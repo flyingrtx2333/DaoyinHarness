@@ -1,0 +1,43 @@
+# Local clean-room reference material. Never commit or package it.
+/claude-code-main/
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+.turbo/
+*.tsbuildinfo
+
+# Local runtime state
+.daoyin-harness/
+data/
+workspaces/
+logs/
+credentials/
+transcripts/
+checkpoints/
+artifacts/
+previews/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test artifacts
+playwright-report/
+test-results/
+
