@@ -138,11 +138,6 @@ npm run build
 
 在这些脚本真正落地之前，文档、提交说明和发布页面不得宣称 DaoyinHarness 已经安装成功、已经运行或已经通过验收。
 
-## 参考资料政策
-
-`claude-code-main/` 是本机已有的反编译/恢复工程，当前目录中没有随附许可证文件。DaoyinHarness 只允许记录独立观察到的行为、协议需求和测试用例，不允许复制其源码、类型、文案、品牌资源或生成产物。详见 [ADR-0001](docs/adr/0001-clean-room-local-runtime.md)。
-
 ## 路线图
 
 P0 只建立文档和仓库治理；P1 才开始实现 npm CLI 与本地服务。完整阶段和退出条件见 [ROADMAP](docs/ROADMAP.md)。
-
