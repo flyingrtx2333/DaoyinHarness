@@ -41,20 +41,20 @@ Windows alternate data streams, reserved device names and reparse-point escapes 
 
 ## 4. Process and package execution
 
-v1 has no arbitrary Shell tool. Supported execution is a registry of named operations such as dependency install, declared package script, build, test and preview.
+v1 has no arbitrary Shell tool. The implemented Process Service accepts an executable plus argument array from a runtime-owned named-operation policy; model input never supplies raw shell text or arbitrary argv. Current automatic operations are bounded read-only runtime/Git inspections. Workspace package scripts are a separate policy class because `package.json` scripts execute workspace-controlled code.
 
-Each operation defines:
+Implemented controls:
 
-- executable and argument construction;
-- allowed working directory;
-- inherited environment allowlist;
-- timeout, CPU/process and output limits;
-- network policy;
-- cancellation behavior;
-- redaction rules;
-- evidence expected on success.
+- working directory is workspace-relative, resolved through `realpath`, and must remain beneath the selected canonical root;
+- only a minimal environment is inherited; Git credential prompts/pagers are disabled and `GIT_CEILING_DIRECTORIES` prevents repository discovery above the selected workspace;
+- Git diff inspection disables external diff/textconv helpers and fsmonitor where applicable;
+- execution uses `shell:false`, bounded argv/count, cancellation, timeout and bounded stdout/stderr evidence;
+- package scripts require both a runtime allowlist match and a declaration in the safe workspace `package.json`;
+- package-script execution requires an exact one-shot permission fingerprint scoped to account + resource + session;
+- permission approval is append-only local state and cannot be granted by the model; approval does not itself start execution;
+- successful process evidence explicitly reports `osIsolation: "none"` until a real OS sandbox provider exists.
 
-Arguments are passed as arrays without shell interpolation. Package lifecycle scripts are treated as executable third-party code and require an explicit policy decision before enablement; the default installer mode should suppress them until the project or operator grants that capability.
+Still required before describing process execution as sandboxed: OS-level filesystem/process isolation, explicit child-process/CPU/resource ceilings and enforceable per-operation network isolation. A future sandbox provider must sit below the current Process Service/permission contract rather than introducing a second command path.
 
 ## 5. Tool permissions
 
@@ -69,7 +69,7 @@ v1 categories:
 - **process**: named package, build, test and preview commands;
 - **credential**: internal-only Cloud Client operations, never model-callable.
 
-High-impact changes display the exact scope to the user. Repeated permission prompts can be remembered only for the current project and exact policy class.
+High-impact changes display the exact scope to the user. Current Process Permission grants are intentionally narrower than a remembered policy class: they bind the exact command fingerprint to the current account/resource/session and are consumed once. Broader remembered permissions require a separate policy design and are not part of the current implementation.
 
 ## 6. Preview isolation
 

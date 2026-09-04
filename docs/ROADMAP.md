@@ -1,123 +1,173 @@
 # DaoyinHarness Roadmap
 
-> Status: implementation sequence. A phase is complete only when its exit criteria are met.
+> Status: implementation sequence for a general-purpose local Agent Harness. A phase is complete only when its exit criteria are met; website preview is an optional capability, not the definition of v1.
 
-## P0 — Documentation and repository baseline
+## P0 — Repository and architecture baseline
 
 Deliverables:
 
 - independent Git repository on `main`;
-- README, repository rules, architecture, protocol, auth, security, testing and ADRs;
-- local reference directory ignored and absent from the Git index.
+- README, architecture, protocol, auth, security, testing and ADRs;
+- local research/reference trees excluded from product source and packages;
+- clean-room implementation rule.
 
 Exit criteria:
 
-- all internal Markdown links resolve;
-- terminology and public names are consistent;
-- `git diff --check` passes;
-- one focused `docs:` commit contains no implementation or main-platform change.
+- terminology consistently describes a general Agent Harness;
+- docs do not imply every session is a software project;
+- package and Git audits exclude reference/runtime state.
 
-## P1 — npm CLI and local shell
+## P1 — Local runtime shell
 
 Deliverables:
 
-- npm workspace skeleton and locked Node.js 22 toolchain;
-- published-package layout for `@daoyin/harness` and `daoyin-harness` binary;
-- loopback Fastify server, static React UI and `/api/v1/health`;
-- port scan `4677..4699`, explicit-port failure, `--no-open`, `--data-dir`, `--log-level`;
-- process diagnostics and clean shutdown.
+- npm workspace and Node.js 22 baseline;
+- `@daoyin/harness` / `daoyin-harness` CLI layout;
+- loopback Fastify server and React Web UI;
+- port scan, explicit port, data directory, workspace and browser-launch options;
+- local Host/Origin/CSRF boundary and clean shutdown.
+
+Current state: substantially implemented.
 
 Exit criteria:
 
-- packed tarball installs on clean Windows, macOS and Linux Node.js 22 environments;
-- default and explicit port behavior passes integration tests;
-- browser displays local health with no cloud credentials;
-- package audit excludes local reference and runtime state.
+- package installs on clean Windows, macOS and Linux Node.js 22 environments;
+- runtime starts on loopback with no cloud credential;
+- package audit contains no local references, secrets or runtime state.
 
-## P2 — Daoyin PKCE login
+## P2 — Daoyin identity and model gateway
 
 Deliverables:
 
-- main-platform OAuth client and endpoints defined in [AUTH](AUTH.md);
-- local PKCE flow, callback, browser session, CSRF and OS credential-store adapters;
-- authenticated user summary and logout;
-- user-token-authenticated AI Gateway contract available in a non-production environment.
+- OAuth 2.1 Authorization Code + PKCE for the local client;
+- OS credential-store adapters and authenticated local browser session;
+- user-token-authenticated Daoyin AI Gateway;
+- normalized model request/response/tool-call contract;
+- quota, membership and audit integration without exposing provider keys locally.
 
 Exit criteria:
 
-- positive, replay, redirect, origin, CSRF, refresh and revocation tests pass;
-- tokens are absent from localStorage, URLs, logs, transcript and SQLite;
-- account switch cannot mix data namespaces;
-- platform changes are independently reviewed and deployed before production claims.
+- login, refresh, revocation, replay, redirect, origin and CSRF tests pass;
+- tokens never enter URL history, localStorage, transcript or plaintext data stores;
+- account switching cannot mix local namespaces;
+- one real model can complete a no-tool chat turn and one tool-backed turn.
 
-## P3 — Workspace, persistence and recovery
+## P3 — Session trajectory, context and recovery
 
 Deliverables:
 
-- account/project data layout and workspace confinement;
-- append-only transcript, SQLite materialized view and rebuild command;
-- project/session/turn state machines;
-- immutable checkpoints and atomic current pointer;
-- cancellation, crash recovery and context compaction primitives;
-- turn, project and local cross-project memory records.
+- persistent session catalog;
+- append-only JSONL trajectory with strictly increasing `eventSeq`;
+- user/assistant multi-turn context reconstructed from persisted events;
+- bounded context history and append-only derived compaction records;
+- cancellation and incremental replay;
+- provenance-bound session/resource/account memory with append-only supersession/tombstones;
+- crash/interruption semantics and future fork/resume metadata;
+- derived SQLite/search indexes that can be rebuilt from facts.
+
+Current state: session catalog, append-only events, incremental replay, cancellation, bounded multi-turn dialogue reconstruction, deterministic context compaction and the first scoped JSONL memory store/retriever are implemented. Crash takeover, fork/resume, SQLite materialization and semantic/vector retrieval remain.
 
 Exit criteria:
 
-- acknowledged messages survive forced exit and restart;
-- truncated transcript and stale SQLite index recover safely;
-- failed candidates do not replace usable checkpoints;
-- path traversal and symlink/junction escape tests pass;
-- memory retrieval exposes source IDs and respects account/project scope.
+- a follow-up turn can answer from prior persisted dialogue without the browser resending history;
+- acknowledged events survive restart;
+- truncated-tail recovery cannot invent or erase completed events;
+- cancellation never deletes prior evidence;
+- old context can be compacted without deleting the source trajectory.
 
-## P4 — Agent loop, model gateway and tools
+## P4 — Capability registry and core tool packs
 
 Deliverables:
 
-- normalized model streaming client through the Daoyin AI Gateway;
-- durable Agent loop and structured tool registry;
-- file, search, web inspection, named package/build/test and diagnostic tools;
-- real-time persisted events, progress UI and final error summarization;
-- inbox semantics for cancellation, correction and additional requirements.
+- model-facing capability registry independent from the Agent loop;
+- tool metadata including category and mutating/read-only status;
+- workspace pack for safe file list/read/search/write/patch;
+- public Web pack for `web_search` and `web_fetch`;
+- SSRF, timeout, redirect and response-size policies;
+- capability metadata exposed to the UI/runtime bootstrap;
+- tool packs mountable without adding Agent-loop branches.
+
+Current state: the capability registry plus Workspace, public Web, local Skills and scoped Memory packs are implemented. Tool execution now receives trusted account/session/resource/turn provenance context, and bootstrap exposes the mounted capability snapshot.
 
 Exit criteria:
 
-- deterministic replay suite covers success, multi-tool, interruption and failure;
-- one terminal event and one final assistant response exist for every turn;
-- raw tool payloads never render as chat messages;
-- direct URLs remain inspectable when search is unavailable;
-- real-model gate completes the minimum application scenario within budget.
+- Agent loop tests run unchanged when capabilities are added or removed;
+- private-network Web fetches and redirect escapes are rejected;
+- workspace path traversal/symlink escape tests pass;
+- UI displays actual mounted capabilities rather than a hard-coded product mode;
+- tool failure evidence returns to the model and produces one truthful terminal answer.
 
-## P5 — Build, evaluation and local preview
+## P5 — Standard general-Agent capability set
+
+This is the main v1 capability phase. It replaces the previous assumption that “build + preview” defines product completeness.
 
 Deliverables:
 
-- named build/test/preview process policies;
-- evaluator for required files, build, routes, browser runtime and optional interactions;
-- isolated preview origin and sandboxed UI integration;
-- candidate/usable/rejected checkpoint workflow;
-- reliability dashboard backed by evidence-level reports.
+- **Process service + permission policy + OS sandbox provider**: cwd, argument arrays, env allowlist, output/time/resource bounds, cancellation, risk classification, exact user decisions and real isolation where available;
+- **Skills**: discover, load and inject reusable instructions/workflows with provenance and bounded context;
+- **MCP / extension seam**: external capabilities normalize into the same registry contract;
+- **Browser capability**: public navigation, page inspection and controlled interaction separated from raw HTTP fetch;
+- **Goals / plans / task state**: persistent task artifacts that are data, not hidden chain-of-thought;
+- **Workflow execution**: reusable multi-step routines with child execution records;
+- capability/settings UI for inspecting what is installed and enabled.
+
+Current state: Process Service, named read-only process inspection, exact one-shot package-script permission grants, permission UI/API, local Skills and the first scoped Memory/Compaction layers are implemented. Process execution has explicit cwd/argv/minimal-env/time/output/cancellation policy, but current evidence truthfully reports `osIsolation: none`; an actual OS sandbox provider, MCP, Browser, Goals/Workflow and capability settings remain.
 
 Exit criteria:
 
-- a simple one-page application reaches a usable preview in one normal turn;
-- refresh and reconnect preserve all messages and progress;
-- route or runtime failure remains blocking while optional capability gaps are follow-up work;
-- UI never claims a missing preview exists;
-- Windows, macOS and Linux packaged E2E suites pass.
+- one session can naturally move through plain chat → Web research → local file work → controlled process execution;
+- high-risk process actions cannot bypass the permission/sandbox policy;
+- disabling a Skill/tool pack removes it cleanly without breaking transcript replay;
+- browser evidence is distinguishable from model claims;
+- a failed child workflow cannot be reported as completed by the parent.
 
-## v1 release
+## P6 — Advanced Agent runtime
 
-v1 is P0 through P5. It includes the local closed loop and Daoyin account/model access. It does not wait for P6.
+Deliverables:
 
-Internal beta requirements are defined in [TESTING](TESTING.md). Public npm publication is a separate product and security decision after internal beta evidence.
+- sub-agents with explicit parent/child trajectory links and bounded delegation;
+- session fork/resume/search;
+- long-context compaction and provenance-aware memory;
+- account-local stable preferences, session memory and workspace/resource memory;
+- plugin discovery, enable/disable and versioned runtime composition;
+- scheduling/background task interfaces where product authorization allows them;
+- richer trajectory inspector for context injections, tools and child runs.
 
-## P6 — Optional cloud and channels
+Exit criteria:
 
-Potential deliverables, each requiring its own ADR and threat model:
+- child-agent work is auditable and cancellable;
+- forks never rewrite source history;
+- memory injection exposes provenance and scope;
+- plugin removal cannot corrupt existing session logs;
+- scheduled work has explicit ownership, limits and cancellation.
 
-- immutable COS snapshot backup and cross-device restore;
-- verified public preview and publish domains;
-- encrypted cloud project metadata;
-- 微信、飞书、QQ channel identity binding, unified conversation and completion delivery.
+## P7 — Task-specific capability packs
 
-P6 cannot change local project files from another device without explicit conflict and authorization semantics. COS remains snapshot storage, not an active workspace.
+These are useful applications of the Harness, not core identity:
+
+- software build/test/evaluation;
+- isolated local web preview;
+- screenshot/browser fidelity evaluation;
+- document/PDF/media processing;
+- data-analysis helpers;
+- optional publishing/snapshot capabilities.
+
+A coding or website task may mount these packs. A research or document session does not need them.
+
+## v1 release definition
+
+v1 is the local runtime plus P2–P5: authenticated model access, durable multi-turn sessions and a credible **standard general-Agent capability set**. P6 advanced orchestration may continue after v1.
+
+Public npm publication is a separate security/product decision after clean Node.js 22 package tests on Windows, macOS and Linux.
+
+## Later cloud and channels
+
+Potential later capabilities, each requiring its own ADR and threat model:
+
+- encrypted cross-device session/resource sync;
+- immutable artifact backup;
+- verified publish/preview services;
+- 微信、飞书、QQ and other channel identity binding;
+- remote execution only with explicit device ownership, authorization and conflict semantics.
+
+Cloud storage must never silently become the authority for a live local workspace.

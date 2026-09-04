@@ -1,224 +1,288 @@
 # DaoyinHarness Architecture
 
-> Status: architecture baseline. No runtime described here has been implemented yet.
+> Status: general-agent architecture baseline. The local process, REST/UI slice, append-only session transcript, multi-turn Agent loop, per-step System Prompt assembly, workspace/Web capability packs and first local Skills catalog/loader are implemented. OAuth/AI Gateway, SQLite indexes, durable memory storage, sandboxed process execution, Browser, workflows, sub-agents, MCP and plugin discovery remain staged work.
 
-## 1. Goals and boundaries
+## 1. Product boundary
 
-DaoyinHarness turns a local Node.js process into the durable execution environment for an AI application builder. The browser is a view and input surface, not the owner of task state. The Daoyin cloud is an account and model control plane, not the executor for ordinary local edits.
+DaoyinHarness is a **general-purpose local Agent Harness**. It is not a website builder and it is not defined by software projects. A coding repository may be the current workspace, but the same session model must also support research, document work, local file operations, analysis, browser tasks, workflows and other tool-backed work.
 
-v1 optimizes for four outcomes:
+The browser is a view and input surface, not the owner of Agent state. The Daoyin cloud is the account/model control plane, not the executor for ordinary local tools.
 
-1. A simple project reaches a working local preview without a remote job queue.
-2. The Agent always sees and continues from real project files.
-3. Refresh, process restart, cancellation, and transient network failure do not lose the conversation or last usable result.
-4. Every completion or failure is backed by structured evidence instead of UI inference.
+The architecture optimizes for five outcomes:
 
-Cloud publish, COS synchronization, cross-device state, and IM channels are deliberately deferred.
+1. One persistent conversation can move between plain chat, research, local files and engineering tasks without switching products.
+2. Every model-visible capability is registered through an explicit capability seam instead of being hard-coded into the Agent loop.
+3. Refresh, reconnect, cancellation and process restart preserve the append-only trajectory and completed tool evidence.
+4. The Agent can continue from prior turns using persisted session history rather than browser-provided chat text.
+5. Successful actions, failures and external facts are backed by tool evidence instead of UI inference.
 
-## 2. Components
+Cloud publish, cross-device state and IM channels are not required for the local v1 loop.
+
+## 2. Runtime shape
 
 ```text
-CLI
- └─ Local Server
-     ├─ Auth Session ─────────────── Daoyin OAuth / AI Gateway
-     ├─ Web UI
-     ├─ Agent Engine
-     │   ├─ Context and Memory
-     │   ├─ Model Stream
-     │   └─ Tool Dispatcher
-     ├─ Workspace Service
-     ├─ Checkpoint Service
-     ├─ Build and Preview Service
-     ├─ Evaluator
-     ├─ Transcript Store (JSONL)
-     └─ State Index (SQLite)
+CLI / Local Server / Web UI
+            │
+            ├── Local browser session + CSRF
+            ├── Session Catalog
+            ├── Append-only Trajectory (JSONL)
+            ├── Agent Engine
+            │    ├── Context Assembler
+            │    ├── System Prompt Registry
+            │    │    ├── cached stable sections
+            │    │    └── per-step dynamic sections
+            │    ├── Model client seam
+            │    ├── Bounded tool loop
+            │    └── Cancellation
+            └── Capability Registry
+                 ├── Workspace pack
+                 │    ├── list/read/search
+                 │    ├── write/patch
+                 │    └── allowlisted package operations
+                 ├── Web pack
+                 │    ├── web_search
+                 │    └── web_fetch
+                 ├── Skills pack
+                 │    ├── catalog injection
+                 │    ├── list_skills
+                 │    └── load_skill
+                 ├── Process / Sandbox        [planned]
+                 ├── MCP / Plugins            [planned]
+                 ├── Browser / Computer Use   [planned]
+                 ├── Workflow / Goals         [planned]
+                 └── Sub-agents               [planned]
+
+Daoyin cloud control plane
+            ├── OAuth / account / membership
+            ├── authenticated AI Gateway
+            └── usage / model policy / audit
 ```
+
+The Agent Engine depends on model, event-store and tool-registry interfaces. It must not know whether a tool came from the built-in workspace pack, Web pack, a Skill, MCP server or future plugin.
+
+## 3. Core components
 
 ### CLI
 
-The npm executable owns process startup, port selection, data-directory resolution, browser opening, signal handling, and clean shutdown.
-
-Planned interface:
+The npm executable owns process startup, loopback port selection, data-directory resolution, workspace selection, browser opening, signals and shutdown.
 
 ```text
 daoyin-harness [--port <number>] [--no-open]
-               [--data-dir <path>] [--log-level <level>]
+               [--data-dir <path>] [--workspace <path>]
+               [--log-level <level>]
 ```
 
-Without `--port`, the CLI attempts `4677` through `4699`. With `--port`, occupation is an error; silently moving to a different port would break the OAuth callback and operator expectations.
+Without `--port`, the CLI scans `4677` through `4699`. An explicit occupied port fails instead of silently moving.
 
 ### Local Server
 
-The Fastify server serves the compiled UI and `/api/v1`, establishes the browser session, serializes project writes, persists events before broadcast, and shuts down running tools on termination. It binds only to loopback.
+Fastify serves the compiled UI and `/api/v1`, owns the local browser session, protects state changes with an HttpOnly SameSite cookie plus CSRF token, exposes persisted session/event APIs and dispatches Agent turns.
+
+The server is composition glue. Capability-specific business logic belongs in capability packages, not route handlers.
 
 ### Web UI
 
-The React UI renders persisted protocol events. It does not synthesize success from progress percentages and does not own authoritative message state. On reconnect it requests every event after the last acknowledged `eventSeq`.
+The React UI renders persisted protocol events and capability metadata. It is intentionally task-neutral: a conversation is not automatically a project and tool cards are driven by event data.
+
+The current implementation recovers via `eventSeq` polling. WebSocket delivery may replace polling later without changing transcript semantics.
 
 ### Agent Engine
 
-The Agent Engine owns the turn loop:
+The Agent Engine owns the bounded loop:
 
-1. persist the user request;
-2. assemble current context and retrieved memory;
-3. stream a model response from the Daoyin AI Gateway;
-4. validate and dispatch requested tools;
-5. persist tool evidence;
-6. continue until a terminal assistant response, cancellation, or bounded failure;
-7. summarize user-visible results and create a checkpoint only when warranted.
+1. read prior persisted session events;
+2. reconstruct bounded recent user/assistant context;
+3. add the current turn-specific instruction without rewriting the user message;
+4. persist `turn.started`;
+5. call the configured model with current capability descriptors;
+6. validate and dispatch tool calls through the registry;
+7. persist tool success/failure evidence before continuing;
+8. stop on a terminal assistant response, cancellation or bounded failure.
 
-The model never executes a tool directly. A policy layer validates the tool name, arguments, workspace scope, permission and budget.
+The workspace is a context source, not a mandatory semantic category. The default prompt explicitly forbids assuming that every request is coding or website work.
 
-### Workspace Service
+### System Prompt Registry and Context Assembler
 
-Each project has a fixed canonical root. All file operations resolve both the lexical path and real path beneath that root. Writes use temporary files plus atomic replacement where supported. Mutations for the same project are serialized.
+The core prompt is no longer one hard-coded string. `SystemPromptRegistry` resolves named sections in priority order and returns separate stable and dynamic text blocks.
 
-### Build, Preview and Evaluator
+- **Stable sections** currently cover identity, general scope, tool behavior, safety/evidence and truthful completion. They are cached after first resolution and reused until the registry changes.
+- **Dynamic sections** are rebuilt before **every model step**, not merely once at turn start. Core dynamic sections include mounted capabilities, persisted recent tool evidence and turn-specific instructions.
+- The local Server composition root adds runtime time/OS metadata, selected workspace context, bounded workspace guidance from `.daoyin/AGENT.md` / `AGENTS.md`, an automatically discovered Skill catalog, and an optional provenance-bound memory provider seam.
+- Tool schemas are snapshotted from the current `ToolRegistry` for the same model step. A capability added or removed between steps can therefore change both the schema and dynamic capability section without changing the Agent loop.
 
-Build execution uses named operations and argument arrays, not arbitrary interpolated shell text. The evaluator distinguishes:
+`ContextAssembler` is responsible for bounded historical dialogue plus per-step System Prompt assembly. Recent user/assistant turns are reconstructed from the append-only transcript. Historical tool execution is not inferred from assistant prose: `tool.started` now persists bounded JSON input, and completed/failed evidence is projected into the `recent_tool_evidence` dynamic section. Older transcripts without tool inputs remain readable and simply expose `null` input for that evidence.
 
-- source and configuration checks;
-- build-process success;
-- preview HTTP health;
-- browser runtime and console health;
-- optional interaction assertions.
+Skill discovery follows progressive disclosure. The dynamic Skill catalog injects only `name + description`; the complete `SKILL.md` body enters model context only after an explicit `load_skill` tool call. This keeps normal turns smaller and prevents all installed skill instructions from competing in every prompt.
 
-A failed optional capability is reported as follow-up work, not automatically as a blocking failure. Route startup, syntax failure, policy violation, missing required artifact, or an unusable preview is blocking.
+A future model adapter may map `stableText` and `dynamicText` to provider-specific prompt-cache blocks. The Agent core deliberately preserves that boundary now rather than flattening away the distinction.
 
-Generated pages are served from a separate preview origin and embedded with an explicit iframe sandbox policy.
+### Capability Registry
 
-### Cloud Client
+Each model-facing tool declares:
 
-The Cloud Client exchanges the authorization code, refreshes user credentials through an OS credential-store adapter, fetches user identity and streams model responses. It never exposes the model-provider credential to the local server or browser.
+- stable `name`;
+- description and JSON input schema;
+- capability category (`workspace`, `web`, `process`, `system`, `extension`);
+- whether the operation is mutating;
+- one policy-checked executor.
 
-## 3. Sources of truth
+Tools can be registered individually or as a named tool pack. The registry is the first composition layer; future Skills/MCP/plugins should resolve into the same model-facing tool contract rather than creating parallel Agent loops.
+
+### Workspace capability
+
+The selected local root is safety-scoped. File paths are workspace-relative, lexical and real-path escapes are rejected, symlinks are not followed for unsafe writes, and writes use temporary files plus atomic replacement where supported.
+
+The workspace pack is useful for code, notes, documents and arbitrary text-based local work. It no longer owns process execution; process capabilities are mounted through the independent Process Service described below.
+
+### Web capability
+
+`web_search` and `web_fetch` are read-only model-facing tools behind one Web capability pack.
+
+Public fetch policy currently:
+
+- only HTTP/HTTPS;
+- only ports 80/443;
+- URL credentials rejected;
+- localhost and `.local` rejected;
+- DNS results checked before requests;
+- private, loopback, link-local, carrier-grade NAT and other non-public address ranges rejected;
+- every redirect target is revalidated;
+- response body and timeout are bounded;
+- only textual response types are returned to the model.
+
+Fetched/search content is untrusted data and cannot override system or policy instructions.
+
+### Memory and compaction
+
+Local memory is implemented as append-only JSONL records with explicit `session`, `resource`, or `account` scope. Each record carries `kind`, bounded keywords, confidence, source event IDs, creation time and optional `supersedes`. Updating a memory appends a replacement record; forgetting appends a tombstone. Old records remain auditable but stop participating in normal retrieval. The current built-in retriever uses bounded lexical/CJK token overlap, scope priority, confidence and recency; semantic/vector retrieval can replace or augment this derived index later without changing the record format.
+
+The model-facing memory pack exposes `memory_search`, `memory_remember`, `memory_update` and `memory_forget`. Account/session/resource IDs are injected by trusted Tool execution context rather than accepted from model arguments. `resource` scope uses a stable hash of the canonical workspace root, preventing memory bleed across different selected workspaces without exposing the path as an identifier.
+
+Context compaction is a separate derived store. When older completed turns exceed configured turn/character thresholds, `ContextCompactor` writes a `SessionCompaction` covering an explicit `sourceStartSeq..sourceEndSeq` range. The first implementation uses a deterministic trajectory projection so it never requires an extra model call or hidden reasoning. Covered raw dialogue and tool events remain in the canonical transcript; only model context changes. The prompt receives the compacted summary plus raw recent dialogue/tool evidence after the covered range, avoiding duplicate context.
+
+### Process, permission and future sandbox capability
+
+Process execution is now separated from the Workspace pack in `@daoyin/harness-process`. The model never receives a generic shell-string tool. `ProcessService` accepts only an executable plus argument array, resolves `cwd` beneath the selected canonical workspace root, uses a minimal inherited environment, disables interactive Git credential prompts, bounds runtime/output, supports cancellation, and reports structured execution evidence.
+
+The first policy registry exposes named operations rather than arbitrary commands. `process_inspect` currently permits bounded read-only `node_version`, `git_status`, `git_diff_check`, `git_diff_stat` and `git_log_recent`. Git inspection disables fsmonitor, external diff and textconv helpers where applicable and sets the selected workspace as `GIT_CEILING_DIRECTORIES`, preventing an apparently read-only inspection from discovering a parent repository or launching repository-configured helpers.
+
+Workspace-controlled executable code is treated differently. `run_package_script` requires both a runtime allowlist match and a declaration in the target workspace `package.json`. The exact executable/arguments/cwd/risk plan is hashed into a command fingerprint. Without a matching approved grant, the tool emits `PROCESS_APPROVAL_REQUIRED` with a structured permission request. The local UI shows the exact display command and reason; the user can allow once or deny through a CSRF-protected endpoint. Approval alone never starts background execution. A later turn consumes the exact grant once, and changing script/cwd/fingerprint requires a new decision. Permission history is append-only in `process/permissions.jsonl` and scoped to account + resource + session.
+
+This is **not yet an OS sandbox**. Current successful process evidence explicitly reports `osIsolation: "none"`; the stable System Prompt forbids describing permission-only execution as isolated. A future Bubblewrap/Seatbelt/Windows isolation provider should sit beneath the same Process Service contract so tool names, permissions and transcript evidence do not need to change. Persistent interactive process sessions are also deferred until lifecycle, resource and cancellation semantics are auditable.
+
+### Skills, MCP and plugins
+
+Skills provide reusable instructions/workflows; MCP and plugins provide capabilities. They should be discoverable and mountable per runtime/session without requiring Agent Engine changes.
+
+The long-term invariant is **capabilities are composable, the loop stays small**.
+
+## 4. Sources of truth
 
 | Data | Source of truth | Derived/read model |
 | --- | --- | --- |
-| Project source | Workspace files | File index and search cache |
-| Conversation | Append-only JSONL transcript | SQLite message and turn tables |
-| Execution state | Persisted events | In-memory scheduler and UI state |
-| Last usable result | Immutable checkpoint manifest | Project current-checkpoint pointer |
-| Memory | Versioned memory records with provenance | Embedding/keyword indexes |
-| Identity | Daoyin authorization server | Local session and account metadata |
+| Conversation and tool trajectory | Append-only JSONL transcript | UI turns, summaries, future SQLite indexes |
+| Session list/active turn | Local session catalog | UI sidebar |
+| Local files | Selected workspace | File list/search results |
+| Execution state | Persisted events | In-memory cancellation map and UI state |
+| Capability availability | Runtime capability registry | Bootstrap capability list |
+| Identity | Daoyin authorization server | Local browser/account session |
+| Memory | Versioned records with provenance | Retrieval indexes and summaries |
+| Process permission decisions | Append-only permission snapshots keyed by exact fingerprint | UI pending/approved/denied/consumed state |
 
-SQLite transactions maintain the current queryable view, but recovery must be possible by replaying transcripts and checkpoint manifests. A write is not visible to clients until its corresponding event is durably appended.
+An event is persisted before it becomes authoritative UI state. Derived stores must be rebuildable from facts where practical.
 
-## 4. Local data layout
-
-```text
-~/.daoyin-harness/
-└─ <accountId>/
-   ├─ index.sqlite
-   ├─ logs/
-   ├─ memory/
-   │  └─ user-memory.jsonl
-   └─ workspaces/
-      └─ <projectId>/
-         ├─ files/
-         ├─ transcripts/<sessionId>.jsonl
-         ├─ checkpoints/<checkpointId>/manifest.json
-         ├─ artifacts/
-         └─ project-memory.jsonl
-```
-
-Credential material is stored outside this tree in the operating-system credential manager. IDs are opaque UUIDs; display names never become path components.
-
-## 5. Entity lifecycle
-
-### Project
-
-`creating -> ready -> archived`
-
-Deletion is not part of the initial v1 interface. Archive hides a project without removing files or transcripts.
+## 5. Session and trajectory model
 
 ### Session
 
+A session is a conversation identity, not a project identity. It may contain ordinary chat, research, tool work or engineering changes in any order.
+
 `idle -> running -> idle`
 
-A session may enter `recovering` during transcript replay. An unrecoverable transcript integrity error produces `needs_attention`; it is never silently replaced with an empty session.
+A session has at most one active turn in the current local implementation.
 
 ### Turn
 
 `queued -> running -> completed | failed | cancelled`
 
-Only one mutating turn runs per project. A new user message while a turn runs is classified as:
-
-- cancellation, which aborts future tools;
-- correction or additional requirement, which is appended to the current turn inbox and applied at the next model boundary;
-- independent request, which remains queued.
-
-The original user message is always persisted and rendered immediately.
+The user message is persisted in `turn.started`. Turn-specific controls such as “careful planning” are separate instructions and must not be prepended to or rewrite the visible user message.
 
 ### Tool call
 
-`requested -> running -> completed | failed | cancelled`
+`requested/running -> completed | failed | cancelled`
 
-Progress is optional and monotonic within one tool call. A tool result contains structured evidence for the Agent and a separately sanitized display summary for the UI.
+Tool results contain structured evidence for model reasoning and a bounded display summary for the UI. Raw failures do not become fake assistant prose.
 
-### Checkpoint
+### Multi-turn context
 
-`candidate -> usable | rejected`
+Before a new model call, the Agent reconstructs recent dialogue from the persisted transcript with bounded turn and character budgets. Current-user text outranks historical context. Later compaction may replace older raw turns in the model context with derived summaries, but never deletes the underlying trajectory.
 
-A candidate becomes usable only after required evaluator checks pass. Updating the project's current pointer is an atomic operation. Rejected candidates remain available for diagnosis but cannot replace the current usable checkpoint.
+### Fork and resume
+
+Forking is planned as a new session identity whose context references a source event boundary. It must not duplicate or rewrite the source trajectory.
 
 ## 6. Recovery and interruption
 
-### Browser refresh or reconnect
+### Browser refresh / reconnect
 
-The browser presents its last `eventSeq`; the server replays later events from persistent storage, then switches to live WebSocket delivery. Duplicate delivery is permitted; duplicate application is not.
+The client requests events after its last `eventSeq`. Duplicate transport delivery is acceptable; duplicate application is not.
 
 ### Process crash
 
-On startup the server scans turns left in `running`. Completed tool evidence remains immutable. Non-idempotent tools are not retried automatically. The turn becomes `interrupted` internally, a recovery event is appended, and the Agent receives explicit evidence about what finished and what is unknown.
+Completed events remain immutable. Unknown non-idempotent side effects must not be automatically replayed. A future recovery service will mark interrupted turns and expose the last known evidence.
 
 ### Cancellation
 
-Cancellation signals the active model stream and child process, prevents new tool dispatch, records the best-known state, and emits `turn.cancelled`. It does not delete the user request, assistant deltas, tool results, or candidate files.
+Cancellation aborts the active model/tool signal and prevents future tool dispatch. It records `turn.cancelled` and never erases already persisted events or file effects.
 
 ### Context compaction
 
-Compaction creates a derived summary referencing a contiguous event range, important facts, unresolved requirements and checkpoint IDs. The original events remain available for recovery and audit. Recent raw tool payloads are excluded unless required to explain an active failure.
-
-### Failure rollback
-
-Working files may contain a failed attempt, but the preview selector and project current-checkpoint pointer remain on the last usable checkpoint. The UI describes this accurately without repetitive boilerplate.
+Compaction is implemented as a separate append-only derived store. The current deterministic strategy summarizes completed older turns and tool outcomes into an explicit source event range while retaining a configurable number of recent raw turns. `ContextAssembler` excludes covered raw dialogue/tool evidence from the model request and injects the derived `session_compaction` section instead. The canonical JSONL transcript is never rewritten or shortened. A later semantic summarizer may improve the summary contents, but it must preserve the same source-range/provenance contract.
 
 ## 7. Memory model
 
-Memory has three v1 scopes:
+General-agent memory is not synonymous with “project memory”. The implemented persistent scopes are:
 
-1. **Turn context**: active request, recent events, current plan, running tools and failure evidence.
-2. **Project memory**: durable requirements, architecture decisions, accepted design choices, open defects and checkpoint lineage.
-3. **Account-local memory**: stable preferences and a lightweight index of projects created on the current machine.
+1. **Session memory** — durable goals, decisions, facts or preferences that should apply only to the current conversation.
+2. **Resource memory** — durable facts tied to the selected workspace/resource; the scope ID is derived from a hash of the canonical root rather than supplied by the model.
+3. **Account-local memory** — stable preferences/facts suitable for reuse across local sessions for the authenticated account namespace.
 
-Every memory record includes source event IDs, scope, created time, confidence and supersession state. Retrieval combines explicit entity matches, recency and semantic/keyword relevance. Retrieved memory is context, never an instruction that overrides the current user request.
+Turn context remains transient and comes from the canonical trajectory. Future knowledge/attachment memory can reuse the same provenance contract when those resource types exist.
 
-Cross-device memory synchronization is not part of v1. The UI and Agent must not claim knowledge of projects that exist only on another machine.
+Each stored memory has a stable ID, kind, content, bounded keywords, confidence, source event IDs, scope and creation time. Retrieval is authorized before scoring. Corrections append a new record that `supersedes` the prior record; forgetting appends a tombstone. A superseded branch cannot be updated again, preventing contradictory active forks. Original messages and tool evidence remain the factual layer; memory is derived, replaceable and auditable.
 
-## 8. Cloud integration
+## 8. Security boundaries
 
-v1 requires two main-platform capabilities:
+- local HTTP binds only to loopback;
+- Host/Origin checks reject cross-origin access;
+- state changes require local session cookie + CSRF token;
+- workspace paths are scoped and escape-checked;
+- public Web tools reject private-network destinations and validate redirects;
+- external content is data, never policy;
+- model-provider secrets are never sent to the browser;
+- no arbitrary shell-string tool exists; named read-only process operations are policy-checked, workspace-controlled executable code requires an exact one-shot permission, and current evidence explicitly reports that OS isolation is still absent.
 
-- OAuth 2.1 Authorization Code + PKCE for local loopback clients.
-- A user-token-authenticated streaming AI Gateway that accepts normalized messages and tools and returns normalized model events.
+## 9. Cloud integration
 
-The model gateway performs membership, quota, policy and audit checks. Local tool execution and workspace content remain local except for the minimal model context explicitly sent in a request.
+v1 cloud dependencies are intentionally narrow:
 
-Future snapshot sync uploads immutable, content-addressed artifacts. It cannot turn COS into a mounted or live-edit workspace.
+- OAuth 2.1 Authorization Code + PKCE for local loopback clients;
+- a user-token-authenticated AI Gateway accepting normalized messages/tools and returning normalized model events.
 
-## 9. Planned package boundaries
+The gateway handles membership, quota, model policy and audit. Local capabilities remain local except for bounded context explicitly sent to the model.
+
+## 10. Package boundaries
 
 | Package | Responsibility |
 | --- | --- |
-| `@daoyin/harness` / `packages/cli` | Published executable and startup lifecycle |
-| `packages/server` | Loopback HTTP, WebSocket, browser session |
-| `packages/agent-core` | Turns, model loop, interruption, compaction, memory assembly |
-| `packages/workspace` | Paths, files, transcript, SQLite, checkpoints |
-| `packages/protocol` | Shared API, event and error schemas |
-| `packages/tools` | Tool registry, policies and executors |
-| `packages/evaluator` | Build, route, browser and evidence checks |
-| `packages/ui` | Local React application |
+| `@daoyin/harness` / `packages/cli` | Published executable and local startup lifecycle |
+| `packages/server` | Loopback HTTP, browser session and composition root |
+| `packages/agent-core` | General turn loop, context, cancellation and compaction |
+| `packages/process` | Confined process execution, named-operation policy and append-only permission grants |
+| `packages/workspace` | Safe local files, session transcript and local state primitives |
+| `packages/protocol` | Shared API/event/capability/error contracts |
+| `packages/tools` | Capability registry and built-in tool packs |
+| `packages/evaluator` | Optional task-specific evidence/evaluation adapters |
+| `packages/ui` | Task-neutral local React application |
 
-Packages depend inward through explicit interfaces. UI code cannot import workspace or credential implementations, and tools cannot write directly to protocol transports.
-
+Likely future packages include `skills`, `sandbox`, `browser`, `mcp`, `workflow`, `memory` and `plugins`. They should depend on explicit runtime interfaces rather than importing the UI or server routing layer.

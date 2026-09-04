@@ -1,6 +1,6 @@
 # DaoyinHarness Local Protocol
 
-> Status: contract proposal for v1. No endpoint is implemented yet.
+> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, and Process Permission decisions are implemented. Authentication, richer recovery/fork APIs, WebSocket live delivery, OS Sandbox, MCP/Browser capability management and idempotency remain planned.
 
 ## 1. Transport and versioning
 
@@ -10,21 +10,15 @@ Breaking changes require a new URL version. Additive fields are allowed within v
 
 ## 2. Core resources
 
-```ts
-type Project = {
-  id: string;
-  name: string;
-  status: "creating" | "ready" | "archived";
-  currentCheckpointId: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
+A session is the primary conversational resource. It does not require a software project identity.
 
+```ts
 type Session = {
   id: string;
-  projectId: string;
+  title: string;
   status: "idle" | "running" | "recovering" | "needs_attention";
   lastEventSeq: number;
+  activeTurnId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -38,56 +32,44 @@ type Turn = {
   finishedAt: string | null;
 };
 
-type ToolCall = {
-  id: string;
-  turnId: string;
-  toolName: string;
-  status: "requested" | "running" | "completed" | "failed" | "cancelled";
-  displayText: string;
-  startedAt: string | null;
-  finishedAt: string | null;
+type ToolCapability = {
+  name: string;
+  description: string;
+  category: "workspace" | "web" | "process" | "system" | "extension";
+  mutating: boolean;
 };
 
-type Checkpoint = {
-  id: string;
-  projectId: string;
-  turnId: string;
-  status: "candidate" | "usable" | "rejected";
-  manifestHash: string;
-  previewUrl: string | null;
-  createdAt: string;
+type WorkspaceSummary = {
+  name: string;
+  root: string;
+  fileCount: number;
 };
 ```
 
-`previewUrl` is a local, short-lived URL and is not proof of a public deployment.
+Task-specific resources such as build checkpoints, previews, documents, workflows or browser artifacts are capability-owned extensions. They are not mandatory fields on every session.
 
 ## 3. REST surface
 
-### Process and authentication
+### Implemented local MVP surface
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/health` | Process, database and workspace readiness |
-| `GET` | `/api/v1/auth/status` | Current local login state and user summary |
-| `POST` | `/api/v1/auth/login` | Begin PKCE and return the main-platform authorization URL |
-| `POST` | `/api/v1/auth/logout` | Revoke credentials and clear the local browser session |
+| `GET` | `/api/v1/health` | Process, catalog and workspace readiness |
+| `GET` | `/api/v1/bootstrap` | Issue the local HttpOnly session cookie and return CSRF token, workspace summary, recent sessions and mounted capability metadata |
+| `GET` | `/api/v1/workspace/files` | List files from the selected, policy-checked workspace |
+| `GET` | `/api/v1/process/permissions?sessionId=<id>` | List append-only Process Permission state visible to the current local account/resource/session |
+| `POST` | `/api/v1/process/permissions/:requestId/decision` | Approve once or deny the exact pending Process Permission request; requires cookie + CSRF |
+| `GET` | `/api/v1/sessions` | List local sessions |
+| `POST` | `/api/v1/sessions` | Create a local session |
+| `GET` | `/api/v1/sessions/:sessionId/events?after=<seq>` | Replay persisted events after a sequence number |
+| `POST` | `/api/v1/sessions/:sessionId/turns` | Start one Agent turn for the session |
+| `POST` | `/api/v1/sessions/:sessionId/turns/:turnId/cancel` | Abort future model/tool work for the active turn |
 
-### Projects and sessions
+The bootstrap response sets `daoyin_harness_session` as an HttpOnly `SameSite=Strict` cookie. State-changing requests currently require that cookie plus the in-memory bootstrap token in `X-Daoyin-CSRF`. The browser never supplies `accountId` or an arbitrary workspace path to turn endpoints.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/v1/projects` | List non-archived local projects |
-| `POST` | `/api/v1/projects` | Create a local project and workspace |
-| `GET` | `/api/v1/projects/:projectId` | Read project state |
-| `POST` | `/api/v1/projects/:projectId/archive` | Archive without deleting local data |
-| `POST` | `/api/v1/projects/:projectId/sessions` | Create or resume a session |
-| `GET` | `/api/v1/sessions/:sessionId` | Read session state and last sequence |
-| `GET` | `/api/v1/sessions/:sessionId/events?after=<seq>` | Replay persisted events |
-| `POST` | `/api/v1/sessions/:sessionId/turns` | Persist a user message and queue a turn |
-| `POST` | `/api/v1/turns/:turnId/cancel` | Cancel future work for the turn |
-| `POST` | `/api/v1/projects/:projectId/preview` | Start or return the verified local preview |
+### Planned v1 surface
 
-State-changing requests require the local CSRF token in `X-CSRF-Token`. Project and session ownership are resolved from the authenticated local session, never accepted as account IDs from the browser.
+Authentication (`/auth/*`), session fork/resume/search, capability enable/disable, MCP/Browser management, OS Sandbox management, idempotency keys and the WebSocket live stream are still contract targets rather than implemented endpoints. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
 
 ## 4. Event envelope
 
@@ -99,7 +81,7 @@ type EventEnvelope<TType extends EventType, TPayload> = {
   eventSeq: number;
   type: TType;
   accountId: string;
-  projectId: string;
+  scopeId: string;
   sessionId: string;
   turnId: string | null;
   occurredAt: string;
@@ -107,23 +89,22 @@ type EventEnvelope<TType extends EventType, TPayload> = {
 };
 ```
 
-`eventSeq` is strictly increasing within a session. The server persists the event before acknowledging or broadcasting it.
+`eventSeq` is strictly increasing within a session. The server persists the event before acknowledging or broadcasting it. `scopeId` is a runtime/resource namespace for authorization and recovery; it must not be interpreted as a mandatory software-project ID.
 
-Required v1 event types:
+Implemented core event types:
 
 | Event | Required payload |
 | --- | --- |
-| `turn.started` | turn status and accepted user-message ID |
-| `assistant.delta` | ordered text delta and content-block ID |
-| `tool.started` | tool-call ID, tool name and concise display text |
-| `tool.progress` | tool-call ID, optional percent and replacement display text |
-| `tool.completed` | tool-call ID, sanitized summary and evidence references |
-| `tool.failed` | tool-call ID, stable error code, retryability and evidence references |
-| `checkpoint.created` | checkpoint ID, status and evaluator summary |
+| `turn.started` | running status, accepted user-message ID and visible user text |
+| `assistant.delta` | ordered assistant text delta and content-block ID |
+| `tool.started` | tool-call ID, tool name, concise display text and bounded JSON input when serializable |
+| `tool.completed` | tool-call ID, sanitized summary and structured evidence |
+| `tool.failed` | tool-call ID, stable error code, message, retryability and optional bounded structured `details` (for example a Process Permission request) |
 | `turn.completed` | final assistant-message ID and outcome summary |
+| `turn.failed` | stable failure code and terminal outcome summary |
 | `turn.cancelled` | cancellation source and last completed event sequence |
 
-Internal recovery may add `turn.recovering`, `turn.interrupted`, and `session.needs_attention` as additive event types before v1 is frozen.
+Planned additive events include tool progress, recovery/interruption, session forks and parent/child Agent execution. Context compaction is currently a separate derived store keyed to event ranges rather than a canonical Agent event. Task-specific capability packs may define namespaced artifact/checkpoint events without making them core Agent events.
 
 ## 5. WebSocket replay
 
@@ -161,7 +142,25 @@ type ToolDisplay = {
 
 After a terminal tool failure, the Agent must generate a normal final response that states what succeeded, what failed, whether work was preserved, and the next safe action. Only explicit security or policy violations use `critical` presentation.
 
-## 7. Errors
+## 7. Memory and compaction state
+
+Memory is a derived local state store, not part of the canonical conversation transcript. Each `MemoryRecord` is append-only and includes an authenticated account namespace, one of the `session | resource | account` scopes, a memory kind, bounded content/keywords, confidence, source event IDs, creation time and optional `supersedes` pointer. Corrections append a replacement record. Forgetting appends a tombstone. Superseded and tombstoned records remain auditable but are excluded from normal retrieval.
+
+Model-facing memory tools never accept `accountId`, `sessionId` or resource scope IDs from model arguments. The runtime injects these through trusted tool execution context. A new memory also requires source-event provenance from the current persisted turn/tool trajectory. The current built-in retrieval ranks only authorized active memories with bounded lexical/CJK token relevance, scope, confidence and recency; semantic/vector indexes may be added later as replaceable derived retrieval layers.
+
+Context compaction is also derived state and is stored separately from the transcript. A `SessionCompaction` contains `sessionId`, `sourceStartSeq`, `sourceEndSeq`, summary, strategy and creation time. Covered events are not deleted, rewritten or renumbered. Model context uses the compacted summary for covered older events and raw dialogue/tool evidence only after `sourceEndSeq`, so replay/audit semantics remain unchanged.
+
+There is no public browser Memory/Compaction REST mutation surface in the current slice. Memory mutation happens through the model-facing capability registry; compaction is internal context maintenance. Future management APIs must preserve the same authorization, provenance and append-only invariants.
+
+## 8. Process permission state
+
+The model-facing Process capability does not accept arbitrary shell text. Read-only named inspections can run automatically when their policy plan is classified `inspect`. Workspace-controlled package scripts require an exact one-shot permission. The command plan fingerprint covers operation, executable, argument array, relative cwd and risk classification; account/resource/session scope is added by the permission store.
+
+A package-script attempt without an approved fingerprint returns a normal `tool.failed` event with code `PROCESS_APPROVAL_REQUIRED`, `retryable=true`, and structured `details` containing the permission request ID, display command, risk, reason, status and fingerprint. The browser may decide that request only through the current loopback account/resource namespace. Approving does not execute anything by itself; a later Agent turn must request the exact same operation, which atomically consumes the approved grant before the Process Service starts it. A consumed grant cannot be reused. A denied request remains denied until the user explicitly changes the decision.
+
+Permission history is append-only in the local process state store. Model-facing arguments never contain `accountId`, `resourceScopeId`, `sessionId` or permission status. Current process success evidence reports `osIsolation: "none"`; this contract must change only when a real isolation provider is installed, and permission-only execution must never be presented as sandboxed.
+
+## 9. Errors
 
 REST errors use a stable envelope:
 
@@ -177,13 +176,14 @@ REST errors use a stable envelope:
 }
 ```
 
-Known error families include `AUTH_*`, `WORKSPACE_*`, `TURN_*`, `TOOL_*`, `MODEL_*`, `PREVIEW_*`, and `POLICY_*`. Unknown exceptions map to `INTERNAL_ERROR` in the client response and retain the original stack only in redacted local diagnostics.
+Known error families include `AUTH_*`, `WORKSPACE_*`, `WEB_*`, `SKILL_*`, `MEMORY_*`, `COMPACTION_*`, `PROCESS_*`, `TURN_*`, `TOOL_*`, `MODEL_*`, `EXTENSION_*`, and `POLICY_*`. Task-specific capability packs may define their own stable families. Unknown exceptions map to `INTERNAL_ERROR` in the client response and retain the original stack only in redacted local diagnostics.
 
-## 8. Idempotency and concurrency
+## 10. Idempotency and concurrency
 
-- Project creation and turn submission accept `Idempotency-Key`.
-- Reusing a key with the same body returns the prior resource; a different body is a conflict.
-- A project has at most one mutating turn. Additional turns are queued and visible.
-- Cancellation is idempotent.
-- Checkpoint promotion uses compare-and-swap against the expected current checkpoint.
-- Event persistence and the corresponding SQLite materialized update occur in one logical transaction boundary; recovery reconciles partial storage failures from the transcript.
+- Turn submission and future state-creating operations should accept `Idempotency-Key`; this is not yet implemented in the current local slice.
+- Reusing a key with the same canonical request body returns the prior resource; the same key with a different body is a conflict.
+- The current runtime allows at most one active turn per session. Future child agents/workflows use separate execution identities rather than pretending to be parallel turns in the same slot.
+- Capability implementations own finer-grained mutation serialization for protected resources such as a workspace, document or browser session.
+- Cancellation is idempotent and never deletes prior events.
+- Derived SQLite/materialized state must reconcile from append-only trajectory facts after partial persistence failures.
+- Capability-specific atomic pointers, such as a verified preview/checkpoint, use compare-and-swap or an equivalent explicit expected-version guard when introduced.

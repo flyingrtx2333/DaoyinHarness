@@ -1,8 +1,8 @@
 # DaoyinHarness
 
-> **项目状态：架构设计阶段。** 当前仓库只包含文档基线，npm 包尚未发布，下面的安装与启动命令暂不可用。
+> **项目状态：通用本地 Agent 纵向闭环已打通，真实模型网关待接入。** CLI、本地 API、React Web UI、安全工作区、append-only trajectory、每步 Prompt/Context 装配、Capability Registry、Skills、公共 Web、provenance-bound Memory、Context Compaction，以及受控 Process Service + 一次性 Permission Gate 已经串联。道引账号 OAuth / AI Gateway、OS 级 Sandbox、Browser、MCP、Workflow/Sub-agent 与正式 npm 发布仍未实现。
 
-DaoyinHarness 是一个计划中的本地 AI 应用构建运行时。用户安装一个 npm 包，在本机打开网页，使用道引主平台账号登录后，即可让 Agent 在真实工作目录中创建、修改、构建、验收和预览项目。
+DaoyinHarness 是道引的本地通用 Agent Harness，不是网页生成器，也不把“软件项目”当成所有任务的默认形态。用户启动一个本地运行时并使用道引账号登录后，同一个 Agent 可以在持续会话中聊天、检索公开网页、处理本地文件与资料、执行受控工具、完成软件工程任务，并在后续通过 Skills、Browser、Sandbox、Workflow、子 Agent 和插件继续扩展能力。
 
 项目采用净室实现。仓库旁的 `claude-code-main/` 只用于研究持久 Agent 的行为与交互模式，不是 DaoyinHarness 的代码基础，也不会进入 Git、npm 包或发布产物。
 
@@ -27,20 +27,21 @@ npx @daoyin/harness
 2. 优先使用端口 `4677`，被占用时依次尝试到 `4699`。
 3. 自动打开本地 Web UI。
 4. 通过道引主平台 OAuth 2.1 Authorization Code + PKCE 登录。
-5. 在本地真实工作区运行 Agent、构建、验收并提供预览。
-6. 重启进程或刷新页面后，从 transcript 与 checkpoint 恢复。
+5. 在持续会话中按需使用本地文件、网页检索、受控进程与后续扩展能力；写代码和预览网页只是可选任务类型之一。
+6. 重启进程或刷新页面后，从 transcript 与派生状态恢复，不丢失已经完成的工具证据。
 
 ## v1 范围
 
-v1 必须完成一个不依赖云端任务队列的本地闭环：
+v1 必须完成一个不依赖云端任务队列的本地通用 Agent 闭环：
 
-- 道引主平台账号登录。
-- 每个项目独立的真实本地工作区。
-- Agent 读取、创建和继续修改工作区文件。
-- 结构化工具进度、取消、插话和会话恢复。
-- 本地构建、验收和隔离预览。
-- 失败不覆盖最后一个可用 checkpoint。
-- 当前轮、项目级和同账号本机跨项目记忆。
+- 道引主平台账号登录与统一 AI Gateway。
+- 持久会话、多轮上下文、取消、恢复、分叉所需的 append-only trajectory。
+- 本地工作区的安全文件读取、搜索、创建和修改；工作区只是可选上下文，不等于任务类型。
+- 公共网页搜索与抓取，并为后续 Browser/Computer Use 保留独立 capability seam。
+- 受控进程、构建/测试等本地执行能力；高风险操作必须进入权限或沙箱边界，而不是默认开放任意 Shell。
+- Skills、工具包与后续 MCP/插件通过统一能力注册表组合，不把具体工具写死在 Agent loop 中。
+- 结构化工具进度、错误证据和 `eventSeq` 回放；失败不能抹掉已经完成的事实记录。
+- 当前回合、会话、本机稳定偏好与后续知识记忆分层，原始 transcript 始终是事实源。
 
 v1 明确不包含：
 
@@ -54,25 +55,31 @@ v1 明确不包含：
 ## 架构边界
 
 ```text
-本地 DaoyinHarness                         道引云端控制面
-┌────────────────────────┐                ┌──────────────────────┐
-│ CLI 与本地 HTTP 服务    │──账号授权─────→│ OAuth、账户与会员      │
-│ Web UI                  │──模型请求─────→│ 用户鉴权的 AI Gateway  │
-│ Agent Engine 与工具     │                │ 用量、策略与审计        │
-│ Workspace 与 Checkpoint │                │                      │
-│ 构建、验收、本地预览    │                │ 后续：同步、发布、IM    │
-└────────────────────────┘                └──────────────────────┘
+本地 DaoyinHarness                              道引云端控制面
+┌─────────────────────────────┐                ┌──────────────────────┐
+│ CLI / Local HTTP / Web UI    │──账号授权─────→│ OAuth、账户与会员      │
+│ Session + Trajectory         │──模型请求─────→│ 用户鉴权的 AI Gateway  │
+│ Agent Loop + Context         │                │ 用量、模型策略与审计    │
+│ Capability Registry          │                │                      │
+│ ├─ Workspace / Files         │                │ 后续：同步与远程能力    │
+│ ├─ Web Search / Fetch        │                └──────────────────────┘
+│ ├─ Memory / Compaction       │
+│ ├─ Process / Permission      │
+│ │   └─ OS Sandbox [planned]  │
+│ ├─ Skills / MCP / Plugins    │
+│ └─ Browser / Workflow / Agent│
+└─────────────────────────────┘
 ```
 
-本地端是交互式构建的执行主体。云端不参与普通文件修改、进度调度和本地预览，只提供账户授权与模型能力。模型供应商密钥永远不下发到本地前端。
+本地端是 Agent 与真实环境交互的执行主体，不限定任务必须是“构建项目”。云端只承担账户授权、模型能力、用量与策略控制；文件、网页访问、进程、浏览器、Skills 和工作流均通过本地 capability 边界接入。模型供应商密钥永远不下发到本地前端。
 
 ## 数据原则
 
-- 活动项目文件以本地工作区为权威来源，COS 不是实时文件系统。
-- 每个会话的 JSONL transcript 是不可变事实记录，只能追加。
-- SQLite 保存结构化索引、状态和检索结果；它损坏后应能从 transcript 重建。
-- checkpoint 是不可变快照。失败候选只能新增，不能覆盖最后一个可用版本。
-- Refresh Token 只能进入操作系统凭据库，禁止进入 localStorage、日志或明文 SQLite。
+- 每个会话的 JSONL trajectory 是不可变事实记录，只能追加；对话、工具结果和失败证据都从这里恢复。
+- 本地工作区中的文件以真实文件系统为权威来源；工作区可以是代码仓库、资料目录或普通文件夹，不要求存在“项目”对象。
+- SQLite 只保存结构化索引、派生状态与检索视图；它损坏后应能从 transcript 和 capability 自有事实重建。
+- Task-specific artifact/checkpoint 只有在对应 capability 需要时才存在，并且不能在失败后覆盖最后一个已验证结果。
+- Refresh Token 只能进入操作系统凭据库，禁止进入 localStorage、日志、trajectory、工具结果或明文 SQLite。
 
 计划中的默认数据目录：
 
@@ -81,14 +88,18 @@ v1 明确不包含：
 └─ <accountId>/
    ├─ index.sqlite
    ├─ logs/
-   ├─ memory/
-   └─ workspaces/
-      └─ <projectId>/
-         ├─ files/
-         ├─ transcripts/
-         ├─ checkpoints/
-         └─ artifacts/
+   ├─ sessions/
+   │  ├─ catalog.json
+   │  └─ transcripts/<sessionId>.jsonl
+   ├─ compactions/<sessionId>.jsonl
+   ├─ memory/memories.jsonl
+   ├─ process/permissions.jsonl
+   ├─ skills/
+   ├─ extensions/
+   └─ artifacts/
 ```
+
+用户显式选择的工作区保持在其原始磁盘位置，不默认复制进 `~/.daoyin-harness`。运行时目录只保存会话、索引、记忆、扩展配置与 capability 产生的工件。
 
 ## 技术基线
 
@@ -99,13 +110,14 @@ v1 明确不包含：
 - SQLite 状态索引与 JSONL 事件日志。
 - 本地 REST API 与 WebSocket 协议统一使用 `/api/v1`。
 
-计划中的工作区包：
+工作区包规划（除 `evaluator` 外均已建立；Agent、Server、Workspace 与 UI 已完成第一条纵向集成）：
 
 ```text
 packages/
 ├─ cli/
 ├─ server/
 ├─ agent-core/
+├─ process/
 ├─ workspace/
 ├─ protocol/
 ├─ tools/
@@ -126,7 +138,7 @@ packages/
 
 ## 开发状态
 
-当前还没有 `package.json`、可执行 CLI 或开发脚本。后续 P1 建立工程骨架后，统一提供：
+P1 工程骨架与 Agent MVP 核心基础已建立，当前提供：
 
 ```powershell
 npm install
@@ -134,10 +146,26 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
+npm run package:audit
+npm run package:verify
 ```
 
-在这些脚本真正落地之前，文档、提交说明和发布页面不得宣称 DaoyinHarness 已经安装成功、已经运行或已经通过验收。
+构建完成后可在本仓库运行；默认把启动命令所在目录作为 Agent 工作区，也可显式指定：
+
+```powershell
+npm start -- --no-open --workspace D:\path\to\project
+```
+
+当前 Web UI 已能创建/切换本地会话、展示持久化对话与工具状态、浏览真实工作区文件、显示运行时实际挂载的 capability，并停止正在运行的 turn。Agent Engine 会从 append-only transcript 恢复最近多轮对话，而不是依赖浏览器把聊天历史重新上传。
+
+System Prompt 已改为注册式装配：固定 Identity / Scope / Tool Behavior / Safety / Completion 作为 Stable Sections 缓存；Runtime、Workspace、能力快照、Skill Catalog、最近 Tool Evidence、Turn Instruction 与可选 Memory 作为 Dynamic Sections，在**每一个 Agent Step**调用模型前重新组装。`tool.started` 同时持久化受限 JSON 输入，使后续回合可以基于真实工具证据继续，而不是只依赖助手总结。
+
+当前内置 capability packs 包括：安全 Workspace 文件操作、公共 `web_search` / `web_fetch`、工作区 `.daoyin/skills/<name>/SKILL.md` 的按需发现与加载、provenance-bound Memory，以及独立 Process Service。Process 不提供任意 Shell：`process_inspect` 只允许策略内的 Node/Git 只读检查；`run_package_script` 只允许 runtime allowlist + `package.json` 已声明的脚本，并对 exact command fingerprint 使用一次性 Permission Gate。批准/拒绝通过本地 CSRF API 和 UI 明确展示，批准本身不会后台自动执行，下一轮才消费授权。当前 Process evidence 会如实标记 `osIsolation: none`；真正 OS 级 Sandbox 尚未实现。Memory 提供 `memory_search / memory_remember / memory_update / memory_forget`，按 session / resource / account 三个 scope 隔离；更新和忘记都通过 append-only supersession/tombstone 完成，不重写历史。Skill Catalog 自动向模型提供 `name + description`，完整正文只有调用 `load_skill` 时才进入上下文。Web 能力拒绝 localhost/私网、URL 凭据和非标准端口，并对 redirect 目标重新校验。
+
+长会话现在有独立 Context Compaction：达到阈值后生成带 `sourceStartSeq..sourceEndSeq` 的派生摘要，只从模型的原始多轮输入中移走已覆盖旧 turn；原 JSONL trajectory 不删除、不改写。Compaction 摘要和最近未覆盖 Tool Evidence 分开进入 Dynamic Prompt，避免重复。
+
+真实模型网关仍未接入：没有注入 `ModelClient` 时，任务会明确记录“真实模型网关尚未登录”，不会伪造成功。开发期使用 `npm run smoke:runtime` 验证 `skills -> Web policy -> workspace -> memory -> compaction -> process permission -> replay` 通用 Agent 纵向闭环。OAuth/AI Gateway、OS 级 Sandbox、Browser、MCP、Workflow、Sub-agent 与语义/向量级长期记忆增强仍在后续阶段。
 
 ## 路线图
 
-P0 只建立文档和仓库治理；P1 才开始实现 npm CLI 与本地服务。完整阶段和退出条件见 [ROADMAP](docs/ROADMAP.md)。
+P0/P1 与 P3/P4 的一部分已经落地；当前目标是先完成 [ROADMAP](docs/ROADMAP.md) 中 P2–P5 的标准通用 Agent 能力集，而不是把网页预览当作 v1 完成标准。

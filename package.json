@@ -1,0 +1,35 @@
+{
+  "name": "daoyin-harness-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clean-room local Agent runtime for Daoyin",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "npm@11.8.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @daoyin/harness-protocol && npm run build --workspace @daoyin/harness-process && npm run build --workspace @daoyin/harness-workspace && npm run build --workspace @daoyin/harness-tools && npm run build --workspace @daoyin/harness-agent-core && npm run build --workspace @daoyin/harness-server && npm run build --workspace @daoyin/harness-ui && npm run build --workspace @daoyin/harness",
+    "dev": "npm run build && npm start -- --no-open",
+    "dev:ui": "npm run dev --workspace @daoyin/harness-ui",
+    "lint": "node node_modules/eslint/bin/eslint.js .",
+    "package:audit": "node scripts/audit-package.mjs",
+    "package:verify": "node scripts/verify-packed-install.mjs",
+    "start": "node packages/cli/dist/index.js",
+    "smoke:runtime": "node scripts/smoke-runtime.mjs",
+    "test": "node node_modules/vitest/vitest.mjs run",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.4.1",
+    "eslint": "^10.0.0",
+    "globals": "^16.4.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.69.0",
+    "vitest": "^4.1.11"
+  }
+}
