@@ -6,6 +6,7 @@ import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { AgentEngine, type ModelClient, type SystemPromptRegistry } from "@daoyin/harness-agent-core";
+import { BrowserService } from "@daoyin/harness-browser";
 import { JsonlProcessPermissionStore, ProcessService, type ProcessPermissionStore } from "@daoyin/harness-process";
 import {
   API_VERSION,
@@ -26,7 +27,7 @@ import {
   type WorkspaceFilesResponse,
   type WorkspaceSummary,
 } from "@daoyin/harness-protocol";
-import { createMemoryTools, createProcessTools, createSkillTools, createWebTools, createWorkspaceTools, ToolRegistry } from "@daoyin/harness-tools";
+import { createBrowserTools, createMemoryTools, createProcessTools, createSkillTools, createWebTools, createWorkspaceTools, ToolRegistry } from "@daoyin/harness-tools";
 import {
   JsonlCompactionStore,
   JsonlMemoryStore,
@@ -47,6 +48,7 @@ export interface CreateAppOptions {
   workspaceRoot?: string;
   model?: ModelClient;
   memoryContextProvider?: MemoryContextProvider;
+  browserExecutablePath?: string;
   sandboxMode?: SandboxMode;
   compactionRetainRecentTurns?: number;
   compactionTriggerUncompactedTurns?: number;
@@ -67,6 +69,7 @@ interface RuntimeState {
   workspaceSummary: WorkspaceSummary | null;
   resourceScopeId: string | null;
   tools: ToolRegistry | null;
+  browserService: BrowserService | null;
   processService: ProcessService | null;
   processPermissions: ProcessPermissionStore | null;
   memoryStore: MemoryStore | null;
@@ -181,6 +184,7 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
     workspaceSummary: null,
     resourceScopeId: null,
     tools: null,
+    browserService: null,
     processService: null,
     processPermissions: null,
     memoryStore: null,
@@ -208,8 +212,10 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
   const compactionStore = new JsonlCompactionStore(path.join(options.dataDir, "compactions"));
   const processService = await ProcessService.create(workspace.root, { sandboxMode: options.sandboxMode ?? "auto" });
   const processPermissions = new JsonlProcessPermissionStore(path.join(options.dataDir, "process", "permissions.jsonl"));
+  const browserService = await BrowserService.create(options.browserExecutablePath === undefined ? {} : { executablePath: options.browserExecutablePath });
   state.memoryStore = memoryStore;
   state.compactionStore = compactionStore;
+  state.browserService = browserService;
   state.processService = processService;
   state.processPermissions = processPermissions;
 
@@ -217,6 +223,7 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
   tools.registerPack({ id: "workspace", tools: createWorkspaceTools(workspace) });
   tools.registerPack({ id: "process", tools: createProcessTools(processService, processPermissions, workspace) });
   tools.registerPack({ id: "web", tools: createWebTools() });
+  if (browserService.status.available) tools.registerPack({ id: "browser", tools: createBrowserTools(browserService) });
   tools.registerPack({ id: "skills", tools: createSkillTools(workspace) });
   tools.registerPack({ id: "memory", tools: createMemoryTools(memoryStore) });
   state.tools = tools;
@@ -283,6 +290,7 @@ function healthFor(options: CreateAppOptions, state: RuntimeState): RuntimeHealt
       workspace: state.workspace === null ? "planned" : "ready",
       authentication: "planned",
       modelGateway: state.model === null ? "planned" : "ready",
+      browser: state.browserService === null ? "planned" : state.browserService.status.available ? "ready" : "unavailable",
     },
   };
 }
@@ -360,6 +368,9 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     trustProxy: false,
   });
   await app.register(fastifyWebsocket);
+  app.addHook("onClose", async () => {
+    await state.browserService?.close();
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     const host = request.headers.host;

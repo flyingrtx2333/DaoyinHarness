@@ -113,11 +113,11 @@ Deliverables:
 - **Workflow execution**: reusable multi-step routines with child execution records;
 - capability/settings UI for inspecting what is installed and enabled.
 
-Current state: Process Service, named read-only process inspection, exact one-shot package-script permission grants, permission UI/API, local Skills and the first scoped Memory/Compaction layers are implemented. Process execution has explicit cwd/argv/minimal-env/time/output/cancellation policy. Linux now has a Bubblewrap provider with startup probing, namespace isolation and network blocked by default for sandboxed operations; Windows/macOS still report `osIsolation: none`. MCP, Browser, Goals/Workflow and capability settings remain.
+Current state: Process Service, named read-only process inspection, exact one-shot package-script permission grants, permission UI/API, local Skills, the first scoped Memory/Compaction layers, and a first controlled Browser capability are implemented. Browser auto-discovers system Chrome/Edge/Chromium, mounts only when available, isolates state per Harness session, returns bounded DOM snapshots with element refs, and separates raw Web fetch from navigation/click/type/back operations behind a public-network filtering proxy. `browser_type` uses persisted-audit redaction and rejects password fields. Process execution has explicit cwd/argv/minimal-env/time/output/cancellation policy. Linux now has a Bubblewrap provider with startup probing, namespace isolation and network blocked by default for sandboxed operations; Windows/macOS still report `osIsolation: none`. MCP, Goals/Workflow, a richer high-impact Browser confirmation policy and capability settings remain.
 
 Exit criteria:
 
-- one session can naturally move through plain chat → Web research → local file work → controlled process execution;
+- one session can naturally move through plain chat → Web research → controlled Browser inspection/interaction → local file work → controlled process execution;
 - high-risk process actions cannot bypass the permission/sandbox policy;
 - disabling a Skill/tool pack removes it cleanly without breaking transcript replay;
 - browser evidence is distinguishable from model claims;

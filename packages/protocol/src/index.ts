@@ -21,6 +21,7 @@ export interface RuntimeHealth {
     workspace: Readiness;
     authentication: Readiness;
     modelGateway: Readiness;
+    browser: Readiness;
   };
 }
 
@@ -202,7 +203,7 @@ export interface WorkspaceSummary {
   fileCount: number;
 }
 
-export type ToolCapabilityCategory = "workspace" | "web" | "process" | "system" | "extension";
+export type ToolCapabilityCategory = "workspace" | "web" | "browser" | "process" | "system" | "extension";
 
 export interface ToolCapabilitySummary {
   name: string;

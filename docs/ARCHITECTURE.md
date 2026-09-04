@@ -160,7 +160,7 @@ The model-facing memory pack exposes `memory_search`, `memory_remember`, `memory
 
 Context compaction is a separate derived store. When older completed turns exceed configured turn/character thresholds, `ContextCompactor` writes a `SessionCompaction` covering an explicit `sourceStartSeq..sourceEndSeq` range. The first implementation uses a deterministic trajectory projection so it never requires an extra model call or hidden reasoning. Covered raw dialogue and tool events remain in the canonical transcript; only model context changes. The prompt receives the compacted summary plus raw recent dialogue/tool evidence after the covered range, avoiding duplicate context.
 
-### Process, permission and future sandbox capability
+### Process, permission and OS sandbox capability
 
 Process execution is now separated from the Workspace pack in `@daoyin/harness-process`. The model never receives a generic shell-string tool. `ProcessService` accepts only an executable plus argument array, resolves `cwd` beneath the selected canonical workspace root, uses a minimal inherited environment, disables interactive Git credential prompts, bounds runtime/output, supports cancellation, and reports structured execution evidence.
 
@@ -168,7 +168,7 @@ The first policy registry exposes named operations rather than arbitrary command
 
 Workspace-controlled executable code is treated differently. `run_package_script` requires both a runtime allowlist match and a declaration in the target workspace `package.json`. The exact executable/arguments/cwd/risk plan is hashed into a command fingerprint. Without a matching approved grant, the tool emits `PROCESS_APPROVAL_REQUIRED` with a structured permission request. The local UI shows the exact display command and reason; the user can allow once or deny through a CSRF-protected endpoint. Approval alone never starts background execution. A later turn consumes the exact grant once, and changing script/cwd/fingerprint requires a new decision. Permission history is append-only in `process/permissions.jsonl` and scoped to account + resource + session.
 
-This is **not yet an OS sandbox**. Current successful process evidence explicitly reports `osIsolation: "none"`; the stable System Prompt forbids describing permission-only execution as isolated. A future Bubblewrap/Seatbelt/Windows isolation provider should sit beneath the same Process Service contract so tool names, permissions and transcript evidence do not need to change. Persistent interactive process sessions are also deferred until lifecycle, resource and cancellation semantics are auditable.
+Linux now has an OS sandbox provider: Bubblewrap is discovered and startup-probed before use, and sandboxed operations report `osIsolation: "bubblewrap"` with network blocked by default. Unsupported/unavailable platforms still report `osIsolation: "none"`, and the stable System Prompt forbids describing permission-only execution as isolated. Future macOS/Windows providers should sit beneath the same Process Service contract so tool names, permissions and transcript evidence do not need to change. Persistent interactive process sessions are also deferred until lifecycle, resource and cancellation semantics are auditable.
 
 ### Skills, MCP and plugins
 
@@ -258,6 +258,7 @@ Each stored memory has a stable ID, kind, content, bounded keywords, confidence,
 - state changes require local session cookie + CSRF token;
 - workspace paths are scoped and escape-checked;
 - public Web tools reject private-network destinations and validate redirects;
+- the Browser capability is mounted only when a supported system browser is discovered; its traffic is forced through a loopback proxy that resolves/pins public targets and rejects local/private destinations, and each Harness session receives an ephemeral BrowserContext;
 - external content is data, never policy;
 - model-provider secrets are never sent to the browser;
 - no arbitrary shell-string tool exists; named read-only process operations are policy-checked and workspace-controlled executable code requires an exact one-shot permission. Linux uses the Bubblewrap provider when its startup probe passes; Windows/macOS currently report `osIsolation: none` rather than pretending to be sandboxed.
@@ -279,6 +280,7 @@ The gateway handles membership, quota, model policy and audit. Local capabilitie
 | `packages/server` | Loopback HTTP, browser session and composition root |
 | `packages/agent-core` | General turn loop, context, cancellation and compaction |
 | `packages/cloud` | Daoyin AI Gateway model adapter and cloud credential-provider boundary |
+| `packages/browser` | System-browser discovery, session-isolated Playwright contexts and pinned public-network proxy |
 | `packages/process` | Confined process execution, named-operation policy and append-only permission grants |
 | `packages/workspace` | Safe local files, session transcript and local state primitives |
 | `packages/protocol` | Shared API/event/capability/error contracts |
@@ -286,4 +288,4 @@ The gateway handles membership, quota, model policy and audit. Local capabilitie
 | `packages/evaluator` | Optional task-specific evidence/evaluation adapters |
 | `packages/ui` | Task-neutral local React application |
 
-Likely future packages include `skills`, `sandbox`, `browser`, `mcp`, `workflow`, `memory` and `plugins`. They should depend on explicit runtime interfaces rather than importing the UI or server routing layer.
+Likely future packages include `skills`, additional `sandbox` providers, `mcp`, `workflow`, richer `memory` and `plugins`. They should depend on explicit runtime interfaces rather than importing the UI or server routing layer.

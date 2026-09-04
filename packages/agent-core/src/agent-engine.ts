@@ -258,7 +258,7 @@ export class AgentEngine {
           toolCallId: call.id,
           toolName: call.name,
           displayText: `正在执行 ${call.name}`,
-          input: toJsonValue(call.input),
+          input: toJsonValue(this.#tools.auditInput(call.name, call.input)),
         });
         const result = await this.#tools.execute(call, signal, {
           accountId: input.accountId,

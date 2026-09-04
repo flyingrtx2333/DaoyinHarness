@@ -12,6 +12,7 @@
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@daoyin/harness-browser": "*",
     "@daoyin/harness-process": "*",
     "@daoyin/harness-protocol": "*",
     "@daoyin/harness-workspace": "*"

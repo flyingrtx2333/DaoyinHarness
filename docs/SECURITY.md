@@ -52,9 +52,9 @@ Implemented controls:
 - package scripts require both a runtime allowlist match and a declaration in the safe workspace `package.json`;
 - package-script execution requires an exact one-shot permission fingerprint scoped to account + resource + session;
 - permission approval is append-only local state and cannot be granted by the model; approval does not itself start execution;
-- successful process evidence explicitly reports `osIsolation: "none"` until a real OS sandbox provider exists.
+- Linux automatically discovers and startup-probes Bubblewrap; operations that request sandboxing report `osIsolation: "bubblewrap"` only after that probe passes, with network blocked by default. Unsupported/unavailable platforms report `osIsolation: "none"`.
 
-Still required before describing process execution as sandboxed: OS-level filesystem/process isolation, explicit child-process/CPU/resource ceilings and enforceable per-operation network isolation. A future sandbox provider must sit below the current Process Service/permission contract rather than introducing a second command path.
+Still required for the full cross-platform sandbox story: Windows/macOS providers plus explicit child-process/CPU/resource ceilings. New providers must sit below the current Process Service/permission contract rather than introducing a second command path.
 
 ## 5. Tool permissions
 
@@ -70,6 +70,15 @@ v1 categories:
 - **credential**: internal-only Cloud Client operations, never model-callable.
 
 High-impact changes display the exact scope to the user. Current Process Permission grants are intentionally narrower than a remembered policy class: they bind the exact command fingerprint to the current account/resource/session and are consumed once. Broader remembered permissions require a separate policy design and are not part of the current implementation.
+
+### Browser controls
+
+- Browser tools are mounted only when a fixed system Chrome, Edge or Chromium executable is discovered; Harness does not silently download a browser binary.
+- Every Harness session receives an ephemeral BrowserContext. Downloads are disabled, service workers are blocked, popups are closed, and contexts are discarded when the session browser is closed or the runtime exits.
+- Browser traffic is forced through a loopback filtering proxy with Chromium's implicit loopback bypass explicitly disabled. The proxy resolves the target itself, rejects local/private/non-public answers, credentials and non-standard ports, and connects to the validated public IP rather than asking Chromium to resolve the hostname a second time.
+- WebRTC is restricted by launch policy and disabled in page initialization to reduce routes that could bypass the HTTP(S) proxy boundary.
+- `browser_type` rejects password/password-autocomplete fields and uses the ToolRegistry `auditInput` hook so typed text is replaced by `[redacted]` in persisted `tool.started` evidence while the real value is used only for the in-memory execution call.
+- `browser_click` and `browser_type` are marked mutating. The current baseline does not yet have a separate one-shot Browser Permission Store, so external page content can never count as authorization for consequential interaction; the user's request must authorize the action. A richer high-impact browser confirmation policy remains future work.
 
 ## 6. Preview isolation
 

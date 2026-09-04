@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +14,14 @@ async function temporaryDirectory(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   cleanupDirectories.push(directory);
   return directory;
+}
+
+async function browserExecutableFixture(): Promise<string> {
+  const directory = await temporaryDirectory("daoyin-server-browser-executable-");
+  const executable = join(directory, "browser-fixture");
+  await writeFile(executable, "#!/bin/sh\nexit 0\n", "utf8");
+  await chmod(executable, 0o700);
+  return executable;
 }
 
 afterEach(async () => {
@@ -43,6 +51,58 @@ describe("local server security boundary", () => {
         authentication: "planned",
       },
     });
+  });
+
+  it("mounts the browser capability only when a supported executable is discovered", async () => {
+    const dataDir = await temporaryDirectory("daoyin-server-browser-data-");
+    const workspaceRoot = await temporaryDirectory("daoyin-server-browser-workspace-");
+    const browserExecutablePath = await browserExecutableFixture();
+    app = await createApp({
+      port: 4677,
+      version: "0.1.0",
+      startedAt: new Date().toISOString(),
+      dataDir,
+      workspaceRoot,
+      browserExecutablePath,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/bootstrap",
+      headers: { host: "127.0.0.1:4677" },
+    });
+    const bootstrap = response.json<RuntimeBootstrap>();
+    expect(bootstrap.health.capabilities.browser).toBe("ready");
+    expect(bootstrap.tools.filter((tool) => tool.category === "browser").map((tool) => tool.name)).toEqual([
+      "browser_open",
+      "browser_snapshot",
+      "browser_click",
+      "browser_type",
+      "browser_back",
+      "browser_close",
+    ]);
+  });
+
+  it("does not advertise browser tools when the configured browser executable is unavailable", async () => {
+    const dataDir = await temporaryDirectory("daoyin-server-no-browser-data-");
+    const workspaceRoot = await temporaryDirectory("daoyin-server-no-browser-workspace-");
+    app = await createApp({
+      port: 4677,
+      version: "0.1.0",
+      startedAt: new Date().toISOString(),
+      dataDir,
+      workspaceRoot,
+      browserExecutablePath: join(workspaceRoot, "missing-browser"),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/bootstrap",
+      headers: { host: "127.0.0.1:4677" },
+    });
+    const bootstrap = response.json<RuntimeBootstrap>();
+    expect(bootstrap.health.capabilities.browser).toBe("unavailable");
+    expect(bootstrap.tools.some((tool) => tool.category === "browser")).toBe(false);
   });
 
   it("rejects a non-loopback Host", async () => {

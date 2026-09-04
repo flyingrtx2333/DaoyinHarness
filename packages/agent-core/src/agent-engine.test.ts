@@ -84,6 +84,39 @@ describe("AgentEngine", () => {
     expect(model.requests[1]?.messages.at(-1)).toMatchObject({ role: "tool", toolName: "write_file" });
   });
 
+  it("persists a tool's sanitized audit input instead of sensitive execution input", async () => {
+    const model = new ReplayModel([
+      {
+        kind: "tool_calls",
+        calls: [{ id: "call_sensitive", name: "sensitive_tool", input: { text: "do not persist me" } }],
+      },
+      { kind: "assistant", content: "Sensitive tool complete." },
+    ]);
+    const root = await temporaryDirectory();
+    const store = new JsonlSessionStore(path.join(root, ".events"));
+    const tools = new ToolRegistry([{
+      name: "sensitive_tool",
+      description: "Test sensitive audit input.",
+      category: "system",
+      mutating: true,
+      inputSchema: { type: "object" },
+      auditInput: () => ({ text: "[redacted]" }),
+      async execute() {
+        return {
+          ok: true,
+          summary: "Sensitive operation completed.",
+          evidence: { schemaVersion: 1, toolName: "sensitive_tool", result: { ok: true }, artifacts: [], diagnostics: [] },
+        };
+      },
+    }]);
+    const engine = new AgentEngine({ model, tools, events: store });
+
+    await engine.runTurn({ ...turnInput, turnId: "turn_sensitive", userMessage: "Use the sensitive tool." });
+    const started = (await store.read("session_test")).find((event) => event.type === "tool.started");
+    expect(started).toMatchObject({ type: "tool.started", payload: { input: { text: "[redacted]" } } });
+    expect(JSON.stringify(await store.read("session_test"))).not.toContain("do not persist me");
+  });
+
   it("reassembles dynamic prompt sections for every step and persists tool inputs for later evidence", async () => {
     const model = new ReplayModel([
       {

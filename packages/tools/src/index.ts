@@ -12,5 +12,6 @@ export {
 export { createWorkspaceTools } from "./workspace-tools.js";
 export { createProcessTools, type ProcessToolOptions } from "./process-tools.js";
 export { createWebTools, type WebToolOptions } from "./web-tools.js";
+export { createBrowserTools } from "./browser-tools.js";
 export { createSkillTools, discoverWorkspaceSkills, type SkillSummary } from "./skill-tools.js";
 export { createMemoryTools } from "./memory-tools.js";

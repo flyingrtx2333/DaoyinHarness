@@ -35,7 +35,7 @@ type Turn = {
 type ToolCapability = {
   name: string;
   description: string;
-  category: "workspace" | "web" | "process" | "system" | "extension";
+  category: "workspace" | "web" | "browser" | "process" | "system" | "extension";
   mutating: boolean;
 };
 

@@ -44,6 +44,7 @@ export interface ToolFailure {
 export type ToolExecution = ToolSuccess | ToolFailure;
 
 export interface ToolDefinition extends ToolDescriptor {
+  auditInput?(input: Record<string, unknown>): unknown;
   execute(input: Record<string, unknown>, signal: AbortSignal, context: ToolExecutionContext): Promise<ToolSuccess>;
 }
 
@@ -84,6 +85,16 @@ export class ToolRegistry {
 
   public capabilities(): ToolCapabilitySummary[] {
     return this.descriptors().map(({ name, description, category, mutating }) => ({ name, description, category, mutating }));
+  }
+
+  public auditInput(toolName: string, input: Record<string, unknown>): unknown {
+    const definition = this.#tools.get(toolName);
+    if (definition?.auditInput === undefined) return input;
+    try {
+      return definition.auditInput(input);
+    } catch {
+      return { redacted: true };
+    }
   }
 
   public async execute(
