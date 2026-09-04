@@ -201,7 +201,7 @@ export function App(): React.JSX.Element {
     : sandbox.available
       ? `沙箱 ${sandbox.provider}`
       : sandbox.mode === "off" ? "沙箱已关闭" : "权限模式 · 无 OS 沙箱";
-  const modelReady = state.kind === "ready" && state.bootstrap.health.capabilities.authentication === "ready";
+  const modelReady = state.kind === "ready" && state.bootstrap.health.capabilities.modelGateway === "ready";
   const capabilityCategories = state.kind === "ready"
     ? [...new Set(state.bootstrap.tools.map((tool) => tool.category))]
     : [];

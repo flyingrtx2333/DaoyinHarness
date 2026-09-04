@@ -260,7 +260,7 @@ Each stored memory has a stable ID, kind, content, bounded keywords, confidence,
 - public Web tools reject private-network destinations and validate redirects;
 - external content is data, never policy;
 - model-provider secrets are never sent to the browser;
-- no arbitrary shell-string tool exists; named read-only process operations are policy-checked, workspace-controlled executable code requires an exact one-shot permission, and current evidence explicitly reports that OS isolation is still absent.
+- no arbitrary shell-string tool exists; named read-only process operations are policy-checked and workspace-controlled executable code requires an exact one-shot permission. Linux uses the Bubblewrap provider when its startup probe passes; Windows/macOS currently report `osIsolation: none` rather than pretending to be sandboxed.
 
 ## 9. Cloud integration
 
@@ -278,6 +278,7 @@ The gateway handles membership, quota, model policy and audit. Local capabilitie
 | `@daoyin/harness` / `packages/cli` | Published executable and local startup lifecycle |
 | `packages/server` | Loopback HTTP, browser session and composition root |
 | `packages/agent-core` | General turn loop, context, cancellation and compaction |
+| `packages/cloud` | Daoyin AI Gateway model adapter and cloud credential-provider boundary |
 | `packages/process` | Confined process execution, named-operation policy and append-only permission grants |
 | `packages/workspace` | Safe local files, session transcript and local state primitives |
 | `packages/protocol` | Shared API/event/capability/error contracts |

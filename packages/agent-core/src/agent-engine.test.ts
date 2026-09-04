@@ -190,4 +190,17 @@ describe("AgentEngine", () => {
       "turn.failed",
     ]);
   });
+
+  it("preserves stable MODEL_* gateway error codes in the terminal event", async () => {
+    const model: ModelClient = {
+      async complete() {
+        throw Object.assign(new Error("login required"), { code: "MODEL_AUTH_REQUIRED" });
+      },
+    };
+    const { engine, store } = await fixture(model);
+
+    await expect(engine.runTurn(turnInput)).resolves.toMatchObject({ status: "failed" });
+    const terminal = (await store.read("session_test")).find((event) => event.type === "turn.failed");
+    expect(terminal).toMatchObject({ type: "turn.failed", payload: { code: "MODEL_AUTH_REQUIRED" } });
+  });
 });

@@ -148,7 +148,70 @@ If a supported credential manager is unavailable, v1 falls back to an in-memory 
 
 ## 7. AI Gateway authorization
 
-The future user-facing model endpoint requires `harness:use`, validates account status and quota, and emits a request/audit ID. It accepts normalized messages and tool schemas but never executes local tools. The access token must not be forwarded to model providers or included in model input.
+The user-facing model endpoint requires `harness:use`, validates account status and quota, and emits a request/audit ID. It accepts normalized messages and tool schemas but never executes local tools. The cloud credential must not be forwarded to model providers or included in model input.
+
+The local client contract is now implemented in `packages/cloud`. The planned main-platform endpoint is:
+
+```text
+POST /api/ai/harness/responses
+Authorization: Bearer <short-lived access credential>
+Content-Type: application/json
+```
+
+Request body:
+
+```json
+{
+  "schemaVersion": 1,
+  "model": "optional-policy-model",
+  "messages": [],
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "...",
+      "inputSchema": {}
+    }
+  ],
+  "systemPrompt": {
+    "stableText": "...",
+    "dynamicText": "...",
+    "sections": [
+      { "id": "identity", "kind": "stable" }
+    ]
+  }
+}
+```
+
+Successful response:
+
+```json
+{
+  "schemaVersion": 1,
+  "requestId": "req_...",
+  "output": {
+    "kind": "assistant",
+    "content": "..."
+  }
+}
+```
+
+or:
+
+```json
+{
+  "schemaVersion": 1,
+  "requestId": "req_...",
+  "output": {
+    "kind": "tool_calls",
+    "content": "optional assistant preface",
+    "calls": [
+      { "id": "call_...", "name": "read_file", "input": { "path": "README.md" } }
+    ]
+  }
+}
+```
+
+The client accepts HTTPS only, except loopback HTTP for a local development gateway. It bounds response size and timeout, validates the normalized output shape, and maps authorization, quota, rate-limit and upstream failures to stable `MODEL_*` errors. Until the platform OAuth endpoints exist, a development-only bridge may inject a process-memory credential through `DAOYIN_HARNESS_GATEWAY_URL` and `DAOYIN_HARNESS_GATEWAY_CREDENTIAL`; this bridge is not the production authentication design and never writes the credential to Harness state.
 
 ## 8. Required tests
 

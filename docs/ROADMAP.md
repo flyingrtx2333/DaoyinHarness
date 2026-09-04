@@ -45,6 +45,8 @@ Deliverables:
 - normalized model request/response/tool-call contract;
 - quota, membership and audit integration without exposing provider keys locally.
 
+Current state: the normalized Daoyin AI Gateway `ModelClient` is implemented in `packages/cloud`, including HTTPS/loopback policy, bounded timeout/response handling, strict assistant/tool-call parsing and stable gateway error mapping. A development-only process-memory credential bridge is wired through the CLI so a real gateway can be exercised before OAuth exists. Main-platform OAuth endpoints, credential-store adapters, token refresh/rotation and the production Gateway service are still required.
+
 Exit criteria:
 
 - login, refresh, revocation, replay, redirect, origin and CSRF tests pass;
@@ -111,7 +113,7 @@ Deliverables:
 - **Workflow execution**: reusable multi-step routines with child execution records;
 - capability/settings UI for inspecting what is installed and enabled.
 
-Current state: Process Service, named read-only process inspection, exact one-shot package-script permission grants, permission UI/API, local Skills and the first scoped Memory/Compaction layers are implemented. Process execution has explicit cwd/argv/minimal-env/time/output/cancellation policy, but current evidence truthfully reports `osIsolation: none`; an actual OS sandbox provider, MCP, Browser, Goals/Workflow and capability settings remain.
+Current state: Process Service, named read-only process inspection, exact one-shot package-script permission grants, permission UI/API, local Skills and the first scoped Memory/Compaction layers are implemented. Process execution has explicit cwd/argv/minimal-env/time/output/cancellation policy. Linux now has a Bubblewrap provider with startup probing, namespace isolation and network blocked by default for sandboxed operations; Windows/macOS still report `osIsolation: none`. MCP, Browser, Goals/Workflow and capability settings remain.
 
 Exit criteria:
 

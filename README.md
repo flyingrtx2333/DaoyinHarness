@@ -1,6 +1,6 @@
 # DaoyinHarness
 
-> **项目状态：通用本地 Agent 纵向闭环已打通，真实模型网关待接入。** CLI、本地 API、React Web UI、安全工作区、append-only trajectory、每步 Prompt/Context 装配、Capability Registry、Skills、公共 Web、provenance-bound Memory、Context Compaction，以及受控 Process Service + 一次性 Permission Gate 已经串联。道引账号 OAuth / AI Gateway、OS 级 Sandbox、Browser、MCP、Workflow/Sub-agent 与正式 npm 发布仍未实现。
+> **项目状态：通用本地 Agent 纵向闭环已打通，模型网关客户端已落地，主平台 OAuth / Gateway 服务端仍待联调。** CLI、本地 API、React Web UI、安全工作区、append-only trajectory、每步 Prompt/Context 装配、Capability Registry、Skills、公共 Web、provenance-bound Memory、Context Compaction、受控 Process Service + 一次性 Permission Gate，以及标准化 Daoyin AI Gateway `ModelClient` 已经串联。Linux Bubblewrap OS Sandbox 已实现并带启动探测；Windows/macOS Sandbox、Browser、MCP、Workflow/Sub-agent 与正式 npm 发布仍未实现。
 
 DaoyinHarness 是道引的本地通用 Agent Harness，不是网页生成器，也不把“软件项目”当成所有任务的默认形态。用户启动一个本地运行时并使用道引账号登录后，同一个 Agent 可以在持续会话中聊天、检索公开网页、处理本地文件与资料、执行受控工具、完成软件工程任务，并在后续通过 Skills、Browser、Sandbox、Workflow、子 Agent 和插件继续扩展能力。
 
@@ -65,7 +65,7 @@ v1 明确不包含：
 │ ├─ Web Search / Fetch        │                └──────────────────────┘
 │ ├─ Memory / Compaction       │
 │ ├─ Process / Permission      │
-│ │   └─ OS Sandbox [planned]  │
+│ │   └─ OS Sandbox [Linux]    │
 │ ├─ Skills / MCP / Plugins    │
 │ └─ Browser / Workflow / Agent│
 └─────────────────────────────┘
@@ -117,6 +117,7 @@ packages/
 ├─ cli/
 ├─ server/
 ├─ agent-core/
+├─ cloud/
 ├─ process/
 ├─ workspace/
 ├─ protocol/
@@ -160,11 +161,11 @@ npm start -- --no-open --workspace D:\path\to\project
 
 System Prompt 已改为注册式装配：固定 Identity / Scope / Tool Behavior / Safety / Completion 作为 Stable Sections 缓存；Runtime、Workspace、能力快照、Skill Catalog、最近 Tool Evidence、Turn Instruction 与可选 Memory 作为 Dynamic Sections，在**每一个 Agent Step**调用模型前重新组装。`tool.started` 同时持久化受限 JSON 输入，使后续回合可以基于真实工具证据继续，而不是只依赖助手总结。
 
-当前内置 capability packs 包括：安全 Workspace 文件操作、公共 `web_search` / `web_fetch`、工作区 `.daoyin/skills/<name>/SKILL.md` 的按需发现与加载、provenance-bound Memory，以及独立 Process Service。Process 不提供任意 Shell：`process_inspect` 只允许策略内的 Node/Git 只读检查；`run_package_script` 只允许 runtime allowlist + `package.json` 已声明的脚本，并对 exact command fingerprint 使用一次性 Permission Gate。批准/拒绝通过本地 CSRF API 和 UI 明确展示，批准本身不会后台自动执行，下一轮才消费授权。当前 Process evidence 会如实标记 `osIsolation: none`；真正 OS 级 Sandbox 尚未实现。Memory 提供 `memory_search / memory_remember / memory_update / memory_forget`，按 session / resource / account 三个 scope 隔离；更新和忘记都通过 append-only supersession/tombstone 完成，不重写历史。Skill Catalog 自动向模型提供 `name + description`，完整正文只有调用 `load_skill` 时才进入上下文。Web 能力拒绝 localhost/私网、URL 凭据和非标准端口，并对 redirect 目标重新校验。
+当前内置 capability packs 包括：安全 Workspace 文件操作、公共 `web_search` / `web_fetch`、工作区 `.daoyin/skills/<name>/SKILL.md` 的按需发现与加载、provenance-bound Memory，以及独立 Process Service。Process 不提供任意 Shell：`process_inspect` 只允许策略内的 Node/Git 只读检查；`run_package_script` 只允许 runtime allowlist + `package.json` 已声明的脚本，并对 exact command fingerprint 使用一次性 Permission Gate。批准/拒绝通过本地 CSRF API 和 UI 明确展示，批准本身不会后台自动执行，下一轮才消费授权。Linux 上会自动探测 Bubblewrap，探测成功后受控进程可获得文件系统/进程命名空间与默认断网隔离；Windows/macOS 暂时仍会如实标记 `osIsolation: none`。Memory 提供 `memory_search / memory_remember / memory_update / memory_forget`，按 session / resource / account 三个 scope 隔离；更新和忘记都通过 append-only supersession/tombstone 完成，不重写历史。Skill Catalog 自动向模型提供 `name + description`，完整正文只有调用 `load_skill` 时才进入上下文。Web 能力拒绝 localhost/私网、URL 凭据和非标准端口，并对 redirect 目标重新校验。
 
 长会话现在有独立 Context Compaction：达到阈值后生成带 `sourceStartSeq..sourceEndSeq` 的派生摘要，只从模型的原始多轮输入中移走已覆盖旧 turn；原 JSONL trajectory 不删除、不改写。Compaction 摘要和最近未覆盖 Tool Evidence 分开进入 Dynamic Prompt，避免重复。
 
-真实模型网关仍未接入：没有注入 `ModelClient` 时，任务会明确记录“真实模型网关尚未登录”，不会伪造成功。开发期使用 `npm run smoke:runtime` 验证 `skills -> Web policy -> workspace -> memory -> compaction -> process permission -> replay` 通用 Agent 纵向闭环。OAuth/AI Gateway、OS 级 Sandbox、Browser、MCP、Workflow、Sub-agent 与语义/向量级长期记忆增强仍在后续阶段。
+标准化 Daoyin AI Gateway 客户端已接入 `ModelClient` 边界：它只接受 HTTPS（回环开发地址例外）、将凭据限制在请求头、限制响应大小/超时、验证 assistant/tool-call 响应结构，并把 401/配额/限流/5xx 等错误映射成稳定的 `MODEL_*` 失败码。主平台 OAuth 尚未提供时，可仅在开发环境通过 `DAOYIN_HARNESS_GATEWAY_URL` + `DAOYIN_HARNESS_GATEWAY_CREDENTIAL`（可选 `DAOYIN_HARNESS_MODEL`）注入一次进程内凭据；该桥接不会写入本地状态，正式 v1 仍必须换成 OAuth + OS Credential Store。未配置模型时任务会明确失败而不伪造执行。开发期使用 `npm run smoke:runtime` 验证通用 Agent 纵向闭环。主平台 OAuth/Gateway 服务端、Windows/macOS Sandbox、Browser、MCP、Workflow、Sub-agent 与语义/向量级长期记忆增强仍在后续阶段。
 
 ## 路线图
 

@@ -23,6 +23,7 @@
     "open": "^11.0.2"
   },
   "devDependencies": {
+    "@daoyin/harness-cloud": "*",
     "@daoyin/harness-protocol": "*",
     "@daoyin/harness-server": "*",
     "esbuild": "^0.28.2"

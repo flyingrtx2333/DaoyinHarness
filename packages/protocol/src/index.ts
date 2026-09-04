@@ -20,6 +20,7 @@ export interface RuntimeHealth {
     database: Readiness;
     workspace: Readiness;
     authentication: Readiness;
+    modelGateway: Readiness;
   };
 }
 

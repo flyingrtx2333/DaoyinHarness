@@ -61,6 +61,15 @@ function isUsableToolCall(call: ModelToolCall): boolean {
   );
 }
 
+function modelFailure(error: unknown): { code: string; message: string } {
+  const message = error instanceof Error ? error.message : "Model request failed.";
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && /^MODEL_[A-Z0-9_]{1,80}$/u.test(code)) return { code, message };
+  }
+  return { code: "MODEL_REQUEST_FAILED", message };
+}
+
 function toJsonValue(value: unknown, depth = 0): JsonValue {
   if (depth > 12) return "[depth-limit]";
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
@@ -199,7 +208,8 @@ export class AgentEngine {
           await append("turn.cancelled", { status: "cancelled", source: "user", lastCompletedEventSeq: lastEventSeq });
           return { status: "cancelled", finalText, lastEventSeq };
         }
-        return this.#fail(append, "MODEL_REQUEST_FAILED", error instanceof Error ? error.message : "Model request failed.");
+        const failure = modelFailure(error);
+        return this.#fail(append, failure.code, failure.message);
       }
 
       if (reply.kind === "assistant") {

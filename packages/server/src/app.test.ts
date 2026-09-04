@@ -145,6 +145,8 @@ describe("local server security boundary", () => {
     const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
     expect(cookie).toContain("HttpOnly");
     expect(bootstrap.workspace).toMatchObject({ root: workspaceRoot, fileCount: 0 });
+    expect(bootstrap.health.capabilities.modelGateway).toBe("ready");
+    expect(bootstrap.health.capabilities.authentication).toBe("planned");
 
     const createResponse = await app.inject({
       method: "POST",

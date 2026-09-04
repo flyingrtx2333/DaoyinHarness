@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import open from "open";
+import { createDevelopmentGatewayModelFromEnvironment } from "@daoyin/harness-cloud";
 import { createApp } from "@daoyin/harness-server";
 import { DEFAULT_PORT, LAST_SCANNED_PORT, type CliOptions } from "./args.js";
 
@@ -20,6 +21,7 @@ export async function startHarness(
   publicDir: string,
 ): Promise<RunningHarness> {
   await mkdir(options.dataDir, { recursive: true });
+  const model = createDevelopmentGatewayModelFromEnvironment(process.env, version);
   const ports = options.port === undefined
     ? Array.from({ length: LAST_SCANNED_PORT - DEFAULT_PORT + 1 }, (_, index) => DEFAULT_PORT + index)
     : [options.port];
@@ -33,6 +35,7 @@ export async function startHarness(
       dataDir: options.dataDir,
       workspaceRoot: options.workspaceRoot,
       sandboxMode: options.sandboxMode,
+      ...(model === null ? {} : { model }),
       logger: options.logLevel === "silent" ? false : { level: options.logLevel },
     });
 

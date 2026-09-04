@@ -274,6 +274,7 @@ function healthFor(options: CreateAppOptions, state: RuntimeState): RuntimeHealt
       database: state.catalog === null ? "planned" : "ready",
       workspace: state.workspace === null ? "planned" : "ready",
       authentication: "planned",
+      modelGateway: state.model === null ? "planned" : "ready",
     },
   };
 }
