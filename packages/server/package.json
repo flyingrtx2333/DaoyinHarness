@@ -14,6 +14,7 @@
   "dependencies": {
     "@daoyin/harness-agent-core": "*",
     "@daoyin/harness-browser": "*",
+    "@daoyin/harness-mcp": "*",
     "@daoyin/harness-process": "*",
     "@daoyin/harness-protocol": "*",
     "@daoyin/harness-tools": "*",

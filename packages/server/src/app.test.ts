@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { ModelClient } from "@daoyin/harness-agent-core";
+import type { McpClientFactory } from "@daoyin/harness-mcp";
 import type { RuntimeBootstrap, SessionEventsResponse } from "@daoyin/harness-protocol";
 import { createApp } from "./app.js";
 
@@ -103,6 +104,52 @@ describe("local server security boundary", () => {
     const bootstrap = response.json<RuntimeBootstrap>();
     expect(bootstrap.health.capabilities.browser).toBe("unavailable");
     expect(bootstrap.tools.some((tool) => tool.category === "browser")).toBe(false);
+  });
+
+  it("mounts connected MCP tools and exposes server status in bootstrap", async () => {
+    const dataDir = await temporaryDirectory("daoyin-server-mcp-data-");
+    const workspaceRoot = await temporaryDirectory("daoyin-server-mcp-workspace-");
+    const mcpClientFactory: McpClientFactory = () => ({
+      async connect() {},
+      async listTools() {
+        return [{
+          name: "lookup",
+          description: "Look up a record.",
+          inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+          annotations: { readOnlyHint: true },
+        }];
+      },
+      async callTool() {
+        return { content: [{ type: "text", text: "done" }] };
+      },
+      serverInfo() {
+        return { name: "Test MCP", version: "2.0.0" };
+      },
+      async close() {},
+    });
+    app = await createApp({
+      port: 4677,
+      version: "0.1.0",
+      startedAt: new Date().toISOString(),
+      dataDir,
+      workspaceRoot,
+      mcpServers: [{ id: "demo", url: "https://mcp.example.test/mcp" }],
+      mcpClientFactory,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/bootstrap",
+      headers: { host: "127.0.0.1:4677" },
+    });
+    const bootstrap = response.json<RuntimeBootstrap>();
+    expect(bootstrap.health.capabilities.mcp).toBe("ready");
+    expect(bootstrap.mcpServers).toEqual([
+      expect.objectContaining({ id: "demo", status: "connected", serverName: "Test MCP", toolCount: 1 }),
+    ]);
+    expect(bootstrap.tools.filter((tool) => tool.name.startsWith("mcp_"))).toEqual([
+      expect.objectContaining({ category: "extension", name: expect.stringMatching(/^mcp_demo_lookup_[a-f0-9]{12}$/u), mutating: false }),
+    ]);
   });
 
   it("rejects a non-loopback Host", async () => {

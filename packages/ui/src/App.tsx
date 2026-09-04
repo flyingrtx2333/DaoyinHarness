@@ -123,6 +123,7 @@ function toolLabel(name: string): string {
     memory_update: "更新记忆",
     memory_forget: "忘记记忆",
   };
+  if (name.startsWith("mcp_")) return "MCP 扩展工具";
   return labels[name] ?? name;
 }
 
@@ -213,6 +214,9 @@ export function App(): React.JSX.Element {
   const capabilityCategories = state.kind === "ready"
     ? [...new Set(state.bootstrap.tools.map((tool) => tool.category))]
     : [];
+  const mcpServers = state.kind === "ready" ? state.bootstrap.mcpServers : [];
+  const mcpConnectedCount = mcpServers.filter((server) => server.status === "connected").length;
+  const mcpStatusTitle = mcpServers.map((server) => `${server.id}: ${server.status === "connected" ? `已连接 · ${String(server.toolCount)} tools` : server.message ?? "连接失败"}`).join("\n");
 
   const loadSession = useCallback(async (sessionId: string, signal?: AbortSignal): Promise<void> => {
     const [payload, permissions] = await Promise.all([
@@ -496,6 +500,7 @@ export function App(): React.JSX.Element {
               <p>{modelReady ? "聊天、研究网页、整理资料、处理本地文件或完成工程任务，都从同一段会话继续。" : "会话、工作区和工具运行时已经接通；真实模型网关登录仍在下一步接入。"}</p>
               <div className="capability-strip">
                 {capabilityCategories.map((category) => <span className="capability-chip" key={category}>{capabilityCategoryLabel(category)}</span>)}
+                {mcpServers.length > 0 ? <span className="capability-chip" title={mcpStatusTitle}>MCP {mcpConnectedCount}/{mcpServers.length}</span> : null}
                 <span className={`capability-chip sandbox-chip ${sandbox?.available ? "ready" : "fallback"}`}>{sandboxLabel}</span>
               </div>
               <div className="workspace-chip"><Icon name="folder" /><span>{workspace?.root ?? "未选择工作区"}</span></div>

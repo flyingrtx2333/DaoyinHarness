@@ -1,6 +1,6 @@
 # DaoyinHarness Architecture
 
-> Status: general-agent architecture baseline. The local process, REST/UI slice, append-only session transcript, multi-turn Agent loop, per-step System Prompt assembly, workspace/Web capability packs and first local Skills catalog/loader are implemented. OAuth/AI Gateway, SQLite indexes, durable memory storage, sandboxed process execution, Browser, workflows, sub-agents, MCP and plugin discovery remain staged work.
+> Status: general-agent architecture baseline. The local process, REST/UI + WebSocket slice, append-only session transcript, multi-turn Agent loop, per-step System Prompt assembly, workspace/Web/Skills/Memory/Browser/Process capability packs, Linux Bubblewrap sandbox, standardized Daoyin Gateway client, and explicit remote Streamable HTTP MCP adapter are implemented. Main-platform OAuth/Gateway service integration, SQLite materialization, workflows/goals, sub-agents, stdio MCP under the Process policy, Windows/macOS sandbox providers and plugin discovery remain staged work.
 
 ## 1. Product boundary
 
@@ -46,9 +46,9 @@ CLI / Local Server / Web UI
                  │    ├── catalog injection
                  │    ├── list_skills
                  │    └── load_skill
-                 ├── Process / Sandbox        [planned]
-                 ├── MCP / Plugins            [planned]
-                 ├── Browser / Computer Use   [planned]
+                 ├── Process / Sandbox        [Linux implemented]
+                 ├── MCP remote HTTP           [implemented]
+                 ├── Browser / Computer Use   [implemented baseline]
                  ├── Workflow / Goals         [planned]
                  └── Sub-agents               [planned]
 
@@ -69,6 +69,9 @@ The npm executable owns process startup, loopback port selection, data-directory
 ```text
 daoyin-harness [--port <number>] [--no-open]
                [--data-dir <path>] [--workspace <path>]
+               [--sandbox auto|required|off]
+               [--mcp <id>=<url>]...
+               [--mcp-bearer-env <id>=<env-name>]...
                [--log-level <level>]
 ```
 
@@ -84,7 +87,7 @@ The server is composition glue. Capability-specific business logic belongs in ca
 
 The React UI renders persisted protocol events and capability metadata. It is intentionally task-neutral: a conversation is not automatically a project and tool cards are driven by event data.
 
-The current implementation recovers via `eventSeq` polling. WebSocket delivery may replace polling later without changing transcript semantics.
+The current implementation uses a session-scoped WebSocket for live delivery. On reconnect the browser supplies its last `eventSeq`; the server replays the persisted gap before entering live mode, while the REST replay endpoint remains the authoritative recovery fallback.
 
 ### Agent Engine
 
@@ -122,11 +125,11 @@ Each model-facing tool declares:
 
 - stable `name`;
 - description and JSON input schema;
-- capability category (`workspace`, `web`, `process`, `system`, `extension`);
+- capability category (`workspace`, `web`, `browser`, `process`, `system`, `extension`);
 - whether the operation is mutating;
 - one policy-checked executor.
 
-Tools can be registered individually or as a named tool pack. The registry is the first composition layer; future Skills/MCP/plugins should resolve into the same model-facing tool contract rather than creating parallel Agent loops.
+Tools can be registered individually or as a named tool pack. Built-in Skills and connected MCP servers already resolve into the same model-facing registry contract; future plugins must do the same rather than creating parallel Agent loops.
 
 ### Workspace capability
 
@@ -172,7 +175,9 @@ Linux now has an OS sandbox provider: Bubblewrap is discovered and startup-probe
 
 ### Skills, MCP and plugins
 
-Skills provide reusable instructions/workflows; MCP and plugins provide capabilities. They should be discoverable and mountable per runtime/session without requiring Agent Engine changes.
+Skills provide reusable instructions/workflows; MCP and plugins provide capabilities. Remote Streamable HTTP MCP is implemented in `packages/mcp`: servers are configured explicitly at CLI startup, optional static Bearer Tokens are resolved only from named environment variables, and one failed server does not block the rest of the Harness. Successful `tools/list` entries receive stable Harness namespaced names, normalize into `extension` tools, and enter the ordinary ToolRegistry without Agent Engine branches. Only `readOnlyHint=true` is trusted as an explicit read-only annotation; otherwise the adapter conservatively marks the tool mutating. Persisted `tool.started` audit input records only MCP argument keys, not values, and binary image/audio result payloads are omitted from normal Agent evidence.
+
+stdio MCP is intentionally deferred because it launches local processes. It must reuse the Process Permission/Sandbox boundary instead of creating a second execution path. Generic plugin discovery is also still planned.
 
 The long-term invariant is **capabilities are composable, the loop stays small**.
 
@@ -259,6 +264,7 @@ Each stored memory has a stable ID, kind, content, bounded keywords, confidence,
 - workspace paths are scoped and escape-checked;
 - public Web tools reject private-network destinations and validate redirects;
 - the Browser capability is mounted only when a supported system browser is discovered; its traffic is forced through a loopback proxy that resolves/pins public targets and rejects local/private destinations, and each Harness session receives an ephemeral BrowserContext;
+- remote MCP endpoints are explicit startup configuration, use HTTPS except explicit loopback HTTP, reject URL credentials/query parameters and automatic redirects, and their tool metadata/results remain untrusted external data;
 - external content is data, never policy;
 - model-provider secrets are never sent to the browser;
 - no arbitrary shell-string tool exists; named read-only process operations are policy-checked and workspace-controlled executable code requires an exact one-shot permission. Linux uses the Bubblewrap provider when its startup probe passes; Windows/macOS currently report `osIsolation: none` rather than pretending to be sandboxed.
@@ -281,6 +287,7 @@ The gateway handles membership, quota, model policy and audit. Local capabilitie
 | `packages/agent-core` | General turn loop, context, cancellation and compaction |
 | `packages/cloud` | Daoyin AI Gateway model adapter and cloud credential-provider boundary |
 | `packages/browser` | System-browser discovery, session-isolated Playwright contexts and pinned public-network proxy |
+| `packages/mcp` | Explicit remote Streamable HTTP MCP lifecycle, tool discovery/call normalization and server status |
 | `packages/process` | Confined process execution, named-operation policy and append-only permission grants |
 | `packages/workspace` | Safe local files, session transcript and local state primitives |
 | `packages/protocol` | Shared API/event/capability/error contracts |
@@ -288,4 +295,4 @@ The gateway handles membership, quota, model policy and audit. Local capabilitie
 | `packages/evaluator` | Optional task-specific evidence/evaluation adapters |
 | `packages/ui` | Task-neutral local React application |
 
-Likely future packages include `skills`, additional `sandbox` providers, `mcp`, `workflow`, richer `memory` and `plugins`. They should depend on explicit runtime interfaces rather than importing the UI or server routing layer.
+Likely future packages include a dedicated `skills` package, additional `sandbox` providers, `workflow`, richer `memory` and `plugins`. stdio MCP support should extend `packages/mcp` while delegating process creation to the controlled Process Service. Future packages should depend on explicit runtime interfaces rather than importing the UI or server routing layer.

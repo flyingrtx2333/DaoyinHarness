@@ -16,6 +16,8 @@ const HELP = `DaoyinHarness ${VERSION}
   --data-dir <目录>   指定本地运行数据目录
   --workspace <目录>  指定 Agent 可访问的本地工作区；默认当前目录
   --sandbox <模式>   auto|required|off；默认 auto，required 不允许静默降级
+  --mcp <id>=<URL>    显式连接远程/回环 Streamable HTTP MCP；可重复
+  --mcp-bearer-env <id>=<环境变量>  从进程环境读取该 MCP 的静态 Bearer Token
   --log-level <级别>  fatal|error|warn|info|debug|trace|silent
   --help, -h           显示帮助
   --version, -v        显示版本`;

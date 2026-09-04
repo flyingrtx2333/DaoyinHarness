@@ -1,5 +1,5 @@
 {
-  "name": "@daoyin/harness-tools",
+  "name": "@daoyin/harness-mcp",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,10 +12,6 @@
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@daoyin/harness-browser": "*",
-    "@daoyin/harness-mcp": "*",
-    "@daoyin/harness-process": "*",
-    "@daoyin/harness-protocol": "*",
-    "@daoyin/harness-workspace": "*"
+    "@modelcontextprotocol/client": "^2.0.0"
   }
 }

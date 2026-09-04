@@ -22,6 +22,7 @@ export interface RuntimeHealth {
     authentication: Readiness;
     modelGateway: Readiness;
     browser: Readiness;
+    mcp: Readiness;
   };
 }
 
@@ -212,6 +213,17 @@ export interface ToolCapabilitySummary {
   mutating: boolean;
 }
 
+export interface McpServerSummary {
+  id: string;
+  endpoint: string;
+  status: "connected" | "failed";
+  serverName: string | null;
+  serverVersion: string | null;
+  toolCount: number;
+  errorCode?: string;
+  message?: string;
+}
+
 export interface RuntimeBootstrap {
   csrfToken: string;
   health: RuntimeHealth;
@@ -219,6 +231,7 @@ export interface RuntimeBootstrap {
   workspace: WorkspaceSummary | null;
   sessions: LocalSessionSummary[];
   tools: ToolCapabilitySummary[];
+  mcpServers: McpServerSummary[];
 }
 
 export interface SessionEventsResponse {

@@ -40,7 +40,7 @@ describe("runtime startup", () => {
   it("starts on one of the documented default loopback ports", async () => {
     const dataDir = await temporaryDirectory();
     const running = await startHarness(
-      { openBrowser: false, dataDir, workspaceRoot: dataDir, sandboxMode: "auto", logLevel: "silent", help: false, version: false },
+      { openBrowser: false, dataDir, workspaceRoot: dataDir, sandboxMode: "auto", mcpServers: [], logLevel: "silent", help: false, version: false },
       "0.1.0-test",
       join(dataDir, "missing-public"),
     );
@@ -65,7 +65,7 @@ describe("runtime startup", () => {
 
     await expect(
       startHarness(
-        { port: occupied.port, openBrowser: false, dataDir, workspaceRoot: dataDir, sandboxMode: "auto", logLevel: "silent", help: false, version: false },
+        { port: occupied.port, openBrowser: false, dataDir, workspaceRoot: dataDir, sandboxMode: "auto", mcpServers: [], logLevel: "silent", help: false, version: false },
         "0.1.0-test",
         join(dataDir, "missing-public"),
       ),

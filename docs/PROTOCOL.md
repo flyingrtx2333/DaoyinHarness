@@ -1,6 +1,6 @@
 # DaoyinHarness Local Protocol
 
-> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, Process Permission decisions, WebSocket live delivery/replay, and Linux Bubblewrap Sandbox are implemented. Authentication, richer recovery/fork APIs, Windows/macOS Sandbox providers, MCP/Browser capability management and idempotency remain planned.
+> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, Process Permission decisions, WebSocket live delivery/replay, Linux Bubblewrap Sandbox, controlled Browser, and explicit remote Streamable HTTP MCP tool mounting/status are implemented. Authentication, richer recovery/fork APIs, Windows/macOS Sandbox providers, interactive MCP/Browser management APIs, stdio MCP and idempotency remain planned.
 
 ## 1. Transport and versioning
 
@@ -44,6 +44,17 @@ type WorkspaceSummary = {
   root: string;
   fileCount: number;
 };
+
+type McpServerSummary = {
+  id: string;
+  endpoint: string;
+  status: "connected" | "failed";
+  serverName: string | null;
+  serverVersion: string | null;
+  toolCount: number;
+  errorCode?: string;
+  message?: string;
+};
 ```
 
 Task-specific resources such as build checkpoints, previews, documents, workflows or browser artifacts are capability-owned extensions. They are not mandatory fields on every session.
@@ -55,7 +66,7 @@ Task-specific resources such as build checkpoints, previews, documents, workflow
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v1/health` | Process, catalog and workspace readiness |
-| `GET` | `/api/v1/bootstrap` | Issue the local HttpOnly session cookie and return CSRF token, workspace summary, recent sessions and mounted capability metadata |
+| `GET` | `/api/v1/bootstrap` | Issue the local HttpOnly session cookie and return CSRF token, workspace summary, recent sessions, mounted capability metadata and configured MCP server status |
 | `GET` | `/api/v1/workspace/files` | List files from the selected, policy-checked workspace |
 | `GET` | `/api/v1/process/permissions?sessionId=<id>` | List append-only Process Permission state visible to the current local account/resource/session |
 | `POST` | `/api/v1/process/permissions/:requestId/decision` | Approve once or deny the exact pending Process Permission request; requires cookie + CSRF |
@@ -70,7 +81,7 @@ The bootstrap response sets `daoyin_harness_session` as an HttpOnly `SameSite=St
 
 ### Planned v1 surface
 
-Authentication (`/auth/*`), session fork/resume/search, capability enable/disable, MCP/Browser management, Windows/macOS Sandbox management and idempotency keys are still contract targets rather than implemented endpoints. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
+Authentication (`/auth/*`), session fork/resume/search, runtime capability enable/disable, interactive MCP/Browser management, Windows/macOS Sandbox management and idempotency keys are still contract targets rather than implemented endpoints. Remote Streamable HTTP MCP itself is already mounted from explicit CLI startup configuration; the missing piece here is an authenticated browser/API management surface, not the MCP tool adapter. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
 
 ## 4. Event envelope
 
@@ -130,8 +141,8 @@ type ToolEvidence = {
   schemaVersion: 1;
   toolName: string;
   result: unknown;
-  artifacts: ArtifactReference[];
-  diagnostics: DiagnosticReference[];
+  artifacts: string[];
+  diagnostics: string[];
 };
 
 type ToolDisplay = {
@@ -163,7 +174,17 @@ A package-script attempt without an approved fingerprint returns a normal `tool.
 
 Permission history is append-only in the local process state store. Model-facing arguments never contain `accountId`, `resourceScopeId`, `sessionId` or permission status. On Linux, process success evidence reports `osIsolation: "bubblewrap"` only when the Bubblewrap startup probe passed and that operation actually requested sandboxing; unavailable/non-Linux providers report `osIsolation: "none"`. Permission-only execution must never be presented as sandboxed.
 
-## 9. Errors
+## 9. MCP extension state
+
+Remote MCP servers are process-startup configuration rather than session-owned resources in the current slice. The CLI accepts repeated `--mcp <id>=<url>` entries plus optional `--mcp-bearer-env <id>=<environment-variable-name>`. The actual Bearer Token is resolved from process memory at startup; it is not part of the CLI value, bootstrap response, tool schema or transcript.
+
+The runtime supports Streamable HTTP transport. Remote endpoints require HTTPS; explicitly configured loopback endpoints may use HTTP for local development. Endpoint URLs reject embedded credentials and query parameters, and the transport does not follow HTTP redirects automatically. Each successfully connected server is listed in `RuntimeBootstrap.mcpServers` with its public endpoint, server metadata and tool count. A failed server is also listed with a bounded public error, but contributes no tools. `health.capabilities.mcp` is `ready` when the MCP subsystem initialized with no configured servers or at least one configured server connected; it is `unavailable` when servers were configured and none connected.
+
+MCP `tools/list` entries are normalized into ordinary `extension` ToolRegistry definitions. Harness tool names include the configured server ID, a sanitized external tool name and a stable short hash to avoid collisions. Only an explicit MCP `readOnlyHint=true` is treated as read-only; other tools are conservatively marked mutating. Persisted `tool.started` input for MCP records only argument key names/count, not argument values. MCP text/structured results are bounded before entering evidence; image/audio binary payloads are represented only by metadata and encoded length. External tool metadata and results are untrusted data and cannot grant permission or override runtime policy.
+
+stdio MCP remains planned because it starts local processes. Its transport must delegate process creation to the existing Process Permission/Sandbox boundary rather than introducing a parallel executable path.
+
+## 10. Errors
 
 REST errors use a stable envelope:
 
@@ -179,9 +200,9 @@ REST errors use a stable envelope:
 }
 ```
 
-Known error families include `AUTH_*`, `WORKSPACE_*`, `WEB_*`, `SKILL_*`, `MEMORY_*`, `COMPACTION_*`, `PROCESS_*`, `TURN_*`, `TOOL_*`, `MODEL_*`, `EXTENSION_*`, and `POLICY_*`. Task-specific capability packs may define their own stable families. Unknown exceptions map to `INTERNAL_ERROR` in the client response and retain the original stack only in redacted local diagnostics.
+Known error families include `AUTH_*`, `WORKSPACE_*`, `WEB_*`, `BROWSER_*`, `SKILL_*`, `MEMORY_*`, `COMPACTION_*`, `PROCESS_*`, `MCP_*`, `TURN_*`, `TOOL_*`, `MODEL_*`, `EXTENSION_*`, and `POLICY_*`. Task-specific capability packs may define their own stable families. Unknown exceptions map to `INTERNAL_ERROR` in the client response and retain the original stack only in redacted local diagnostics.
 
-## 10. Idempotency and concurrency
+## 11. Idempotency and concurrency
 
 - Turn submission and future state-creating operations should accept `Idempotency-Key`; this is not yet implemented in the current local slice.
 - Reusing a key with the same canonical request body returns the prior resource; the same key with a different body is a conflict.

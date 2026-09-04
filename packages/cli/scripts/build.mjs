@@ -11,7 +11,7 @@ await build({
   platform: "node",
   format: "esm",
   target: "node22",
-  external: ["@fastify/static", "@fastify/websocket", "fastify", "open", "playwright-core"],
+  external: ["@fastify/static", "@fastify/websocket", "@modelcontextprotocol/client", "fastify", "open", "playwright-core"],
   legalComments: "none",
   logLevel: "info",
 });

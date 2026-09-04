@@ -89,7 +89,7 @@ Deliverables:
 - capability metadata exposed to the UI/runtime bootstrap;
 - tool packs mountable without adding Agent-loop branches.
 
-Current state: the capability registry plus Workspace, public Web, local Skills and scoped Memory packs are implemented. Tool execution now receives trusted account/session/resource/turn provenance context, and bootstrap exposes the mounted capability snapshot.
+Current state: the capability registry plus Workspace, public Web, local Skills, scoped Memory, controlled Browser and explicit remote Streamable HTTP MCP packs are implemented. Tool execution now receives trusted account/session/resource/turn provenance context, and bootstrap exposes the mounted capability snapshot plus configured MCP server status.
 
 Exit criteria:
 
@@ -113,11 +113,11 @@ Deliverables:
 - **Workflow execution**: reusable multi-step routines with child execution records;
 - capability/settings UI for inspecting what is installed and enabled.
 
-Current state: Process Service, named read-only process inspection, exact one-shot package-script permission grants, permission UI/API, local Skills, the first scoped Memory/Compaction layers, and a first controlled Browser capability are implemented. Browser auto-discovers system Chrome/Edge/Chromium, mounts only when available, isolates state per Harness session, returns bounded DOM snapshots with element refs, and separates raw Web fetch from navigation/click/type/back operations behind a public-network filtering proxy. `browser_type` uses persisted-audit redaction and rejects password fields. Process execution has explicit cwd/argv/minimal-env/time/output/cancellation policy. Linux now has a Bubblewrap provider with startup probing, namespace isolation and network blocked by default for sandboxed operations; Windows/macOS still report `osIsolation: none`. MCP, Goals/Workflow, a richer high-impact Browser confirmation policy and capability settings remain.
+Current state: Process Service, named read-only process inspection, exact one-shot package-script permission grants, permission UI/API, local Skills, the first scoped Memory/Compaction layers, controlled Browser, and a remote Streamable HTTP MCP adapter are implemented. Browser auto-discovers system Chrome/Edge/Chromium, mounts only when available, isolates state per Harness session, returns bounded DOM snapshots with element refs, and separates raw Web fetch from navigation/click/type/back operations behind a public-network filtering proxy. `browser_type` uses persisted-audit redaction and rejects password fields. MCP servers are explicitly configured at CLI startup, isolate individual connection failures, normalize `tools/list` into namespaced `extension` tools, conservatively classify mutation unless `readOnlyHint=true`, redact argument values from persisted audit input, and bound/strip binary results. Process execution has explicit cwd/argv/minimal-env/time/output/cancellation policy. Linux now has a Bubblewrap provider with startup probing, namespace isolation and network blocked by default for sandboxed operations; Windows/macOS still report `osIsolation: none`. Goals/Workflow, stdio MCP through the Process boundary, a richer high-impact Browser confirmation policy and capability settings remain.
 
 Exit criteria:
 
-- one session can naturally move through plain chat → Web research → controlled Browser inspection/interaction → local file work → controlled process execution;
+- one session can naturally move through plain chat → Web research → controlled Browser inspection/interaction → explicit MCP capability use → local file work → controlled process execution;
 - high-risk process actions cannot bypass the permission/sandbox policy;
 - disabling a Skill/tool pack removes it cleanly without breaking transcript replay;
 - browser evidence is distinguishable from model claims;
