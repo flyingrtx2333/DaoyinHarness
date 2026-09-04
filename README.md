@@ -1,6 +1,6 @@
 # DaoyinHarness
 
-> **项目状态：通用本地 Agent 纵向闭环已打通，模型网关客户端、受控 Browser、远程 Streamable HTTP MCP，以及第一版 Goals / Workflow / Child Agent orchestration 已落地，主平台 OAuth / Gateway 服务端仍待联调。** CLI、本地 API、React Web UI、安全工作区、append-only trajectory、每步 Prompt/Context 装配、Capability Registry、Skills、公共 Web、Browser、MCP、provenance-bound Memory、Context Compaction、持久 Goal/Workflow/Child Run、受控 Process Service + 一次性 Permission Gate，以及标准化 Daoyin AI Gateway `ModelClient` 已经串联。Linux Bubblewrap OS Sandbox 已实现并带启动探测；Windows/macOS Sandbox、session fork/resume/search、插件/能力管理与正式 npm 发布仍待完成。
+> **项目状态：通用本地 Agent 纵向闭环已打通，模型网关客户端、受控 Browser、远程 Streamable HTTP MCP、Goals / Workflow / Child Agent orchestration，以及 session fork/resume/search + crash interruption recovery 已落地，主平台 OAuth / Gateway 服务端仍待联调。** CLI、本地 API、React Web UI、安全工作区、append-only trajectory、每步 Prompt/Context 装配、Capability Registry、Skills、公共 Web、Browser、MCP、provenance-bound Memory、Context Compaction、持久 Goal/Workflow/Child Run、受控 Process Service + 一次性 Permission Gate，以及标准化 Daoyin AI Gateway `ModelClient` 已经串联。Linux Bubblewrap OS Sandbox 已实现并带启动探测；Windows/macOS Sandbox、插件/能力管理、SQLite materialization/语义检索与正式 npm 发布仍待完成。
 
 DaoyinHarness 是道引的本地通用 Agent Harness，不是网页生成器，也不把“软件项目”当成所有任务的默认形态。用户启动一个本地运行时并使用道引账号登录后，同一个 Agent 可以在持续会话中聊天、检索公开网页、操作受控本地浏览器、调用显式配置的 MCP 扩展、处理本地文件与资料、维护可见任务目标、运行可复用 Workflow、委派有独立 trajectory 的 Child Agent、执行受控工具并完成软件工程任务；Skills、Sandbox、后续插件与更多运行时能力继续通过同一 capability seam 扩展。
 
@@ -161,7 +161,7 @@ npm run package:verify
 npm start -- --no-open --workspace D:\path\to\project
 ```
 
-当前 Web UI 已能创建/切换本地会话、展示持久化对话与工具状态、浏览真实工作区文件、显示运行时实际挂载的 capability，并停止正在运行的 turn。运行中的事件已由每 800ms 轮询升级为 session-scoped WebSocket 实时推送；断线后客户端携带最近 `eventSeq` 重连，服务端先补 persisted gap 再进入 live mode，REST replay 仍保留为事实恢复后备。Agent Engine 会从 append-only transcript 恢复最近多轮对话，而不是依赖浏览器把聊天历史重新上传。
+当前 Web UI 已能创建/切换本地会话、全文搜索会话与持久工具证据、从最近安全终止边界创建不可变 session fork、显式恢复进程重启后遗留的 active turn、展示 `interrupted` 状态、展示持久化对话与工具状态、浏览真实工作区文件、显示运行时实际挂载的 capability，并停止正在运行的 turn。运行中的事件已由每 800ms 轮询升级为 session-scoped WebSocket 实时推送；断线后客户端携带最近 `eventSeq` 重连，服务端先补 persisted gap 再进入 live mode，REST replay 仍保留为事实恢复后备。Agent Engine 会从 append-only transcript 恢复最近多轮对话；fork 通过祖先引用继承源会话对话与已持久化工具证据，而不会复制或改写源 trajectory。
 
 System Prompt 已改为注册式装配：固定 Identity / Scope / Tool Behavior / Safety / Orchestration Behavior / Completion 作为 Stable Sections 缓存；Runtime、Workspace、能力快照、Skill Catalog、最近 Tool Evidence、Turn Instruction、可见 Goal/Workflow/Child Run 状态与可选 Memory 作为 Dynamic Sections，在**每一个 Agent Step**调用模型前重新组装。`tool.started` 同时持久化受限 JSON 输入，使后续回合可以基于真实工具证据继续，而不是只依赖助手总结。
 
@@ -173,7 +173,7 @@ Orchestration 现在提供 `goal_create / goal_list / goal_update / workflow_cre
 
 长会话现在有独立 Context Compaction：达到阈值后生成带 `sourceStartSeq..sourceEndSeq` 的派生摘要，只从模型的原始多轮输入中移走已覆盖旧 turn；原 JSONL trajectory 不删除、不改写。Compaction 摘要和最近未覆盖 Tool Evidence 分开进入 Dynamic Prompt，避免重复。
 
-标准化 Daoyin AI Gateway 客户端已接入 `ModelClient` 边界：它只接受 HTTPS（回环开发地址例外）、将凭据限制在请求头、限制响应大小/超时、验证 assistant/tool-call 响应结构，并把 401/配额/限流/5xx 等错误映射成稳定的 `MODEL_*` 失败码。主平台 OAuth 尚未提供时，可仅在开发环境通过 `DAOYIN_HARNESS_GATEWAY_URL` + `DAOYIN_HARNESS_GATEWAY_CREDENTIAL`（可选 `DAOYIN_HARNESS_MODEL`）注入一次进程内凭据；该桥接不会写入本地状态，正式 v1 仍必须换成 OAuth + OS Credential Store。未配置模型时任务会明确失败而不伪造执行。开发期使用 `npm run smoke:runtime` 验证通用 Agent 纵向闭环。主平台 OAuth/Gateway 服务端、Windows/macOS Sandbox、session fork/resume/search、stdio MCP 安全接入、插件/能力设置、SQLite materialization 与语义/向量级长期记忆增强仍在后续阶段。
+标准化 Daoyin AI Gateway 客户端已接入 `ModelClient` 边界：它只接受 HTTPS（回环开发地址例外）、将凭据限制在请求头、限制响应大小/超时、验证 assistant/tool-call 响应结构，并把 401/配额/限流/5xx 等错误映射成稳定的 `MODEL_*` 失败码。主平台 OAuth 尚未提供时，可仅在开发环境通过 `DAOYIN_HARNESS_GATEWAY_URL` + `DAOYIN_HARNESS_GATEWAY_CREDENTIAL`（可选 `DAOYIN_HARNESS_MODEL`）注入一次进程内凭据；该桥接不会写入本地状态，正式 v1 仍必须换成 OAuth + OS Credential Store。未配置模型时任务会明确失败而不伪造执行。开发期使用 `npm run smoke:runtime` 验证通用 Agent 纵向闭环。主平台 OAuth/Gateway 服务端、Windows/macOS Sandbox、stdio MCP 安全接入、插件/能力设置、SQLite materialization 与语义/向量级长期记忆增强仍在后续阶段。
 
 ## 路线图
 

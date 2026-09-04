@@ -66,7 +66,7 @@ function projectTurns(events: readonly AgentEvent[]): TurnProjection[] {
         message: clip(event.payload.message, 420),
         details: event.payload.details ?? null,
       });
-    } else if (event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled") {
+    } else if (event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled" || event.type === "turn.interrupted") {
       turn.status = event.type.slice("turn.".length);
     }
   }

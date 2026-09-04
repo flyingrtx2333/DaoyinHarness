@@ -1,6 +1,6 @@
 # DaoyinHarness Local Protocol
 
-> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, Process Permission decisions, WebSocket live delivery/replay, Linux Bubblewrap Sandbox, controlled Browser, explicit remote Streamable HTTP MCP tool mounting/status, and append-only Goal/Workflow/Child Agent orchestration are implemented. Authentication, session fork/resume/search, richer crash recovery, Windows/macOS Sandbox providers, interactive capability management APIs, stdio MCP and idempotency remain planned.
+> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, Process Permission decisions, WebSocket live delivery/replay, Linux Bubblewrap Sandbox, controlled Browser, explicit remote Streamable HTTP MCP tool mounting/status, append-only Goal/Workflow/Child Agent orchestration, session fork/resume/search, and crash interruption recovery are implemented. Authentication, Windows/macOS Sandbox providers, interactive capability management APIs, stdio MCP and idempotency remain planned.
 
 ## 1. Transport and versioning
 
@@ -19,6 +19,7 @@ type Session = {
   status: "idle" | "running" | "recovering" | "needs_attention";
   lastEventSeq: number;
   activeTurnId: string | null;
+  forkedFrom?: { sourceSessionId: string; sourceEventSeq: number };
   createdAt: string;
   updatedAt: string;
 };
@@ -26,7 +27,7 @@ type Session = {
 type Turn = {
   id: string;
   sessionId: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
   userMessage: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -73,6 +74,9 @@ Task-specific resources such as build checkpoints, previews, documents, workflow
 | `POST` | `/api/v1/process/permissions/:requestId/decision` | Approve once or deny the exact pending Process Permission request; requires cookie + CSRF |
 | `GET` | `/api/v1/sessions` | List local sessions |
 | `POST` | `/api/v1/sessions` | Create a local session |
+| `GET` | `/api/v1/sessions/search?q=<query>&limit=<n>` | Search persisted session titles, dialogue and tool evidence |
+| `POST` | `/api/v1/sessions/:sessionId/forks` | Create an empty branch referencing a safe immutable terminal event boundary |
+| `POST` | `/api/v1/sessions/:sessionId/resume` | Reconcile a crash-stale `activeTurnId` by appending `turn.interrupted`; rejects a turn still running in this process |
 | `GET` | `/api/v1/sessions/:sessionId/events?after=<seq>` | Replay persisted events after a sequence number |
 | `WS` | `/api/v1/sessions/:sessionId/events/ws?after=<seq>` | Replay the persisted gap and then push live session events |
 | `POST` | `/api/v1/sessions/:sessionId/turns` | Start one Agent turn for the session |
@@ -82,7 +86,7 @@ The bootstrap response sets `daoyin_harness_session` as an HttpOnly `SameSite=St
 
 ### Planned v1 surface
 
-Authentication (`/auth/*`), session fork/resume/search, runtime capability enable/disable, interactive MCP/Browser management, Windows/macOS Sandbox management and idempotency keys are still contract targets rather than implemented endpoints. Remote Streamable HTTP MCP itself is already mounted from explicit CLI startup configuration, and Goal/Workflow/Child Agent orchestration is already model-facing plus read-visible through `/api/v1/orchestration`; the missing pieces here are management/configuration surfaces and richer session recovery. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
+Authentication (`/auth/*`), runtime capability enable/disable, interactive MCP/Browser management, Windows/macOS Sandbox management and idempotency keys are still contract targets rather than implemented endpoints. Remote Streamable HTTP MCP itself is already mounted from explicit CLI startup configuration, Goal/Workflow/Child Agent orchestration is already model-facing plus read-visible through `/api/v1/orchestration`, and the first session fork/resume/search recovery surface is implemented. Remaining recovery work is richer derived indexing/inspection rather than a second trajectory authority. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
 
 ## 4. Event envelope
 
@@ -116,8 +120,9 @@ Implemented core event types:
 | `turn.completed` | final assistant-message ID and outcome summary |
 | `turn.failed` | stable failure code and terminal outcome summary |
 | `turn.cancelled` | cancellation source and last completed event sequence |
+| `turn.interrupted` | `runtime_restart` / `runtime_recovery` reason and the last persisted event sequence before interruption |
 
-Planned additive events include tool progress, recovery/interruption, session forks and parent/child Agent execution. Context compaction is currently a separate derived store keyed to event ranges rather than a canonical Agent event. Task-specific capability packs may define namespaced artifact/checkpoint events without making them core Agent events.
+Planned additive events include richer tool progress and any future capability-owned recovery signals. Session forks are represented as immutable catalog ancestry metadata rather than copied transcript events, while parent/child Agent execution remains represented by explicit orchestration records. Context compaction is a separate derived store keyed to event ranges rather than a canonical Agent event. Task-specific capability packs may define namespaced artifact/checkpoint events without making them core Agent events.
 
 ## 5. WebSocket replay
 

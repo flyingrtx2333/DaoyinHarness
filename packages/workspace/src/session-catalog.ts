@@ -65,6 +65,31 @@ export class JsonSessionCatalog {
     return result;
   }
 
+  public async createFork(sourceSessionId: string, sourceEventSeq: number, title?: string): Promise<LocalSessionSummary> {
+    assertSafeId(sourceSessionId);
+    if (!Number.isInteger(sourceEventSeq) || sourceEventSeq < 0) {
+      throw Object.assign(new Error("sourceEventSeq must be a non-negative integer."), { code: "SESSION_FORK_BOUNDARY_INVALID" });
+    }
+    let result: LocalSessionSummary | undefined;
+    await this.#mutate((document) => {
+      const source = document.sessions.find((session) => session.id === sourceSessionId);
+      if (source === undefined) throw Object.assign(new Error("Source session not found."), { code: "SESSION_NOT_FOUND" });
+      const now = new Date().toISOString();
+      result = {
+        id: `ses_${crypto.randomUUID().replaceAll("-", "")}`,
+        title: normalizeTitle(title ?? `${source.title} · 分支`),
+        createdAt: now,
+        updatedAt: now,
+        lastEventSeq: 0,
+        activeTurnId: null,
+        forkedFrom: { sourceSessionId, sourceEventSeq },
+      };
+      document.sessions.push(result);
+    });
+    if (result === undefined) throw new Error("Session fork creation completed without a result.");
+    return result;
+  }
+
   public async update(
     sessionId: string,
     patch: Partial<Pick<LocalSessionSummary, "title" | "updatedAt" | "lastEventSeq" | "activeTurnId">>,

@@ -67,7 +67,7 @@ Deliverables:
 - crash/interruption semantics and future fork/resume metadata;
 - derived SQLite/search indexes that can be rebuilt from facts.
 
-Current state: session catalog, append-only events, incremental REST replay, session-scoped WebSocket live delivery with `eventSeq` reconnect recovery, cancellation, bounded multi-turn dialogue reconstruction, deterministic context compaction and the first scoped JSONL memory store/retriever are implemented. Crash takeover, fork/resume, SQLite materialization and semantic/vector retrieval remain.
+Current state: session catalog, append-only events, incremental REST replay, session-scoped WebSocket live delivery with `eventSeq` reconnect recovery, cancellation, bounded multi-turn dialogue reconstruction, deterministic context compaction, the first scoped JSONL memory store/retriever, crash-stale turn reconciliation, immutable session fork ancestry, explicit resume and persisted session search are implemented. SQLite materialization and semantic/vector retrieval remain.
 
 Exit criteria:
 
@@ -135,7 +135,7 @@ Deliverables:
 - scheduling/background task interfaces where product authorization allows them;
 - richer trajectory inspector for context injections, tools and child runs.
 
-Current state: bounded Child Agents with explicit parent session/turn links, separate canonical child trajectories, parent cancellation propagation and non-recursive capability snapshots are implemented. The next advanced-runtime priority is session fork/resume/search; plugin lifecycle, scheduling and richer trajectory inspection remain after that.
+Current state: bounded Child Agents with explicit parent session/turn links, separate canonical child trajectories, parent cancellation propagation and non-recursive capability snapshots are implemented. Session fork/resume/search and crash interruption recovery are also implemented with immutable ancestry references, safe terminal fork boundaries, inherited dialogue/tool evidence, explicit `turn.interrupted` facts and Web UI controls. The next advanced-runtime priorities are plugin lifecycle, scheduling/background-task ownership, richer trajectory inspection, and derived semantic search indexes.
 
 Exit criteria:
 

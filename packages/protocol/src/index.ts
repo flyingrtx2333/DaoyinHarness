@@ -40,7 +40,7 @@ export interface ApiError {
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-export type TurnStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type TurnStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
 export type ToolCallStatus = "requested" | "running" | "completed" | "failed" | "cancelled";
 export type MemoryScope = "session" | "resource" | "account";
 export type MemoryKind = "preference" | "fact" | "goal" | "decision" | "note";
@@ -161,6 +161,11 @@ export interface AgentEventPayloads {
     source: "user" | "runtime";
     lastCompletedEventSeq: number;
   };
+  "turn.interrupted": {
+    status: "interrupted";
+    reason: "runtime_restart" | "runtime_recovery";
+    lastCompletedEventSeq: number;
+  };
 }
 
 export type AgentEventType = keyof AgentEventPayloads;
@@ -190,6 +195,11 @@ export type PendingAgentEvent<TType extends AgentEventType = AgentEventType> = {
   payload: AgentEventPayloads[TType];
 };
 
+export interface SessionForkReference {
+  sourceSessionId: string;
+  sourceEventSeq: number;
+}
+
 export interface LocalSessionSummary {
   id: string;
   title: string;
@@ -197,6 +207,7 @@ export interface LocalSessionSummary {
   updatedAt: string;
   lastEventSeq: number;
   activeTurnId: string | null;
+  forkedFrom?: SessionForkReference;
 }
 
 export interface WorkspaceSummary {
@@ -317,6 +328,36 @@ export interface CreateSessionRequest {
 
 export interface CreateSessionResponse {
   session: LocalSessionSummary;
+}
+
+export interface ForkSessionRequest {
+  eventSeq?: number;
+  title?: string;
+}
+
+export interface ForkSessionResponse {
+  session: LocalSessionSummary;
+  sourceSession: LocalSessionSummary;
+  sourceEventSeq: number;
+}
+
+export interface ResumeSessionResponse {
+  session: LocalSessionSummary;
+  interruptedTurnId: string | null;
+  interruptionEventSeq: number | null;
+}
+
+export interface SessionSearchHit {
+  session: LocalSessionSummary;
+  score: number;
+  matchedText: string;
+  eventSeq: number | null;
+  turnId: string | null;
+}
+
+export interface SessionSearchResponse {
+  query: string;
+  hits: SessionSearchHit[];
 }
 
 export interface StartTurnRequest {

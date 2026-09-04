@@ -13,6 +13,7 @@ export interface ContextAssemblerOptions {
 export interface StepContextInput {
   turn: AgentTurnInput;
   priorEvents: readonly AgentEvent[];
+  inheritedEvents?: readonly AgentEvent[];
   compaction?: SessionCompaction;
   step: number;
   tools: readonly ToolDescriptor[];
@@ -39,7 +40,7 @@ export class ContextAssembler {
     this.#historyMaxCharacters = options.historyMaxCharacters ?? 48_000;
   }
 
-  public historicalDialogue(events: readonly AgentEvent[], compaction?: SessionCompaction): ModelConversationItem[] {
+  #historicalTurns(events: readonly AgentEvent[], compaction?: SessionCompaction): HistoricalTurn[] {
     const turns: HistoricalTurn[] = [];
     const indexes = new Map<string, number>();
     const minimumSeq = compaction?.sourceEndSeq ?? 0;
@@ -56,7 +57,10 @@ export class ContextAssembler {
       const turn = turns[index];
       if (turn !== undefined) turn.assistant += event.payload.delta;
     }
+    return turns;
+  }
 
+  #boundedDialogue(turns: readonly HistoricalTurn[]): ModelConversationItem[] {
     const selected: HistoricalTurn[] = [];
     let characters = 0;
     for (let index = turns.length - 1; index >= 0 && selected.length < this.#historyMaxTurns; index -= 1) {
@@ -77,6 +81,17 @@ export class ContextAssembler {
     return messages;
   }
 
+  public historicalDialogue(events: readonly AgentEvent[], compaction?: SessionCompaction): ModelConversationItem[] {
+    return this.#boundedDialogue(this.#historicalTurns(events, compaction));
+  }
+
+  public historicalDialogueSources(
+    sources: readonly { events: readonly AgentEvent[]; compaction?: SessionCompaction }[],
+  ): ModelConversationItem[] {
+    const turns = sources.flatMap((source) => this.#historicalTurns(source.events, source.compaction));
+    return this.#boundedDialogue(turns);
+  }
+
   public async assembleStep(input: StepContextInput): Promise<StepContextAssembly> {
     const prompt = await this.#promptRegistry.assemble({
       accountId: input.turn.accountId,
@@ -87,6 +102,7 @@ export class ContextAssembler {
       ...(input.turn.systemInstruction === undefined ? {} : { systemInstruction: input.turn.systemInstruction }),
       step: input.step,
       priorEvents: input.priorEvents,
+      ...(input.inheritedEvents === undefined ? {} : { inheritedEvents: input.inheritedEvents }),
       ...(input.compaction === undefined ? {} : { compaction: input.compaction }),
       tools: input.tools,
     });

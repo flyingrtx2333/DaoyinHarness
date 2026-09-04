@@ -1,9 +1,12 @@
 import type {
   CreateSessionResponse,
+  ForkSessionResponse,
   OrchestrationSnapshot,
   ProcessPermissionRequest,
+  ResumeSessionResponse,
   RuntimeBootstrap,
   SessionEventsResponse,
+  SessionSearchResponse,
   StartTurnResponse,
   WorkspaceFilesResponse,
 } from "@daoyin/harness-protocol";
@@ -49,6 +52,31 @@ export function createSession(title?: string): Promise<CreateSessionResponse> {
   return request<CreateSessionResponse>("/api/v1/sessions", {
     method: "POST",
     body: JSON.stringify(title === undefined ? {} : { title }),
+  });
+}
+
+export function searchSessions(query: string, limit = 20, signal?: AbortSignal): Promise<SessionSearchResponse> {
+  const search = new URLSearchParams({ q: query, limit: String(limit) });
+  return request<SessionSearchResponse>(
+    `/api/v1/sessions/search?${search.toString()}`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function forkSession(sessionId: string, eventSeq?: number, title?: string): Promise<ForkSessionResponse> {
+  return request<ForkSessionResponse>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/forks`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...(eventSeq === undefined ? {} : { eventSeq }),
+      ...(title === undefined ? {} : { title }),
+    }),
+  });
+}
+
+export function resumeSession(sessionId: string): Promise<ResumeSessionResponse> {
+  return request<ResumeSessionResponse>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/resume`, {
+    method: "POST",
+    body: "{}",
   });
 }
 

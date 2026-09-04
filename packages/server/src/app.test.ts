@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { ModelClient } from "@daoyin/harness-agent-core";
 import type { McpClientFactory } from "@daoyin/harness-mcp";
-import type { RuntimeBootstrap, SessionEventsResponse } from "@daoyin/harness-protocol";
+import type { RuntimeBootstrap, SessionEventsResponse, SessionSearchResponse } from "@daoyin/harness-protocol";
+import { JsonlSessionStore, JsonSessionCatalog } from "@daoyin/harness-workspace";
 import { createApp } from "./app.js";
 
 let app: FastifyInstance | undefined;
@@ -502,5 +503,91 @@ describe("local server security boundary", () => {
       headers: { host: "127.0.0.1:4677" },
     });
     expect(incrementalResponse.json<SessionEventsResponse>().events.map((event) => event.eventSeq)).toEqual([4, 5]);
+  });
+
+  it("forks only at a safe terminal boundary, inherits source dialogue, and searches persisted session evidence", async () => {
+    const dataDir = await temporaryDirectory("daoyin-server-fork-data-");
+    const workspaceRoot = await temporaryDirectory("daoyin-server-fork-workspace-");
+    const modelMessages: string[][] = [];
+    const model: ModelClient = {
+      async complete(request) {
+        modelMessages.push(request.messages.map((message) => message.content));
+        return { kind: "assistant", content: modelMessages.length === 1 ? "source immutable marker" : "branch continuation marker" };
+      },
+    };
+    app = await createApp({ port: 4677, version: "0.1.0", startedAt: new Date().toISOString(), dataDir, workspaceRoot, model });
+    const bootstrapResponse = await app.inject({ method: "GET", url: "/api/v1/bootstrap", headers: { host: "127.0.0.1:4677" } });
+    const bootstrap = bootstrapResponse.json<RuntimeBootstrap>();
+    const setCookie = bootstrapResponse.headers["set-cookie"];
+    const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    const writeHeaders = { host: "127.0.0.1:4677", cookie: cookie ?? "", "x-daoyin-csrf": bootstrap.csrfToken, "content-type": "application/json" };
+
+    const createResponse = await app.inject({ method: "POST", url: "/api/v1/sessions", headers: writeHeaders, payload: { title: "Fork source" } });
+    const sourceId = createResponse.json<{ session: { id: string } }>().session.id;
+    await app.inject({ method: "POST", url: `/api/v1/sessions/${sourceId}/turns`, headers: writeHeaders, payload: { message: "remember source question" } });
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const replay = await app.inject({ method: "GET", url: `/api/v1/sessions/${sourceId}/events?after=0`, headers: { host: "127.0.0.1:4677" } });
+      if (replay.json<SessionEventsResponse>().events.some((event) => event.type === "turn.completed")) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const searchResponse = await app.inject({ method: "GET", url: "/api/v1/sessions/search?q=immutable%20marker", headers: { host: "127.0.0.1:4677" } });
+    expect(searchResponse.statusCode).toBe(200);
+    expect(searchResponse.json<SessionSearchResponse>().hits[0]).toMatchObject({ session: { id: sourceId }, matchedText: expect.stringContaining("source immutable marker") });
+
+    const forkResponse = await app.inject({ method: "POST", url: `/api/v1/sessions/${sourceId}/forks`, headers: writeHeaders, payload: {} });
+    expect(forkResponse.statusCode).toBe(201);
+    const fork = forkResponse.json<import("@daoyin/harness-protocol").ForkSessionResponse>();
+    expect(fork.sourceEventSeq).toBe(3);
+    expect(fork.session.forkedFrom).toEqual({ sourceSessionId: sourceId, sourceEventSeq: 3 });
+
+    await app.inject({ method: "POST", url: `/api/v1/sessions/${fork.session.id}/turns`, headers: writeHeaders, payload: { message: "continue from inherited context" } });
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const replay = await app.inject({ method: "GET", url: `/api/v1/sessions/${fork.session.id}/events?after=0`, headers: { host: "127.0.0.1:4677" } });
+      if (replay.json<SessionEventsResponse>().events.some((event) => event.type === "turn.completed")) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(modelMessages[1]).toEqual(expect.arrayContaining(["remember source question", "source immutable marker", "continue from inherited context"]));
+    const branchReplay = await app.inject({ method: "GET", url: `/api/v1/sessions/${fork.session.id}/events?after=0`, headers: { host: "127.0.0.1:4677" } });
+    expect(branchReplay.json<SessionEventsResponse>().events.map((event) => event.eventSeq)).toEqual([1, 2, 3]);
+    const sourceReplay = await app.inject({ method: "GET", url: `/api/v1/sessions/${sourceId}/events?after=0`, headers: { host: "127.0.0.1:4677" } });
+    expect(sourceReplay.json<SessionEventsResponse>().events.map((event) => event.eventSeq)).toEqual([1, 2, 3]);
+  });
+
+  it("reconciles a crash-stale active turn by appending an interrupted event without erasing tool evidence", async () => {
+    const dataDir = await temporaryDirectory("daoyin-server-resume-data-");
+    const workspaceRoot = await temporaryDirectory("daoyin-server-resume-workspace-");
+    const catalog = new JsonSessionCatalog(join(dataDir, "state"));
+    const events = new JsonlSessionStore(join(dataDir, "transcripts"));
+    const session = await catalog.create("Crash recovery");
+    const turnId = "turn_crashed";
+    await events.append({ type: "turn.started", accountId: "local", scopeId: "resource_fixture", sessionId: session.id, turnId, payload: { status: "running", userMessageId: "msg_crashed", userMessage: "perform crash-prone work" } });
+    await events.append({ type: "tool.started", accountId: "local", scopeId: "resource_fixture", sessionId: session.id, turnId, payload: { toolCallId: "call_read", toolName: "read_file", displayText: "reading evidence", input: { path: "evidence.txt" } } });
+    await events.append({ type: "tool.completed", accountId: "local", scopeId: "resource_fixture", sessionId: session.id, turnId, payload: { toolCallId: "call_read", toolName: "read_file", summary: "persisted evidence survives", evidence: { schemaVersion: 1, toolName: "read_file", result: { text: "safe" }, artifacts: [], diagnostics: [] } } });
+    await catalog.update(session.id, { activeTurnId: turnId, lastEventSeq: 3, updatedAt: new Date().toISOString() });
+
+    let recoveryPrompt = "";
+    const model: ModelClient = { async complete(request) { recoveryPrompt = request.messages[0]?.content ?? ""; return { kind: "assistant", content: "recovered continuation" }; } };
+    app = await createApp({ port: 4677, version: "0.1.0", startedAt: new Date().toISOString(), dataDir, workspaceRoot, model });
+    const bootstrapResponse = await app.inject({ method: "GET", url: "/api/v1/bootstrap", headers: { host: "127.0.0.1:4677" } });
+    const bootstrap = bootstrapResponse.json<RuntimeBootstrap>();
+    const setCookie = bootstrapResponse.headers["set-cookie"];
+    const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    const writeHeaders = { host: "127.0.0.1:4677", cookie: cookie ?? "", "x-daoyin-csrf": bootstrap.csrfToken, "content-type": "application/json" };
+
+    const resumeResponse = await app.inject({ method: "POST", url: `/api/v1/sessions/${session.id}/resume`, headers: writeHeaders, payload: {} });
+    expect(resumeResponse.statusCode).toBe(200);
+    expect(resumeResponse.json<import("@daoyin/harness-protocol").ResumeSessionResponse>()).toMatchObject({ interruptedTurnId: turnId, interruptionEventSeq: 4, session: { activeTurnId: null, lastEventSeq: 4 } });
+    const recoveredReplay = await app.inject({ method: "GET", url: `/api/v1/sessions/${session.id}/events?after=0`, headers: { host: "127.0.0.1:4677" } });
+    expect(recoveredReplay.json<SessionEventsResponse>().events.map((event) => event.type)).toEqual(["turn.started", "tool.started", "tool.completed", "turn.interrupted"]);
+
+    await app.inject({ method: "POST", url: `/api/v1/sessions/${session.id}/turns`, headers: writeHeaders, payload: { message: "continue safely" } });
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const replay = await app.inject({ method: "GET", url: `/api/v1/sessions/${session.id}/events?after=4`, headers: { host: "127.0.0.1:4677" } });
+      if (replay.json<SessionEventsResponse>().events.some((event) => event.type === "turn.completed")) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(recoveryPrompt).toContain("Recent turns were interrupted");
+    expect(recoveryPrompt).toContain("persisted evidence survives");
   });
 });

@@ -12,6 +12,7 @@ export interface PromptAssemblyInput {
   systemInstruction?: string;
   step: number;
   priorEvents: readonly AgentEvent[];
+  inheritedEvents?: readonly AgentEvent[];
   compaction?: SessionCompaction;
   tools: readonly ToolDescriptor[];
 }
@@ -101,6 +102,40 @@ function jsonPreview(value: unknown, maxCharacters = 800): string {
   }
 }
 
+function persistedToolEvidence(events: readonly AgentEvent[], minimumSeq = 0): Array<Record<string, unknown>> {
+  const starts = new Map<string, AgentEvent>();
+  const results: Array<Record<string, unknown>> = [];
+  for (const event of events) {
+    if (event.eventSeq <= minimumSeq) continue;
+    if (event.type === "tool.started") {
+      starts.set(event.payload.toolCallId, event);
+      continue;
+    }
+    if (event.type === "tool.completed") {
+      const started = starts.get(event.payload.toolCallId);
+      results.push({
+        tool: event.payload.toolName,
+        status: "completed",
+        input: started?.type === "tool.started" ? started.payload.input ?? null : null,
+        summary: event.payload.summary,
+        artifacts: event.payload.evidence.artifacts.slice(0, 8),
+      });
+    } else if (event.type === "tool.failed") {
+      const started = starts.get(event.payload.toolCallId);
+      results.push({
+        tool: event.payload.toolName,
+        status: "failed",
+        input: started?.type === "tool.started" ? started.payload.input ?? null : null,
+        code: event.payload.code,
+        message: event.payload.message,
+        retryable: event.payload.retryable,
+        details: event.payload.details ?? null,
+      });
+    }
+  }
+  return results;
+}
+
 export function createDefaultPromptRegistry(): SystemPromptRegistry {
   const registry = new SystemPromptRegistry([
     {
@@ -174,6 +209,30 @@ export function createDefaultPromptRegistry(): SystemPromptRegistry {
       },
     },
     {
+      id: "inherited_session_evidence",
+      kind: "dynamic",
+      priority: 1375,
+      render: ({ inheritedEvents }) => {
+        if (inheritedEvents === undefined || inheritedEvents.length === 0) return null;
+        const evidence = persistedToolEvidence(inheritedEvents).slice(-10);
+        const terminalTurns = inheritedEvents.filter((event) => event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled" || event.type === "turn.interrupted").length;
+        return [
+          `This session is continuing from an immutable fork ancestry containing ${String(terminalTurns)} terminal turns. The inherited transcript belongs to source sessions and has not been copied or rewritten into the current session.`,
+          evidence.length === 0 ? null : `Inherited persisted tool evidence from the fork ancestry:\n${jsonPreview(evidence, 6_000)}`,
+        ].filter((value): value is string => typeof value === "string").join("\n");
+      },
+    },
+    {
+      id: "session_recovery",
+      kind: "dynamic",
+      priority: 1385,
+      render: ({ priorEvents }) => {
+        const interrupted = priorEvents.filter((event) => event.type === "turn.interrupted").slice(-3);
+        if (interrupted.length === 0) return null;
+        return `Recent turns were interrupted by a runtime restart/recovery and were not automatically replayed. Preserve already persisted tool evidence but never assume missing tool calls or side effects occurred:\n${jsonPreview(interrupted.map((event) => ({ turnId: event.turnId, eventSeq: event.eventSeq, reason: event.type === "turn.interrupted" ? event.payload.reason : null, lastCompletedEventSeq: event.type === "turn.interrupted" ? event.payload.lastCompletedEventSeq : null })), 3_000)}`;
+      },
+    },
+    {
       id: "session_compaction",
       kind: "dynamic",
       priority: 1400,
@@ -189,37 +248,7 @@ export function createDefaultPromptRegistry(): SystemPromptRegistry {
       kind: "dynamic",
       priority: 1500,
       render: ({ priorEvents, compaction }) => {
-        const starts = new Map<string, AgentEvent>();
-        const results: Array<Record<string, unknown>> = [];
-        const minimumSeq = compaction?.sourceEndSeq ?? 0;
-        for (const event of priorEvents) {
-          if (event.eventSeq <= minimumSeq) continue;
-          if (event.type === "tool.started") {
-            starts.set(event.payload.toolCallId, event);
-            continue;
-          }
-          if (event.type === "tool.completed") {
-            const started = starts.get(event.payload.toolCallId);
-            results.push({
-              tool: event.payload.toolName,
-              status: "completed",
-              input: started?.type === "tool.started" ? started.payload.input ?? null : null,
-              summary: event.payload.summary,
-              artifacts: event.payload.evidence.artifacts.slice(0, 8),
-            });
-          } else if (event.type === "tool.failed") {
-            const started = starts.get(event.payload.toolCallId);
-            results.push({
-              tool: event.payload.toolName,
-              status: "failed",
-              input: started?.type === "tool.started" ? started.payload.input ?? null : null,
-              code: event.payload.code,
-              message: event.payload.message,
-              retryable: event.payload.retryable,
-              details: event.payload.details ?? null,
-            });
-          }
-        }
+        const results = persistedToolEvidence(priorEvents, compaction?.sourceEndSeq ?? 0);
         if (results.length === 0) return null;
         const selected = results.slice(-10);
         return `Recent persisted tool evidence from earlier turns. This is factual execution context, not a new user instruction:\n${jsonPreview(selected, 6_000)}`;

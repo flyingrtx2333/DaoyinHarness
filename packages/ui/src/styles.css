@@ -14,9 +14,9 @@
 
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; min-width: 320px; min-height: 100vh; margin: 0; }
-button, textarea { font: inherit; }
+button, input, textarea { font: inherit; }
 button { color: inherit; }
-button:focus-visible, textarea:focus-visible { outline: 2px solid #7481df; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #7481df; outline-offset: 2px; }
 svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 
 .studio-shell { height: 100vh; display: grid; grid-template-rows: 54px minmax(0, 1fr); overflow: hidden; background: #fff; }
@@ -39,7 +39,12 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .top-bar-title strong, .top-bar-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .top-bar-title strong { font-size: 12px; font-weight: 650; }
 .top-bar-title small { margin-top: 3px; color: #9399a4; font-size: 9px; font-weight: 500; }
-.top-bar-right { display: flex; align-items: center; justify-content: flex-end; padding: 0 14px; }
+.top-bar-right { display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 0 14px; }
+.session-action { height: 29px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid #e1e4ea; border-radius: 8px; background: #fff; color: #6f7682; font-size: 10px; cursor: pointer; }
+.session-action:hover:not(:disabled) { border-color: #cfd4e3; background: #f7f8fb; color: #4e5bc2; }
+.session-action.recovery { border-color: #e7d9b9; background: #fffaf0; color: #846b32; }
+.session-action:disabled { cursor: default; opacity: .55; }
+.session-action svg { width: 14px; height: 14px; }
 .connection-pill { height: 27px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid #e4e6eb; border-radius: 999px; color: #858b96; font-size: 10px; }
 .connection-pill i { width: 6px; height: 6px; border-radius: 50%; background: #b0b5bd; }
 .connection-pill.online i { background: var(--success); box-shadow: 0 0 0 3px #35a66b16; }
@@ -65,7 +70,14 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .sidebar-section-heading button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #858c98; cursor: pointer; }
 .sidebar-section-heading button:hover { background: #eaecf1; }
 .sidebar-section-heading svg { width: 15px; height: 15px; }
+.session-search { min-height: 34px; display: grid; grid-template-columns: 17px minmax(0,1fr) 12px; align-items: center; gap: 5px; margin: 0 3px 8px; padding: 0 8px; border: 1px solid #e1e4e9; border-radius: 8px; background: #fff; color: #9aa0aa; }
+.session-search:focus-within { border-color: #c4caed; box-shadow: 0 0 0 2px #5867d80d; }
+.session-search svg { width: 14px; height: 14px; }
+.session-search input { min-width: 0; border: 0; outline: 0; background: transparent; color: #555c68; font-size: 10px; }
+.session-search input::placeholder { color: #a5aab3; }
+.search-busy { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
 .empty-sessions { min-height: 145px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #969ca6; text-align: center; }
+.empty-sessions.search-empty { min-height: 110px; }
 .empty-sessions svg { width: 23px; height: 23px; margin-bottom: 9px; opacity: .42; }
 .empty-sessions span { font-size: 11px; }
 .session-list { display: grid; gap: 2px; }
@@ -74,7 +86,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .session-row.active { background: #e8eaf0; }
 .session-row > span { min-width: 0; display: grid; }
 .session-row b { overflow: hidden; color: #555c68; font-size: 11px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
-.session-row small { margin-top: 4px; color: #9ca1aa; font-size: 9px; }
+.session-row b .fork-badge { margin-left: 5px; padding: 1px 4px; border-radius: 999px; background: #eef0ff; color: #6672cf; font-size: 7px; font-style: normal; font-weight: 650; vertical-align: 1px; }
+.session-row small { margin-top: 4px; overflow: hidden; color: #9ca1aa; font-size: 9px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .busy-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px #5867d812; animation: pulse 1.4s ease-in-out infinite; }
 .sidebar-footer { padding: 10px 11px; border-top: 1px solid var(--border); }
 .sidebar-status { width: 100%; min-width: 0; display: grid; grid-template-columns: 28px minmax(0,1fr); align-items: center; gap: 8px; padding: 7px; }
@@ -95,6 +108,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .capability-chip { padding: 5px 8px; border: 1px solid #e4e6eb; border-radius: 999px; background: #fafbfc; color: #737a86; font-size: 9px; font-weight: 560; }
 .sandbox-chip.ready { border-color: #cfe5d8; background: #f5fbf7; color: #4f7b5f; }
 .sandbox-chip.fallback { border-color: #e7dcc0; background: #fffaf0; color: #8a7343; }
+.fork-context { width: fit-content; max-width: min(620px, 100%); display: flex; align-items: center; gap: 7px; margin: 13px auto 0; padding: 7px 10px; border: 1px solid #dfe2f4; border-radius: 9px; background: #f8f8ff; color: #6972a8; font-size: 9px; line-height: 1.45; text-align: left; }
+.fork-context svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .workspace-chip { width: fit-content; max-width: 100%; display: flex; align-items: center; gap: 7px; margin: 12px auto 0; padding: 7px 10px; border: 1px solid #e5e7eb; border-radius: 9px; background: #fafafa; color: #787f8b; font-size: 10px; }
 .workspace-chip svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .workspace-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -132,6 +147,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .thinking-line span:nth-child(2) { animation-delay: .12s; }
 .thinking-line span:nth-child(3) { animation-delay: .24s; }
 .turn-state { color: #999fa9; font-size: 10px; }
+.turn-state.interrupted { color: #8a6c2b; }
 
 .composer-region { width: min(840px, calc(100% - 48px)); justify-self: center; padding: 4px 0 20px; background: linear-gradient(to top, #fff 75%, rgba(255,255,255,0)); }
 .scope-notice { margin: 0 3px 8px; color: #8a6c2b; font-size: 10px; line-height: 1.5; }

@@ -16,15 +16,20 @@ import {
   type ApiError,
   type CreateSessionRequest,
   type CreateSessionResponse,
+  type ForkSessionRequest,
+  type ForkSessionResponse,
   type LocalSessionSummary,
   type OrchestrationSnapshot,
   type ProcessPermissionRequest,
   type RuntimeBootstrap,
   type RuntimeHealth,
+  type ResumeSessionResponse,
   type SandboxMode,
   type SandboxRuntimeStatus,
   type SessionEventStreamMessage,
   type SessionEventsResponse,
+  type SessionSearchHit,
+  type SessionSearchResponse,
   type StartTurnRequest,
   type StartTurnResponse,
   type WorkspaceFilesResponse,
@@ -155,6 +160,50 @@ function parseSessionBody(body: unknown): CreateSessionRequest {
     throw Object.assign(new Error("title 必须是字符串。"), { code: "INVALID_BODY" });
   }
   return title === undefined ? {} : { title };
+}
+
+function parseForkBody(body: unknown): ForkSessionRequest {
+  if (body === undefined || body === null) return {};
+  if (typeof body !== "object" || Array.isArray(body)) {
+    throw Object.assign(new Error("分叉请求格式无效。"), { code: "INVALID_BODY" });
+  }
+  const candidate = body as { eventSeq?: unknown; title?: unknown };
+  if (candidate.eventSeq !== undefined && (!Number.isSafeInteger(candidate.eventSeq) || Number(candidate.eventSeq) < 0)) {
+    throw Object.assign(new Error("eventSeq 必须是非负整数。"), { code: "INVALID_BODY" });
+  }
+  if (candidate.title !== undefined && typeof candidate.title !== "string") {
+    throw Object.assign(new Error("title 必须是字符串。"), { code: "INVALID_BODY" });
+  }
+  return {
+    ...(candidate.eventSeq === undefined ? {} : { eventSeq: Number(candidate.eventSeq) }),
+    ...(candidate.title === undefined ? {} : { title: candidate.title }),
+  };
+}
+
+function normalizedSearchQuery(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase().slice(0, 500);
+}
+
+function searchScore(text: string, query: string): number {
+  const normalized = text.normalize("NFKC").toLowerCase();
+  if (query.length === 0 || normalized.length === 0) return 0;
+  let score = normalized.includes(query) ? 100 : 0;
+  const tokens = [...new Set(query.split(/\s+/gu).filter((token) => token.length > 0))];
+  for (const token of tokens) {
+    if (normalized.includes(token)) score += Math.min(30, 8 + token.length * 2);
+  }
+  return score;
+}
+
+function searchSnippet(text: string, query: string): string {
+  const compact = text.replace(/\s+/gu, " ").trim();
+  if (compact.length <= 280) return compact;
+  const normalized = compact.normalize("NFKC").toLowerCase();
+  const index = normalized.indexOf(query);
+  const start = Math.max(0, (index < 0 ? 0 : index) - 100);
+  const end = Math.min(compact.length, start + 280);
+  return `${start > 0 ? "…" : ""}${compact.slice(start, end)}${end < compact.length ? "…" : ""}`;
 }
 
 function parseTurnBody(body: unknown): StartTurnRequest {
@@ -385,27 +434,154 @@ function publishSessionEvent(state: RuntimeState, event: AgentEvent, session: Lo
 }
 
 function isTerminalTurnEvent(event: AgentEvent, turnId: string): boolean {
-  return event.turnId === turnId && (event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled");
+  return event.turnId === turnId && (
+    event.type === "turn.completed" ||
+    event.type === "turn.failed" ||
+    event.type === "turn.cancelled" ||
+    event.type === "turn.interrupted"
+  );
+}
+
+function isSafeForkBoundary(event: AgentEvent): boolean {
+  return event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled" || event.type === "turn.interrupted";
+}
+
+interface SessionReconcileResult {
+  session: LocalSessionSummary;
+  interruptedTurnId: string | null;
+  interruptionEventSeq: number | null;
 }
 
 async function reconcileSessionActivity(
+  state: RuntimeState & { catalog: JsonSessionCatalog; events: JsonlSessionStore; resourceScopeId: string },
+  session: LocalSessionSummary,
+): Promise<SessionReconcileResult> {
+  if (session.activeTurnId === null) return { session, interruptedTurnId: null, interruptionEventSeq: null };
+  const activeTurnId = session.activeTurnId;
+  const events = await state.events.read(session.id);
+  if (events.some((event) => isTerminalTurnEvent(event, activeTurnId))) {
+    const updated = await state.catalog.update(session.id, { activeTurnId: null, updatedAt: new Date().toISOString() });
+    return { session: updated, interruptedTurnId: null, interruptionEventSeq: null };
+  }
+  if (state.activeTurns.has(activeTurnId)) return { session, interruptedTurnId: null, interruptionEventSeq: null };
+
+  const previousEventSeq = events.at(-1)?.eventSeq ?? 0;
+  const interruption = await state.events.append({
+    type: "turn.interrupted",
+    accountId: "local",
+    scopeId: state.resourceScopeId,
+    sessionId: session.id,
+    turnId: activeTurnId,
+    payload: {
+      status: "interrupted",
+      reason: "runtime_restart",
+      lastCompletedEventSeq: previousEventSeq,
+    },
+  });
+  const updated = await state.catalog.update(session.id, {
+    activeTurnId: null,
+    lastEventSeq: interruption.eventSeq,
+    updatedAt: interruption.occurredAt,
+  });
+  publishSessionEvent(state, interruption, updated);
+  return { session: updated, interruptedTurnId: activeTurnId, interruptionEventSeq: interruption.eventSeq };
+}
+
+function forkBoundary(events: readonly AgentEvent[], requested: number | undefined): number {
+  const safe = events.filter(isSafeForkBoundary).map((event) => event.eventSeq);
+  if (requested === undefined) return safe.at(-1) ?? 0;
+  if (!Number.isSafeInteger(requested) || requested < 0) {
+    throw Object.assign(new Error("分叉边界必须是非负整数。"), { code: "SESSION_FORK_BOUNDARY_INVALID" });
+  }
+  if (requested === 0) return 0;
+  if (!safe.includes(requested)) {
+    throw Object.assign(new Error("分叉只能落在已持久化的终止回合边界。"), {
+      code: "SESSION_FORK_BOUNDARY_INVALID",
+      details: { requestedEventSeq: requested, latestSafeEventSeq: safe.at(-1) ?? 0 },
+    });
+  }
+  return requested;
+}
+
+async function inheritedEventsForSession(
   state: RuntimeState & { catalog: JsonSessionCatalog; events: JsonlSessionStore },
   session: LocalSessionSummary,
-): Promise<LocalSessionSummary> {
-  if (session.activeTurnId === null) return session;
-  const events = await state.events.read(session.id);
-  if (!events.some((event) => isTerminalTurnEvent(event, session.activeTurnId ?? ""))) return session;
-  return state.catalog.update(session.id, { activeTurnId: null, updatedAt: new Date().toISOString() });
+): Promise<AgentEvent[]> {
+  const segments: AgentEvent[][] = [];
+  const seen = new Set<string>([session.id]);
+  let cursor = session;
+  for (let depth = 0; depth < 8; depth += 1) {
+    const reference = cursor.forkedFrom;
+    if (reference === undefined) break;
+    if (seen.has(reference.sourceSessionId)) {
+      throw Object.assign(new Error("Session fork ancestry contains a cycle."), { code: "SESSION_FORK_CYCLE" });
+    }
+    seen.add(reference.sourceSessionId);
+    const source = await state.catalog.get(reference.sourceSessionId);
+    if (source === undefined) throw Object.assign(new Error("Fork source session no longer exists."), { code: "SESSION_FORK_SOURCE_MISSING" });
+    const sourceEvents = await state.events.read(source.id);
+    segments.unshift(sourceEvents.filter((event) => event.eventSeq <= reference.sourceEventSeq));
+    cursor = source;
+    if (depth === 7 && cursor.forkedFrom !== undefined) {
+      throw Object.assign(new Error("Session fork ancestry exceeds the supported depth."), { code: "SESSION_FORK_DEPTH_EXCEEDED" });
+    }
+  }
+  return segments.flat();
+}
+
+async function searchSessions(
+  state: RuntimeState & { catalog: JsonSessionCatalog; events: JsonlSessionStore },
+  rawQuery: unknown,
+  rawLimit: unknown,
+): Promise<SessionSearchResponse> {
+  const query = normalizedSearchQuery(rawQuery);
+  if (query.length === 0) return { query: "", hits: [] };
+  const parsedLimit = typeof rawLimit === "string" ? Number(rawLimit) : 20;
+  const limit = Number.isSafeInteger(parsedLimit) ? Math.max(1, Math.min(50, parsedLimit)) : 20;
+  const sessions = await state.catalog.list();
+  const hits: SessionSearchHit[] = [];
+  for (const session of sessions.slice(0, 500)) {
+    let bestScore = searchScore(session.title, query) * 2;
+    let bestText = bestScore > 0 ? session.title : "";
+    let bestEventSeq: number | null = null;
+    let bestTurnId: string | null = null;
+    const events = await state.events.read(session.id);
+    for (const event of events) {
+      let text = "";
+      if (event.type === "turn.started") text = event.payload.userMessage;
+      else if (event.type === "assistant.delta") text = event.payload.delta;
+      else if (event.type === "tool.completed") text = `${event.payload.toolName} ${event.payload.summary}`;
+      else if (event.type === "tool.failed") text = `${event.payload.toolName} ${event.payload.code} ${event.payload.message}`;
+      if (text.length === 0) continue;
+      const score = searchScore(text, query);
+      if (score <= bestScore) continue;
+      bestScore = score;
+      bestText = text;
+      bestEventSeq = event.eventSeq;
+      bestTurnId = event.turnId;
+    }
+    if (bestScore > 0) {
+      hits.push({
+        session,
+        score: bestScore,
+        matchedText: searchSnippet(bestText, query),
+        eventSeq: bestEventSeq,
+        turnId: bestTurnId,
+      });
+    }
+  }
+  hits.sort((left, right) => right.score - left.score || right.session.updatedAt.localeCompare(left.session.updatedAt));
+  return { query, hits: hits.slice(0, limit) };
 }
 
 async function apiFailure(reply: import("fastify").FastifyReply, error: unknown): Promise<void> {
   const candidate = error as { code?: unknown; message?: unknown };
   const code = typeof candidate.code === "string" ? candidate.code : "INTERNAL_ERROR";
   const message = typeof candidate.message === "string" ? candidate.message : "本地运行时发生未知错误。";
-  const status = code === "SESSION_NOT_FOUND" || code === "PROCESS_PERMISSION_NOT_FOUND" ? 404
+  const status = code === "SESSION_NOT_FOUND" || code === "SESSION_FORK_SOURCE_MISSING" || code === "PROCESS_PERMISSION_NOT_FOUND" ? 404
     : code === "PROCESS_PERMISSION_SCOPE_DENIED" ? 403
-      : code === "SESSION_BUSY" || code === "PROCESS_PERMISSION_CONSUMED" ? 409
-        : code === "INVALID_BODY" ? 400
+      : code === "SESSION_BUSY" || code === "SESSION_STILL_RUNNING" || code === "SESSION_FORK_CYCLE" || code === "SESSION_FORK_DEPTH_EXCEEDED" || code === "PROCESS_PERMISSION_CONSUMED" ? 409
+        : code === "INVALID_BODY" || code === "SESSION_FORK_BOUNDARY_INVALID" ? 400
           : 500;
   await reply.code(status).send(invalidRequest(code, message, status >= 500));
 }
@@ -543,6 +719,49 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     }
   });
 
+  app.get("/api/v1/sessions/search", async (request, reply): Promise<SessionSearchResponse | void> => {
+    try {
+      requireRuntime(state);
+      const { q, limit } = request.query as { q?: string; limit?: string };
+      return searchSessions(state, q, limit);
+    } catch (error) {
+      await apiFailure(reply, error);
+    }
+  });
+
+  app.post("/api/v1/sessions/:sessionId/forks", async (request, reply): Promise<ForkSessionResponse | void> => {
+    try {
+      requireRuntime(state);
+      const { sessionId } = request.params as { sessionId: string };
+      const sourceSession = await state.catalog.get(sessionId);
+      if (sourceSession === undefined) throw Object.assign(new Error("会话不存在。"), { code: "SESSION_NOT_FOUND" });
+      const body = parseForkBody(request.body);
+      const sourceEvents = await state.events.read(sessionId);
+      const sourceEventSeq = forkBoundary(sourceEvents, body.eventSeq);
+      const session = await state.catalog.createFork(sessionId, sourceEventSeq, body.title);
+      void reply.code(201);
+      return { session, sourceSession, sourceEventSeq };
+    } catch (error) {
+      await apiFailure(reply, error);
+    }
+  });
+
+  app.post("/api/v1/sessions/:sessionId/resume", async (request, reply): Promise<ResumeSessionResponse | void> => {
+    try {
+      requireRuntime(state);
+      const { sessionId } = request.params as { sessionId: string };
+      const found = await state.catalog.get(sessionId);
+      if (found === undefined) throw Object.assign(new Error("会话不存在。"), { code: "SESSION_NOT_FOUND" });
+      const result = await reconcileSessionActivity(state, found);
+      if (result.session.activeTurnId !== null) {
+        throw Object.assign(new Error("这个会话的任务仍在当前进程中运行，不能执行恢复。"), { code: "SESSION_STILL_RUNNING" });
+      }
+      return result;
+    } catch (error) {
+      await apiFailure(reply, error);
+    }
+  });
+
   app.get("/api/v1/sessions/:sessionId/events", async (request, reply): Promise<SessionEventsResponse | void> => {
     try {
       requireRuntime(state);
@@ -630,10 +849,12 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
       const { sessionId } = request.params as { sessionId: string };
       const found = await state.catalog.get(sessionId);
       if (found === undefined) throw Object.assign(new Error("会话不存在。"), { code: "SESSION_NOT_FOUND" });
-      const current = await reconcileSessionActivity(state, found);
+      const reconciled = await reconcileSessionActivity(state, found);
+      const current = reconciled.session;
       if (current.activeTurnId !== null) throw Object.assign(new Error("这个会话已有任务正在执行。"), { code: "SESSION_BUSY" });
 
       const body = parseTurnBody(request.body);
+      const inheritedEvents = await inheritedEventsForSession(state, current);
       const turnId = `turn_${crypto.randomUUID().replaceAll("-", "")}`;
       const controller = new AbortController();
       state.activeTurns.set(turnId, controller);
@@ -659,7 +880,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         ...(options.compactionTriggerCharacters === undefined ? {} : { compactionTriggerCharacters: options.compactionTriggerCharacters }),
         ...(options.compactionMaxSummaryCharacters === undefined ? {} : { compactionMaxSummaryCharacters: options.compactionMaxSummaryCharacters }),
         onEvent: async (event) => {
-          const terminal = event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled";
+          const terminal = event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled" || event.type === "turn.interrupted";
           const session = await state.catalog.update(sessionId, {
             lastEventSeq: event.eventSeq,
             updatedAt: event.occurredAt,
@@ -675,6 +896,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         sessionId,
         turnId,
         userMessage: body.message,
+        ...(inheritedEvents.length === 0 ? {} : { inheritedEvents }),
         ...(body.planning ? { systemInstruction: "Before acting, reason through the task structure and dependencies carefully. Keep the visible answer concise unless the user asks for detail." } : {}),
         signal: controller.signal,
       }).finally(async () => {

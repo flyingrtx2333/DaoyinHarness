@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { AgentEvent, LocalSessionSummary, OrchestrationSnapshot, RuntimeBootstrap, SessionEventStreamMessage } from "@daoyin/harness-protocol";
+import type { AgentEvent, LocalSessionSummary, OrchestrationSnapshot, RuntimeBootstrap, SessionEventStreamMessage, SessionSearchHit } from "@daoyin/harness-protocol";
 import {
   bootstrapRuntime,
   cancelTurn,
   createSession,
   decideProcessPermission,
+  forkSession,
   getOrchestrationSnapshot,
   getProcessPermissions,
   getSessionEvents,
   getWorkspaceFiles,
   openSessionEventStream,
+  resumeSession,
+  searchSessions,
   startTurn,
 } from "./api.js";
 
-type IconName = "chat" | "close" | "file" | "folder" | "menu" | "plus" | "send" | "spark" | "stop";
+type IconName = "chat" | "close" | "file" | "folder" | "fork" | "menu" | "plus" | "resume" | "search" | "send" | "spark" | "stop";
 
 type LoadState =
   | { kind: "loading" }
@@ -40,7 +43,7 @@ interface TurnView {
   turnId: string;
   userMessage: string;
   assistantText: string;
-  status: "running" | "completed" | "failed" | "cancelled";
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
   tools: ToolView[];
 }
 
@@ -58,8 +61,11 @@ function Icon({ name }: { name: IconName }): React.JSX.Element {
     close: <path d="m7 7 10 10M17 7 7 17" />,
     file: <><path d="M7 3.5h7l4 4v13H7z" /><path d="M14 3.5v4h4" /></>,
     folder: <path d="M3.5 7.5h6l1.8 2H20.5v9.5H3.5z" />,
+    fork: <><path d="M8 5v5a3 3 0 0 0 3 3h5" /><path d="M16 8v10" /><circle cx="8" cy="5" r="2" /><circle cx="16" cy="6" r="2" /><circle cx="16" cy="18" r="2" /></>,
     menu: <path d="M5 7h14M5 12h14M5 17h14" />,
     plus: <path d="M12 5v14M5 12h14" />,
+    resume: <><path d="M5 12a7 7 0 1 0 2-4.9" /><path d="M5 5v5h5" /></>,
+    search: <><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></>,
     send: <path d="M12 19V5m0 0-5 5m5-5 5 5" />,
     spark: <path d="m12 3 1.4 5.6L19 10l-5.6 1.4L12 17l-1.4-5.6L5 10l5.6-1.4L12 3Z" />,
     stop: <rect x="7" y="7" width="10" height="10" rx="2" />,
@@ -207,6 +213,8 @@ function buildTurns(events: AgentEvent[]): TurnView[] {
       turn.status = "failed";
     } else if (event.type === "turn.cancelled") {
       turn.status = "cancelled";
+    } else if (event.type === "turn.interrupted") {
+      turn.status = "interrupted";
     }
   }
   return [...turns.values()];
@@ -216,6 +224,10 @@ export function App(): React.JSX.Element {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [sessions, setSessions] = useState<LocalSessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionQuery, setSessionQuery] = useState("");
+  const [sessionSearchHits, setSessionSearchHits] = useState<SessionSearchHit[]>([]);
+  const [sessionSearching, setSessionSearching] = useState(false);
+  const [sessionActionBusy, setSessionActionBusy] = useState<"fork" | "resume" | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [prompt, setPrompt] = useState("");
   const [notice, setNotice] = useState("");
@@ -234,6 +246,11 @@ export function App(): React.JSX.Element {
   const transcriptEnd = useRef<HTMLDivElement | null>(null);
 
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
+  const forkSource = selectedSession?.forkedFrom === undefined
+    ? null
+    : sessions.find((session) => session.id === selectedSession.forkedFrom?.sourceSessionId) ?? null;
+  const searchHitBySession = useMemo(() => new Map(sessionSearchHits.map((hit) => [hit.session.id, hit])), [sessionSearchHits]);
+  const visibleSessions = sessionQuery.trim().length === 0 ? sessions : sessionSearchHits.map((hit) => hit.session);
   const turns = useMemo(() => buildTurns(events), [events]);
   const connected = state.kind === "ready";
   const workspace = state.kind === "ready" ? state.bootstrap.workspace : null;
@@ -285,6 +302,30 @@ export function App(): React.JSX.Element {
       });
     return () => controller.abort();
   }, [loadSession]);
+
+  useEffect(() => {
+    const query = sessionQuery.trim();
+    if (query.length === 0) {
+      setSessionSearchHits([]);
+      setSessionSearching(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSessionSearching(true);
+      void searchSessions(query, 20, controller.signal)
+        .then((payload) => setSessionSearchHits(payload.hits))
+        .catch((error: unknown) => {
+          const message = publicError(error);
+          if (message.length > 0) setNotice(message);
+        })
+        .finally(() => setSessionSearching(false));
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [sessionQuery]);
 
   useEffect(() => {
     if (selectedSessionId === null) return undefined;
@@ -429,6 +470,42 @@ export function App(): React.JSX.Element {
     }
   }
 
+  async function forkCurrentSession(): Promise<void> {
+    if (selectedSession === null || selectedSession.activeTurnId !== null || sessionActionBusy !== null) return;
+    setSessionActionBusy("fork");
+    setNotice("");
+    try {
+      const result = await forkSession(selectedSession.id);
+      setSessions((current) => upsertSession(current, result.session));
+      setSessionQuery("");
+      setSessionSearchHits([]);
+      await selectSession(result.session.id);
+      setNotice(`已从“${result.sourceSession.title}”的事件边界 #${String(result.sourceEventSeq)} 创建分支；原会话历史不会被复制或修改。`);
+    } catch (error) {
+      setNotice(publicError(error));
+    } finally {
+      setSessionActionBusy(null);
+    }
+  }
+
+  async function resumeSelectedSession(): Promise<void> {
+    if (selectedSession === null || selectedSession.activeTurnId === null || sessionActionBusy !== null) return;
+    setSessionActionBusy("resume");
+    setNotice("");
+    try {
+      const result = await resumeSession(selectedSession.id);
+      setSessions((current) => upsertSession(current, result.session));
+      await loadSession(result.session.id);
+      setNotice(result.interruptedTurnId === null
+        ? "会话状态已经一致，无需恢复。"
+        : `已把重启前未完成的回合标记为 interrupted（事件 #${String(result.interruptionEventSeq)}）；已完成的工具证据仍然保留。`);
+    } catch (error) {
+      setNotice(publicError(error));
+    } finally {
+      setSessionActionBusy(null);
+    }
+  }
+
   async function stopCurrentTurn(): Promise<void> {
     if (selectedSession?.activeTurnId === null || selectedSession?.activeTurnId === undefined) return;
     try {
@@ -504,6 +581,17 @@ export function App(): React.JSX.Element {
           <div><strong>{selectedSession?.title ?? "DaoyinHarness"}</strong><small>{workspace?.name ?? "本地工作台"}</small></div>
         </div>
         <div className="top-bar-right">
+          {selectedSession !== null ? (
+            selectedSession.activeTurnId === null ? (
+              <button className="session-action" type="button" disabled={sessionActionBusy !== null} onClick={() => void forkCurrentSession()} title="从最近安全终止边界创建不可变分支">
+                <Icon name="fork" /><span>{sessionActionBusy === "fork" ? "分叉中" : "分叉"}</span>
+              </button>
+            ) : (
+              <button className="session-action recovery" type="button" disabled={sessionActionBusy !== null} onClick={() => void resumeSelectedSession()} title="仅用于进程重启后遗留的运行中会话；仍在执行时会被拒绝">
+                <Icon name="resume" /><span>{sessionActionBusy === "resume" ? "恢复中" : "恢复"}</span>
+              </button>
+            )
+          ) : null}
           <span className={`connection-pill ${connected ? "online" : ""}`}><i />{connected ? "本地已连接" : "未连接"}</span>
         </div>
       </header>
@@ -532,21 +620,39 @@ export function App(): React.JSX.Element {
               <h2 id="sessions-heading">最近对话</h2>
               <button type="button" aria-label="新建对话" onClick={startFreshConversation}><Icon name="plus" /></button>
             </div>
+            <label className="session-search">
+              <Icon name="search" />
+              <input
+                value={sessionQuery}
+                onChange={(event) => setSessionQuery(event.target.value)}
+                placeholder="搜索会话与工具证据"
+                aria-label="搜索会话"
+              />
+              {sessionSearching ? <i className="search-busy" aria-label="搜索中" /> : null}
+            </label>
             {sessions.length === 0 ? (
               <div className="empty-sessions"><Icon name="chat" /><span>还没有本地对话</span></div>
+            ) : visibleSessions.length === 0 ? (
+              <div className="empty-sessions search-empty"><Icon name="search" /><span>没有匹配的会话</span></div>
             ) : (
               <div className="session-list">
-                {sessions.map((session) => (
-                  <button
-                    className={`session-row ${session.id === selectedSessionId ? "active" : ""}`}
-                    key={session.id}
-                    type="button"
-                    onClick={() => void selectSession(session.id)}
-                  >
-                    <span><b>{session.title}</b><small>{timeLabel(session.updatedAt)}</small></span>
-                    {session.activeTurnId !== null ? <i className="busy-dot" aria-label="执行中" /> : null}
-                  </button>
-                ))}
+                {visibleSessions.map((session) => {
+                  const hit = searchHitBySession.get(session.id);
+                  return (
+                    <button
+                      className={`session-row ${session.id === selectedSessionId ? "active" : ""}`}
+                      key={session.id}
+                      type="button"
+                      onClick={() => void selectSession(session.id)}
+                    >
+                      <span>
+                        <b>{session.title}{session.forkedFrom !== undefined ? <em className="fork-badge">分支</em> : null}</b>
+                        <small>{hit === undefined ? timeLabel(session.updatedAt) : hit.matchedText}</small>
+                      </span>
+                      {session.activeTurnId !== null ? <i className="busy-dot" aria-label="执行中" /> : null}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -568,6 +674,9 @@ export function App(): React.JSX.Element {
               <img src="/assistant-daoyin.png" alt="" />
               <h1>一个能持续工作的通用 Agent</h1>
               <p>{modelReady ? "聊天、研究网页、整理资料、处理本地文件或完成工程任务，都从同一段会话继续。" : "会话、工作区和工具运行时已经接通；真实模型网关登录仍在下一步接入。"}</p>
+              {selectedSession?.forkedFrom !== undefined ? (
+                <div className="fork-context"><Icon name="fork" /><span>继承自“{forkSource?.title ?? selectedSession.forkedFrom.sourceSessionId}”的事件边界 #{String(selectedSession.forkedFrom.sourceEventSeq)}；祖先 transcript 保持不可变。</span></div>
+              ) : null}
               <div className="capability-strip">
                 {capabilityCategories.map((category) => <span className="capability-chip" key={category}>{capabilityCategoryLabel(category)}</span>)}
                 {mcpServers.length > 0 ? <span className="capability-chip" title={mcpStatusTitle}>MCP {mcpConnectedCount}/{mcpServers.length}</span> : null}
@@ -621,6 +730,7 @@ export function App(): React.JSX.Element {
                         {turn.assistantText.length > 0 ? <div className={`assistant-text ${turn.status === "failed" ? "failed" : ""}`}>{turn.assistantText}</div> : null}
                         {turn.status === "running" && turn.assistantText.length === 0 ? <div className="thinking-line"><span /><span /><span /></div> : null}
                         {turn.status === "cancelled" ? <div className="turn-state">已停止</div> : null}
+                        {turn.status === "interrupted" ? <div className="turn-state interrupted">运行时重启导致本回合中断；已完成证据仍保留</div> : null}
                       </div>
                     </div>
                   </article>

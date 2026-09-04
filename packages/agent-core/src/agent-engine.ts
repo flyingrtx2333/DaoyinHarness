@@ -19,6 +19,7 @@ export interface AgentTurnInput {
   turnId: string;
   userMessage: string;
   systemInstruction?: string;
+  inheritedEvents?: readonly AgentEvent[];
   signal?: AbortSignal;
 }
 
@@ -161,9 +162,13 @@ export class AgentEngine {
     };
 
     const priorEvents = await this.#events.read(input.sessionId);
+    const inheritedEvents = input.inheritedEvents ?? [];
     const compaction = await this.#compactor?.compactIfNeeded(input.sessionId, priorEvents);
     const conversation: ModelConversationItem[] = [
-      ...this.#context.historicalDialogue(priorEvents, compaction),
+      ...this.#context.historicalDialogueSources([
+        ...(inheritedEvents.length === 0 ? [] : [{ events: inheritedEvents }]),
+        { events: priorEvents, ...(compaction === undefined ? {} : { compaction }) },
+      ]),
       { role: "user", content: input.userMessage },
     ];
 
@@ -185,6 +190,7 @@ export class AgentEngine {
       const context = await this.#context.assembleStep({
         turn: input,
         priorEvents,
+        ...(inheritedEvents.length === 0 ? {} : { inheritedEvents }),
         ...(compaction === undefined ? {} : { compaction }),
         step,
         tools,
