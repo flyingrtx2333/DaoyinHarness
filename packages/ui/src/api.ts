@@ -59,6 +59,15 @@ export function getSessionEvents(sessionId: string, afterEventSeq = 0, signal?: 
   );
 }
 
+export function openSessionEventStream(sessionId: string, afterEventSeq = 0): WebSocket {
+  const url = new URL(window.location.href);
+  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = `/api/v1/sessions/${encodeURIComponent(sessionId)}/events/ws`;
+  url.search = new URLSearchParams({ after: String(afterEventSeq) }).toString();
+  url.hash = "";
+  return new WebSocket(url);
+}
+
 export function startTurn(sessionId: string, message: string, planning = false): Promise<StartTurnResponse> {
   return request<StartTurnResponse>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/turns`, {
     method: "POST",

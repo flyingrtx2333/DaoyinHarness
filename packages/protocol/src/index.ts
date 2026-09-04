@@ -226,6 +226,11 @@ export interface SessionEventsResponse {
   lastEventSeq: number;
 }
 
+export type SessionEventStreamMessage =
+  | { type: "ready"; session: LocalSessionSummary; lastEventSeq: number }
+  | { type: "event"; session: LocalSessionSummary; event: AgentEvent }
+  | { type: "error"; code: string; message: string };
+
 export interface CreateSessionRequest {
   title?: string;
 }

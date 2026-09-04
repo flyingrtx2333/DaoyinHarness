@@ -110,6 +110,84 @@ describe("local server security boundary", () => {
     expect(response.json()).toMatchObject({ error: { code: "CSRF_REJECTED" } });
   });
 
+  it("pushes live turn events over WebSocket with persisted event sequences", async () => {
+    const dataDir = await temporaryDirectory("daoyin-server-ws-data-");
+    const workspaceRoot = await temporaryDirectory("daoyin-server-ws-workspace-");
+    const model: ModelClient = {
+      async complete() {
+        return { kind: "assistant", content: "streamed response" };
+      },
+    };
+    app = await createApp({
+      port: 4677,
+      version: "0.1.0",
+      startedAt: new Date().toISOString(),
+      dataDir,
+      workspaceRoot,
+      model,
+    });
+
+    const bootstrapResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/bootstrap",
+      headers: { host: "127.0.0.1:4677" },
+    });
+    const bootstrap = bootstrapResponse.json<RuntimeBootstrap>();
+    const setCookie = bootstrapResponse.headers["set-cookie"];
+    const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/sessions",
+      headers: {
+        host: "127.0.0.1:4677",
+        cookie: cookie ?? "",
+        "x-daoyin-csrf": bootstrap.csrfToken,
+        "content-type": "application/json",
+      },
+      payload: { title: "WebSocket test" },
+    });
+    const sessionId = createResponse.json<{ session: { id: string } }>().session.id;
+    const socket = await app.injectWS(`/api/v1/sessions/${sessionId}/events/ws?after=0`, {
+      headers: {
+        host: "127.0.0.1:4677",
+        origin: "http://127.0.0.1:4677",
+        cookie: cookie ?? "",
+      },
+    });
+    const streamed: Array<{ type?: string; event?: { type?: string; eventSeq?: number }; session?: { activeTurnId?: string | null } }> = [];
+    const completed = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timed out waiting for WebSocket terminal event.")), 2_000);
+      socket.on("message", (data: unknown) => {
+        const message = JSON.parse(String(data)) as { type?: string; event?: { type?: string; eventSeq?: number }; session?: { activeTurnId?: string | null } };
+        streamed.push(message);
+        if (message.type === "event" && message.event?.type === "turn.completed") {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+
+    const turnResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/sessions/${sessionId}/turns`,
+      headers: {
+        host: "127.0.0.1:4677",
+        cookie: cookie ?? "",
+        "x-daoyin-csrf": bootstrap.csrfToken,
+        "content-type": "application/json",
+      },
+      payload: { message: "stream this turn" },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    await completed;
+    socket.close();
+
+    const events = streamed.filter((message) => message.type === "event");
+    expect(events.map((message) => message.event?.type)).toEqual(["turn.started", "assistant.delta", "turn.completed"]);
+    expect(events.map((message) => message.event?.eventSeq)).toEqual([1, 2, 3]);
+    expect(events.at(-1)?.session?.activeTurnId).toBeNull();
+  });
+
   it("persists a session, executes a workspace tool, and replays the turn by event sequence", async () => {
     const dataDir = await temporaryDirectory("daoyin-server-data-");
     const workspaceRoot = await temporaryDirectory("daoyin-server-workspace-");

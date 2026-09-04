@@ -3,11 +3,13 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import fastifyStatic from "@fastify/static";
+import fastifyWebsocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { AgentEngine, type ModelClient, type SystemPromptRegistry } from "@daoyin/harness-agent-core";
 import { JsonlProcessPermissionStore, ProcessService, type ProcessPermissionStore } from "@daoyin/harness-process";
 import {
   API_VERSION,
+  type AgentEvent,
   type ApiError,
   type CreateSessionRequest,
   type CreateSessionResponse,
@@ -17,6 +19,7 @@ import {
   type RuntimeHealth,
   type SandboxMode,
   type SandboxRuntimeStatus,
+  type SessionEventStreamMessage,
   type SessionEventsResponse,
   type StartTurnRequest,
   type StartTurnResponse,
@@ -52,6 +55,9 @@ export interface CreateAppOptions {
   logger?: FastifyServerOptions["logger"];
 }
 
+type LiveSessionEventMessage = Extract<SessionEventStreamMessage, { type: "event" }>;
+type SessionEventSubscriber = (message: LiveSessionEventMessage) => void;
+
 interface RuntimeState {
   csrfToken: string;
   sessionCookie: string;
@@ -68,6 +74,7 @@ interface RuntimeState {
   promptRegistry: SystemPromptRegistry | null;
   model: ModelClient | null;
   activeTurns: Map<string, AbortController>;
+  eventSubscribers: Map<string, Set<SessionEventSubscriber>>;
 }
 
 function requestId(): string {
@@ -181,6 +188,7 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
     promptRegistry: null,
     model: options.model ?? null,
     activeTurns: new Map(),
+    eventSubscribers: new Map(),
   };
 
   if (options.dataDir === undefined || options.workspaceRoot === undefined) return state;
@@ -297,7 +305,29 @@ function requireRuntime(state: RuntimeState): asserts state is RuntimeState & {
   }
 }
 
-function isTerminalTurnEvent(event: import("@daoyin/harness-protocol").AgentEvent, turnId: string): boolean {
+function subscribeSessionEvents(state: RuntimeState, sessionId: string, subscriber: SessionEventSubscriber): () => void {
+  const subscribers = state.eventSubscribers.get(sessionId) ?? new Set<SessionEventSubscriber>();
+  subscribers.add(subscriber);
+  state.eventSubscribers.set(sessionId, subscribers);
+  return () => {
+    const current = state.eventSubscribers.get(sessionId);
+    current?.delete(subscriber);
+    if (current?.size === 0) state.eventSubscribers.delete(sessionId);
+  };
+}
+
+function publishSessionEvent(state: RuntimeState, event: AgentEvent, session: LocalSessionSummary): void {
+  const message: LiveSessionEventMessage = { type: "event", event, session };
+  for (const subscriber of state.eventSubscribers.get(event.sessionId) ?? []) {
+    try {
+      subscriber(message);
+    } catch {
+      // WebSocket subscribers are transient; persisted event replay remains authoritative.
+    }
+  }
+}
+
+function isTerminalTurnEvent(event: AgentEvent, turnId: string): boolean {
   return event.turnId === turnId && (event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled");
 }
 
@@ -329,6 +359,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     logger: options.logger ?? false,
     trustProxy: false,
   });
+  await app.register(fastifyWebsocket);
 
   app.addHook("onRequest", async (request, reply) => {
     const host = request.headers.host;
@@ -360,7 +391,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
 
   app.addHook("onSend", async (_request, reply, payload) => {
     void reply
-      .header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+      .header("Content-Security-Policy", `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:${String(options.port)}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`)
       .header("Referrer-Policy", "no-referrer")
       .header("X-Content-Type-Options", "nosniff")
       .header("X-Frame-Options", "DENY")
@@ -449,6 +480,73 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     }
   });
 
+  app.get("/api/v1/sessions/:sessionId/events/ws", { websocket: true }, (socket, request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const { after } = request.query as { after?: string };
+    let lastSent = parsePositiveInteger(after, 0);
+    let live = false;
+    let closed = false;
+    const pending: LiveSessionEventMessage[] = [];
+    let unsubscribe = (): void => undefined;
+
+    const send = (message: SessionEventStreamMessage): void => {
+      if (!closed && socket.readyState === 1) socket.send(JSON.stringify(message));
+    };
+    const sendEvent = (message: LiveSessionEventMessage): void => {
+      if (message.event.eventSeq <= lastSent) return;
+      lastSent = message.event.eventSeq;
+      send(message);
+    };
+    const subscriber: SessionEventSubscriber = (message) => {
+      if (!live) {
+        pending.push(message);
+        return;
+      }
+      sendEvent(message);
+    };
+
+    socket.once("close", () => {
+      closed = true;
+      unsubscribe();
+    });
+
+    void (async () => {
+      try {
+        requireRuntime(state);
+        if (cookieValue(request.headers.cookie, "daoyin_harness_session") !== state.sessionCookie) {
+          send({ type: "error", code: "LOCAL_SESSION_REQUIRED", message: "本地浏览器会话无效，请刷新页面。" });
+          socket.close(1008, "local session required");
+          return;
+        }
+        let session = await state.catalog.get(sessionId);
+        if (session === undefined) {
+          send({ type: "error", code: "SESSION_NOT_FOUND", message: "会话不存在。" });
+          socket.close(1008, "session not found");
+          return;
+        }
+
+        unsubscribe = subscribeSessionEvents(state, sessionId, subscriber);
+        const replay = await state.events.read(sessionId, lastSent);
+        session = (await state.catalog.get(sessionId)) ?? session;
+        for (const event of replay) sendEvent({ type: "event", event, session });
+        pending.sort((left, right) => left.event.eventSeq - right.event.eventSeq);
+        for (const message of pending) sendEvent(message);
+        pending.length = 0;
+        live = true;
+        session = (await state.catalog.get(sessionId)) ?? session;
+        send({ type: "ready", session, lastEventSeq: lastSent });
+      } catch (error) {
+        const candidate = error as { code?: unknown; message?: unknown };
+        send({
+          type: "error",
+          code: typeof candidate.code === "string" ? candidate.code : "EVENT_STREAM_FAILED",
+          message: typeof candidate.message === "string" ? candidate.message : "事件流初始化失败。",
+        });
+        socket.close(1011, "event stream failed");
+      }
+    })();
+  });
+
   app.post("/api/v1/sessions/:sessionId/turns", async (request, reply): Promise<StartTurnResponse | void> => {
     try {
       requireRuntime(state);
@@ -485,11 +583,12 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         ...(options.compactionMaxSummaryCharacters === undefined ? {} : { compactionMaxSummaryCharacters: options.compactionMaxSummaryCharacters }),
         onEvent: async (event) => {
           const terminal = event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled";
-          await state.catalog.update(sessionId, {
+          const session = await state.catalog.update(sessionId, {
             lastEventSeq: event.eventSeq,
             updatedAt: event.occurredAt,
             ...(terminal ? { activeTurnId: null } : {}),
           });
+          publishSessionEvent(state, event, session);
         },
       });
 

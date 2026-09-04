@@ -157,7 +157,7 @@ npm run package:verify
 npm start -- --no-open --workspace D:\path\to\project
 ```
 
-当前 Web UI 已能创建/切换本地会话、展示持久化对话与工具状态、浏览真实工作区文件、显示运行时实际挂载的 capability，并停止正在运行的 turn。Agent Engine 会从 append-only transcript 恢复最近多轮对话，而不是依赖浏览器把聊天历史重新上传。
+当前 Web UI 已能创建/切换本地会话、展示持久化对话与工具状态、浏览真实工作区文件、显示运行时实际挂载的 capability，并停止正在运行的 turn。运行中的事件已由每 800ms 轮询升级为 session-scoped WebSocket 实时推送；断线后客户端携带最近 `eventSeq` 重连，服务端先补 persisted gap 再进入 live mode，REST replay 仍保留为事实恢复后备。Agent Engine 会从 append-only transcript 恢复最近多轮对话，而不是依赖浏览器把聊天历史重新上传。
 
 System Prompt 已改为注册式装配：固定 Identity / Scope / Tool Behavior / Safety / Completion 作为 Stable Sections 缓存；Runtime、Workspace、能力快照、Skill Catalog、最近 Tool Evidence、Turn Instruction 与可选 Memory 作为 Dynamic Sections，在**每一个 Agent Step**调用模型前重新组装。`tool.started` 同时持久化受限 JSON 输入，使后续回合可以基于真实工具证据继续，而不是只依赖助手总结。
 

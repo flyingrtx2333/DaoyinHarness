@@ -67,7 +67,7 @@ Deliverables:
 - crash/interruption semantics and future fork/resume metadata;
 - derived SQLite/search indexes that can be rebuilt from facts.
 
-Current state: session catalog, append-only events, incremental replay, cancellation, bounded multi-turn dialogue reconstruction, deterministic context compaction and the first scoped JSONL memory store/retriever are implemented. Crash takeover, fork/resume, SQLite materialization and semantic/vector retrieval remain.
+Current state: session catalog, append-only events, incremental REST replay, session-scoped WebSocket live delivery with `eventSeq` reconnect recovery, cancellation, bounded multi-turn dialogue reconstruction, deterministic context compaction and the first scoped JSONL memory store/retriever are implemented. Crash takeover, fork/resume, SQLite materialization and semantic/vector retrieval remain.
 
 Exit criteria:
 

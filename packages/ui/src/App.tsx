@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { AgentEvent, LocalSessionSummary, RuntimeBootstrap } from "@daoyin/harness-protocol";
+import type { AgentEvent, LocalSessionSummary, RuntimeBootstrap, SessionEventStreamMessage } from "@daoyin/harness-protocol";
 import {
   bootstrapRuntime,
   cancelTurn,
@@ -8,6 +8,7 @@ import {
   getProcessPermissions,
   getSessionEvents,
   getWorkspaceFiles,
+  openSessionEventStream,
   startTurn,
 } from "./api.js";
 
@@ -211,8 +212,12 @@ export function App(): React.JSX.Element {
       getSessionEvents(sessionId, 0, signal),
       getProcessPermissions(sessionId, signal),
     ]);
-    lastEventSeq.current = payload.lastEventSeq;
-    setEvents(payload.events);
+    lastEventSeq.current = Math.max(lastEventSeq.current, payload.lastEventSeq);
+    setEvents((current) => {
+      const merged = new Map(payload.events.map((event) => [event.id, event]));
+      for (const event of current) merged.set(event.id, event);
+      return [...merged.values()].sort((left, right) => left.eventSeq - right.eventSeq);
+    });
     setSessions((current) => upsertSession(current, payload.session));
     setPermissionOverrides(Object.fromEntries(permissions.map((permission) => [permission.id, permission.status])));
   }, []);
@@ -240,30 +245,67 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (selectedSessionId === null) return undefined;
     let disposed = false;
-    const poll = async (): Promise<void> => {
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | undefined;
+    let reconnectAttempt = 0;
+
+    const refreshPermissions = (): void => {
+      void getProcessPermissions(selectedSessionId)
+        .then((permissions) => {
+          if (!disposed) setPermissionOverrides(Object.fromEntries(permissions.map((permission) => [permission.id, permission.status])));
+        })
+        .catch((error: unknown) => {
+          if (!disposed) setNotice(publicError(error));
+        });
+    };
+
+    const handleMessage = (message: MessageEvent<unknown>): void => {
+      if (typeof message.data !== "string") return;
+      let payload: SessionEventStreamMessage;
       try {
-        const payload = await getSessionEvents(selectedSessionId, lastEventSeq.current);
-        if (disposed) return;
-        if (payload.events.length > 0) {
-          lastEventSeq.current = payload.lastEventSeq;
-          setEvents((current) => {
-            const seen = new Set(current.map((event) => event.id));
-            return [...current, ...payload.events.filter((event) => !seen.has(event.id))];
-          });
-          if (payload.events.some((event) => (event.type === "tool.failed" || event.type === "tool.completed") && event.payload.toolName === "run_package_script")) {
-            const permissions = await getProcessPermissions(selectedSessionId);
-            if (!disposed) setPermissionOverrides(Object.fromEntries(permissions.map((permission) => [permission.id, permission.status])));
-          }
-        }
-        setSessions((current) => upsertSession(current, payload.session));
-      } catch (error) {
-        if (!disposed) setNotice(publicError(error));
+        payload = JSON.parse(message.data) as SessionEventStreamMessage;
+      } catch {
+        return;
+      }
+      if (payload.type === "error") {
+        setNotice(payload.message);
+        return;
+      }
+      lastEventSeq.current = Math.max(lastEventSeq.current, payload.type === "event" ? payload.event.eventSeq : payload.lastEventSeq);
+      setSessions((current) => upsertSession(current, payload.session));
+      if (payload.type !== "event") return;
+      setEvents((current) => {
+        if (current.some((event) => event.id === payload.event.id)) return current;
+        return [...current, payload.event].sort((left, right) => left.eventSeq - right.eventSeq);
+      });
+      if ((payload.event.type === "tool.failed" || payload.event.type === "tool.completed") && payload.event.payload.toolName === "run_package_script") {
+        refreshPermissions();
       }
     };
-    const timer = window.setInterval(() => void poll(), 800);
+
+    const connect = (): void => {
+      if (disposed) return;
+      socket = openSessionEventStream(selectedSessionId, lastEventSeq.current);
+      socket.addEventListener("open", () => {
+        reconnectAttempt = 0;
+      });
+      socket.addEventListener("message", handleMessage);
+      socket.addEventListener("error", () => {
+        socket?.close();
+      });
+      socket.addEventListener("close", () => {
+        if (disposed) return;
+        const delay = Math.min(5_000, 400 * 2 ** Math.min(reconnectAttempt, 4));
+        reconnectAttempt += 1;
+        reconnectTimer = window.setTimeout(connect, delay);
+      });
+    };
+
+    connect();
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      socket?.close();
     };
   }, [selectedSessionId]);
 
@@ -316,8 +358,12 @@ export function App(): React.JSX.Element {
       await startTurn(sessionId, message, planningEnabled);
       setPrompt("");
       const payload = await getSessionEvents(sessionId, lastEventSeq.current);
-      lastEventSeq.current = payload.lastEventSeq;
-      setEvents((current) => [...current, ...payload.events]);
+      lastEventSeq.current = Math.max(lastEventSeq.current, payload.lastEventSeq);
+      setEvents((current) => {
+        const seen = new Set(current.map((item) => item.id));
+        return [...current, ...payload.events.filter((item) => !seen.has(item.id))]
+          .sort((left, right) => left.eventSeq - right.eventSeq);
+      });
       setSessions((current) => upsertSession(current, payload.session));
     } catch (error) {
       setNotice(publicError(error));

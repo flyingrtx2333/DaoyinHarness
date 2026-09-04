@@ -1,10 +1,10 @@
 # DaoyinHarness Local Protocol
 
-> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, and Process Permission decisions are implemented. Authentication, richer recovery/fork APIs, WebSocket live delivery, OS Sandbox, MCP/Browser capability management and idempotency remain planned.
+> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, Process Permission decisions, WebSocket live delivery/replay, and Linux Bubblewrap Sandbox are implemented. Authentication, richer recovery/fork APIs, Windows/macOS Sandbox providers, MCP/Browser capability management and idempotency remain planned.
 
 ## 1. Transport and versioning
 
-The local server exposes JSON REST endpoints under `/api/v1` and a WebSocket event stream at `/api/v1/events`. The browser uses the same loopback origin as the server.
+The local server exposes JSON REST endpoints under `/api/v1` and one session-scoped WebSocket event stream at `/api/v1/sessions/:sessionId/events/ws`. The browser uses the same loopback origin as the server.
 
 Breaking changes require a new URL version. Additive fields are allowed within v1; clients must ignore unknown fields. All timestamps are RFC 3339 UTC strings, IDs are opaque strings, and sequence numbers are decimal integers.
 
@@ -62,6 +62,7 @@ Task-specific resources such as build checkpoints, previews, documents, workflow
 | `GET` | `/api/v1/sessions` | List local sessions |
 | `POST` | `/api/v1/sessions` | Create a local session |
 | `GET` | `/api/v1/sessions/:sessionId/events?after=<seq>` | Replay persisted events after a sequence number |
+| `WS` | `/api/v1/sessions/:sessionId/events/ws?after=<seq>` | Replay the persisted gap and then push live session events |
 | `POST` | `/api/v1/sessions/:sessionId/turns` | Start one Agent turn for the session |
 | `POST` | `/api/v1/sessions/:sessionId/turns/:turnId/cancel` | Abort future model/tool work for the active turn |
 
@@ -69,7 +70,7 @@ The bootstrap response sets `daoyin_harness_session` as an HttpOnly `SameSite=St
 
 ### Planned v1 surface
 
-Authentication (`/auth/*`), session fork/resume/search, capability enable/disable, MCP/Browser management, OS Sandbox management, idempotency keys and the WebSocket live stream are still contract targets rather than implemented endpoints. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
+Authentication (`/auth/*`), session fork/resume/search, capability enable/disable, MCP/Browser management, Windows/macOS Sandbox management and idempotency keys are still contract targets rather than implemented endpoints. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
 
 ## 4. Event envelope
 
@@ -111,10 +112,12 @@ Planned additive events include tool progress, recovery/interruption, session fo
 The browser connects to:
 
 ```text
-ws://127.0.0.1:<port>/api/v1/events?sessionId=<id>&after=<eventSeq>
+ws://127.0.0.1:<port>/api/v1/sessions/<sessionId>/events/ws?after=<eventSeq>
 ```
 
-The server authenticates the browser session and origin, replays all persisted events after `eventSeq`, emits a `stream.ready` control frame, and then delivers live events. A client reconnect may receive duplicates and must deduplicate by event ID or sequence.
+The WebSocket handshake is subject to the same loopback Host/Origin policy as REST and also requires the local HttpOnly browser-session cookie. The server registers the live subscriber before reading the persisted replay gap, buffers any events produced during that replay window, sends all persisted events after `eventSeq`, drains the buffered live events in sequence order, and then enters live mode. A `ready` control message carries the current session summary and last delivered sequence.
+
+Persist-before-broadcast remains authoritative: the Agent event is appended to the JSONL transcript before the catalog is updated and before a live event is published. If the socket disconnects at any point, the client reconnects using its latest `eventSeq`; both server and UI deduplicate by sequence/event ID. The REST replay endpoint remains the canonical fallback and recovery surface.
 
 The user message is returned by `POST /turns` only after it is persisted. The UI renders that persisted message immediately, so a failed model call cannot make the user's message disappear.
 
@@ -158,7 +161,7 @@ The model-facing Process capability does not accept arbitrary shell text. Read-o
 
 A package-script attempt without an approved fingerprint returns a normal `tool.failed` event with code `PROCESS_APPROVAL_REQUIRED`, `retryable=true`, and structured `details` containing the permission request ID, display command, risk, reason, status and fingerprint. The browser may decide that request only through the current loopback account/resource namespace. Approving does not execute anything by itself; a later Agent turn must request the exact same operation, which atomically consumes the approved grant before the Process Service starts it. A consumed grant cannot be reused. A denied request remains denied until the user explicitly changes the decision.
 
-Permission history is append-only in the local process state store. Model-facing arguments never contain `accountId`, `resourceScopeId`, `sessionId` or permission status. Current process success evidence reports `osIsolation: "none"`; this contract must change only when a real isolation provider is installed, and permission-only execution must never be presented as sandboxed.
+Permission history is append-only in the local process state store. Model-facing arguments never contain `accountId`, `resourceScopeId`, `sessionId` or permission status. On Linux, process success evidence reports `osIsolation: "bubblewrap"` only when the Bubblewrap startup probe passed and that operation actually requested sandboxing; unavailable/non-Linux providers report `osIsolation: "none"`. Permission-only execution must never be presented as sandboxed.
 
 ## 9. Errors
 
