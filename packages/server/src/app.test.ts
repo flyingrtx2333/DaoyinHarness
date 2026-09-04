@@ -152,6 +152,120 @@ describe("local server security boundary", () => {
     ]);
   });
 
+  it("persists visible goals and auditable child-agent runs through the parent Agent loop", async () => {
+    const dataDir = await temporaryDirectory("daoyin-server-orchestration-data-");
+    const workspaceRoot = await temporaryDirectory("daoyin-server-orchestration-workspace-");
+    let parentStep = 0;
+    const model: ModelClient = {
+      async complete(request) {
+        const system = request.messages[0];
+        if (system?.role === "system" && system.content.includes("bounded child Agent")) {
+          const childToolNames = request.tools.map((tool) => tool.name);
+          expect(childToolNames).not.toContain("delegate_agent");
+          expect(childToolNames).not.toContain("workflow_run");
+          expect(childToolNames).not.toContain("run_package_script");
+          expect(childToolNames).not.toContain("memory_remember");
+          return { kind: "assistant", content: "Child subtask completed with evidence." };
+        }
+        parentStep += 1;
+        if (parentStep === 1) {
+          return {
+            kind: "tool_calls",
+            calls: [{
+              id: "call_goal_create",
+              name: "goal_create",
+              input: { title: "Finish orchestration", steps: ["Create visible goal", "Delegate bounded child work"] },
+            }],
+          };
+        }
+        if (parentStep === 2) {
+          return {
+            kind: "tool_calls",
+            calls: [{ id: "call_delegate", name: "delegate_agent", input: { instruction: "Inspect the delegated orchestration subtask only." } }],
+          };
+        }
+        return { kind: "assistant", content: "Parent completed after verified child evidence." };
+      },
+    };
+    app = await createApp({
+      port: 4677,
+      version: "0.1.0",
+      startedAt: new Date().toISOString(),
+      dataDir,
+      workspaceRoot,
+      model,
+    });
+
+    const bootstrapResponse = await app.inject({ method: "GET", url: "/api/v1/bootstrap", headers: { host: "127.0.0.1:4677" } });
+    const bootstrap = bootstrapResponse.json<RuntimeBootstrap>();
+    const setCookie = bootstrapResponse.headers["set-cookie"];
+    const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    expect(bootstrap.health.capabilities.orchestration).toBe("ready");
+    expect(bootstrap.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      "goal_create",
+      "goal_list",
+      "goal_update",
+      "workflow_create",
+      "workflow_list",
+      "workflow_run",
+      "delegate_agent",
+    ]));
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/sessions",
+      headers: {
+        host: "127.0.0.1:4677",
+        cookie: cookie ?? "",
+        "x-daoyin-csrf": bootstrap.csrfToken,
+        "content-type": "application/json",
+      },
+      payload: { title: "Orchestration test" },
+    });
+    const sessionId = createResponse.json<{ session: { id: string } }>().session.id;
+    const turnResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/sessions/${sessionId}/turns`,
+      headers: {
+        host: "127.0.0.1:4677",
+        cookie: cookie ?? "",
+        "x-daoyin-csrf": bootstrap.csrfToken,
+        "content-type": "application/json",
+      },
+      payload: { message: "Create a visible goal and delegate one bounded subtask." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/sessions/${sessionId}/events?after=0`,
+        headers: { host: "127.0.0.1:4677" },
+      });
+      if (response.json<SessionEventsResponse>().events.some((event) => event.type === "turn.completed")) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const orchestrationResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/orchestration?sessionId=${encodeURIComponent(sessionId)}`,
+      headers: { host: "127.0.0.1:4677" },
+    });
+    expect(orchestrationResponse.statusCode).toBe(200);
+    const orchestration = orchestrationResponse.json<import("@daoyin/harness-protocol").OrchestrationSnapshot>();
+    expect(orchestration.goals).toEqual([
+      expect.objectContaining({ title: "Finish orchestration", status: "active", revision: 1 }),
+    ]);
+    expect(orchestration.childRuns).toEqual([
+      expect.objectContaining({
+        parentSessionId: sessionId,
+        status: "completed",
+        finalText: "Child subtask completed with evidence.",
+      }),
+    ]);
+    expect(orchestration.childRuns[0]?.childSessionId).not.toBe(sessionId);
+  });
+
   it("rejects a non-loopback Host", async () => {
     app = await createApp({ port: 4677, version: "0.1.0", startedAt: new Date().toISOString() });
     const response = await app.inject({

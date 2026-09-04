@@ -8,6 +8,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastif
 import { AgentEngine, type ModelClient, type SystemPromptRegistry } from "@daoyin/harness-agent-core";
 import { BrowserService } from "@daoyin/harness-browser";
 import { McpManager, type McpClientFactory, type McpRemoteServerConfig } from "@daoyin/harness-mcp";
+import { ChildAgentRunner, JsonlOrchestrationStore, WorkflowService, createOrchestrationTools } from "@daoyin/harness-orchestration";
 import { JsonlProcessPermissionStore, ProcessService, type ProcessPermissionStore } from "@daoyin/harness-process";
 import {
   API_VERSION,
@@ -16,6 +17,7 @@ import {
   type CreateSessionRequest,
   type CreateSessionResponse,
   type LocalSessionSummary,
+  type OrchestrationSnapshot,
   type ProcessPermissionRequest,
   type RuntimeBootstrap,
   type RuntimeHealth,
@@ -38,7 +40,7 @@ import {
   type MemoryStore,
   type SessionCompactionStore,
 } from "@daoyin/harness-workspace";
-import { createLocalPromptRegistry, type MemoryContextProvider } from "./prompt-context.js";
+import { createLocalPromptRegistry, type MemoryContextProvider, type OrchestrationContextProvider } from "./prompt-context.js";
 
 export interface CreateAppOptions {
   port: number;
@@ -77,6 +79,7 @@ interface RuntimeState {
   processService: ProcessService | null;
   processPermissions: ProcessPermissionStore | null;
   memoryStore: MemoryStore | null;
+  orchestrationStore: JsonlOrchestrationStore | null;
   compactionStore: SessionCompactionStore | null;
   promptRegistry: SystemPromptRegistry | null;
   model: ModelClient | null;
@@ -193,6 +196,7 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
     processService: null,
     processPermissions: null,
     memoryStore: null,
+    orchestrationStore: null,
     compactionStore: null,
     promptRegistry: null,
     model: options.model ?? null,
@@ -212,8 +216,10 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
   };
   state.resourceScopeId = `resource_${createHash("sha256").update(workspace.root).digest("hex").slice(0, 24)}`;
   state.catalog = new JsonSessionCatalog(path.join(options.dataDir, "state"));
-  state.events = new JsonlSessionStore(path.join(options.dataDir, "transcripts"));
+  const events = new JsonlSessionStore(path.join(options.dataDir, "transcripts"));
+  state.events = events;
   const memoryStore = new JsonlMemoryStore(path.join(options.dataDir, "memory", "memories.jsonl"));
+  const orchestrationStore = new JsonlOrchestrationStore(path.join(options.dataDir, "orchestration", "state.jsonl"));
   const compactionStore = new JsonlCompactionStore(path.join(options.dataDir, "compactions"));
   const processService = await ProcessService.create(workspace.root, { sandboxMode: options.sandboxMode ?? "auto" });
   const processPermissions = new JsonlProcessPermissionStore(path.join(options.dataDir, "process", "permissions.jsonl"));
@@ -223,6 +229,7 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
     ...(options.mcpClientFactory === undefined ? {} : { clientFactory: options.mcpClientFactory }),
   });
   state.memoryStore = memoryStore;
+  state.orchestrationStore = orchestrationStore;
   state.compactionStore = compactionStore;
   state.browserService = browserService;
   state.mcpManager = mcpManager;
@@ -238,7 +245,9 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
   if (mcpTools.length > 0) tools.registerPack({ id: "mcp", tools: mcpTools });
   tools.registerPack({ id: "skills", tools: createSkillTools(workspace) });
   tools.registerPack({ id: "memory", tools: createMemoryTools(memoryStore) });
-  state.tools = tools;
+
+  const childExcludedTools = new Set(["run_package_script", "memory_remember", "memory_update", "memory_forget"]);
+  const childTools = new ToolRegistry(tools.definitions().filter((definition) => !childExcludedTools.has(definition.name)));
 
   const memoryContextProvider: MemoryContextProvider = async (input) => {
     const hits = await memoryStore.search({
@@ -260,12 +269,37 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
     const external = await options.memoryContextProvider?.(input);
     return [builtIn, external?.trim() || null].filter((value): value is string => typeof value === "string" && value.length > 0).join("\n") || null;
   };
-  state.promptRegistry = createLocalPromptRegistry({
+  const orchestrationContextProvider: OrchestrationContextProvider = async (input) => {
+    const snapshot = await orchestrationStore.snapshot(input.accountId, input.scopeId, input.sessionId);
+    const goals = snapshot.goals
+      .filter((goal) => goal.status === "active" || goal.status === "blocked")
+      .slice(0, 8)
+      .map((goal) => ({ id: goal.id, title: goal.title, status: goal.status, revision: goal.revision, steps: goal.steps, note: goal.note }));
+    const workflows = snapshot.workflows.slice(0, 12).map((workflow) => ({ id: workflow.id, name: workflow.name, description: workflow.description, stepCount: workflow.steps.length }));
+    const workflowRuns = snapshot.workflowRuns.slice(-8).map((run) => ({ id: run.id, workflowId: run.workflowId, status: run.status, steps: run.steps }));
+    const childRuns = snapshot.childRuns.slice(-8).map((run) => ({ id: run.id, status: run.status, instruction: run.instruction.slice(0, 500), finalText: run.finalText.slice(0, 800) }));
+    if (goals.length === 0 && workflows.length === 0 && workflowRuns.length === 0 && childRuns.length === 0) return null;
+    return JSON.stringify({ goals, workflows, workflowRuns, childRuns });
+  };
+  const promptRegistry = createLocalPromptRegistry({
     workspace,
     workspaceSummary: state.workspaceSummary,
     sandboxStatus: processService.sandboxStatus,
     memoryContextProvider,
+    orchestrationContextProvider,
   });
+  const childRunner = new ChildAgentRunner({
+    model: state.model,
+    tools: childTools,
+    events,
+    promptRegistry,
+    store: orchestrationStore,
+    compactionStore,
+  });
+  const workflowService = new WorkflowService(orchestrationStore, childRunner);
+  tools.registerPack({ id: "orchestration", tools: createOrchestrationTools({ store: orchestrationStore, children: childRunner, workflows: workflowService }) });
+  state.tools = tools;
+  state.promptRegistry = promptRegistry;
   return state;
 }
 
@@ -304,6 +338,7 @@ function healthFor(options: CreateAppOptions, state: RuntimeState): RuntimeHealt
       modelGateway: state.model === null ? "planned" : "ready",
       browser: state.browserService === null ? "planned" : state.browserService.status.available ? "ready" : "unavailable",
       mcp: state.mcpManager === null ? "planned" : state.mcpManager.configuredCount === 0 || state.mcpManager.connectedCount > 0 ? "ready" : "unavailable",
+      orchestration: state.orchestrationStore === null ? "planned" : "ready",
     },
   };
 }
@@ -318,10 +353,11 @@ function requireRuntime(state: RuntimeState): asserts state is RuntimeState & {
   processService: ProcessService;
   processPermissions: ProcessPermissionStore;
   memoryStore: MemoryStore;
+  orchestrationStore: JsonlOrchestrationStore;
   compactionStore: SessionCompactionStore;
   promptRegistry: SystemPromptRegistry;
 } {
-  if (state.catalog === null || state.events === null || state.workspace === null || state.workspaceSummary === null || state.resourceScopeId === null || state.tools === null || state.processService === null || state.processPermissions === null || state.memoryStore === null || state.compactionStore === null || state.promptRegistry === null) {
+  if (state.catalog === null || state.events === null || state.workspace === null || state.workspaceSummary === null || state.resourceScopeId === null || state.tools === null || state.processService === null || state.processPermissions === null || state.memoryStore === null || state.orchestrationStore === null || state.compactionStore === null || state.promptRegistry === null) {
     throw Object.assign(new Error("本地工作区运行时尚未初始化。"), { code: "RUNTIME_NOT_INITIALIZED" });
   }
 }
@@ -447,6 +483,19 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
       requireRuntime(state);
       const files = await state.workspace.listFiles();
       return { root: state.workspace.root, files };
+    } catch (error) {
+      await apiFailure(reply, error);
+    }
+  });
+
+  app.get("/api/v1/orchestration", async (request, reply): Promise<OrchestrationSnapshot | void> => {
+    try {
+      requireRuntime(state);
+      const { sessionId } = request.query as { sessionId?: string };
+      if (sessionId !== undefined && await state.catalog.get(sessionId) === undefined) {
+        throw Object.assign(new Error("会话不存在。"), { code: "SESSION_NOT_FOUND" });
+      }
+      return state.orchestrationStore.snapshot("local", state.resourceScopeId, sessionId);
     } catch (error) {
       await apiFailure(reply, error);
     }

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { AgentEvent, LocalSessionSummary, RuntimeBootstrap, SessionEventStreamMessage } from "@daoyin/harness-protocol";
+import type { AgentEvent, LocalSessionSummary, OrchestrationSnapshot, RuntimeBootstrap, SessionEventStreamMessage } from "@daoyin/harness-protocol";
 import {
   bootstrapRuntime,
   cancelTurn,
   createSession,
   decideProcessPermission,
+  getOrchestrationSnapshot,
   getProcessPermissions,
   getSessionEvents,
   getWorkspaceFiles,
@@ -42,6 +43,14 @@ interface TurnView {
   status: "running" | "completed" | "failed" | "cancelled";
   tools: ToolView[];
 }
+
+const ORCHESTRATION_TOOL_NAMES = new Set([
+  "goal_create",
+  "goal_update",
+  "workflow_create",
+  "workflow_run",
+  "delegate_agent",
+]);
 
 function Icon({ name }: { name: IconName }): React.JSX.Element {
   const paths: Record<IconName, React.JSX.Element> = {
@@ -122,9 +131,30 @@ function toolLabel(name: string): string {
     memory_remember: "保存记忆",
     memory_update: "更新记忆",
     memory_forget: "忘记记忆",
+    goal_create: "创建任务目标",
+    goal_list: "查看任务目标",
+    goal_update: "更新任务进度",
+    workflow_create: "创建工作流",
+    workflow_list: "查看工作流",
+    workflow_run: "运行工作流",
+    delegate_agent: "委派子 Agent",
   };
   if (name.startsWith("mcp_")) return "MCP 扩展工具";
   return labels[name] ?? name;
+}
+
+function orchestrationStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    active: "进行中",
+    blocked: "受阻",
+    completed: "已完成",
+    cancelled: "已取消",
+    pending: "待处理",
+    in_progress: "执行中",
+    running: "执行中",
+    failed: "失败",
+  };
+  return labels[status] ?? status;
 }
 
 function buildTurns(events: AgentEvent[]): TurnView[] {
@@ -195,6 +225,9 @@ export function App(): React.JSX.Element {
   const [filesOpen, setFilesOpen] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [orchestrationOpen, setOrchestrationOpen] = useState(false);
+  const [orchestration, setOrchestration] = useState<OrchestrationSnapshot | null>(null);
+  const [orchestrationLoading, setOrchestrationLoading] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState<string | null>(null);
   const [permissionOverrides, setPermissionOverrides] = useState<Record<string, ProcessPermissionView["status"]>>({});
   const lastEventSeq = useRef(0);
@@ -324,12 +357,23 @@ export function App(): React.JSX.Element {
     transcriptEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [events.length]);
 
+  useEffect(() => {
+    if (!orchestrationOpen) return;
+    const event = events.at(-1);
+    if (event === undefined || (event.type !== "tool.completed" && event.type !== "tool.failed") || !ORCHESTRATION_TOOL_NAMES.has(event.payload.toolName)) return;
+    void getOrchestrationSnapshot(selectedSessionId ?? undefined)
+      .then(setOrchestration)
+      .catch((error: unknown) => setNotice(publicError(error)));
+  }, [events, orchestrationOpen, selectedSessionId]);
+
   async function selectSession(sessionId: string): Promise<void> {
     if (sessionId === selectedSessionId) return;
     setSelectedSessionId(sessionId);
     setEvents([]);
     setNotice("");
     setPermissionOverrides({});
+    setOrchestrationOpen(false);
+    setOrchestration(null);
     lastEventSeq.current = 0;
     setMobileNavigationOpen(false);
     try {
@@ -345,6 +389,8 @@ export function App(): React.JSX.Element {
     setPrompt("");
     setNotice("");
     setPermissionOverrides({});
+    setOrchestrationOpen(false);
+    setOrchestration(null);
     lastEventSeq.current = 0;
     setMobileNavigationOpen(false);
   }
@@ -394,6 +440,7 @@ export function App(): React.JSX.Element {
   }
 
   async function openFiles(): Promise<void> {
+    setOrchestrationOpen(false);
     setFilesOpen(true);
     if (files.length > 0 || filesLoading) return;
     setFilesLoading(true);
@@ -405,6 +452,26 @@ export function App(): React.JSX.Element {
     } finally {
       setFilesLoading(false);
     }
+  }
+
+  async function refreshOrchestration(): Promise<void> {
+    if (orchestrationLoading) return;
+    setOrchestrationLoading(true);
+    try {
+      const payload = await getOrchestrationSnapshot(selectedSessionId ?? undefined);
+      setOrchestration(payload);
+    } catch (error) {
+      setNotice(publicError(error));
+    } finally {
+      setOrchestrationLoading(false);
+    }
+  }
+
+  async function openOrchestration(): Promise<void> {
+    setFilesOpen(false);
+    setOrchestrationOpen(true);
+    setMobileNavigationOpen(false);
+    await refreshOrchestration();
   }
 
   async function decidePermission(permission: ProcessPermissionView, approve: boolean): Promise<void> {
@@ -454,6 +521,9 @@ export function App(): React.JSX.Element {
             </button>
             <button className="sidebar-nav-item" type="button" onClick={() => void openFiles()}>
               <Icon name="folder" /><span>工作区</span><small>{workspace?.fileCount ?? 0}</small>
+            </button>
+            <button className={`sidebar-nav-item ${orchestrationOpen ? "active" : ""}`} type="button" onClick={() => void openOrchestration()}>
+              <Icon name="spark" /><span>任务状态</span><small>{orchestration?.goals.filter((goal) => goal.status === "active" || goal.status === "blocked").length ?? 0}</small>
             </button>
           </nav>
           <div className="sidebar-divider" />
@@ -603,6 +673,67 @@ export function App(): React.JSX.Element {
             <div className="file-panel-root">{workspace?.root}</div>
             <div className="file-list">
               {filesLoading ? <p>正在读取文件……</p> : files.map((file) => <div className="file-row" key={file}><Icon name="file" /><span>{file}</span></div>)}
+            </div>
+          </aside>
+        ) : null}
+
+        {orchestrationOpen ? (
+          <aside className="file-panel orchestration-panel" aria-label="任务与工作流状态">
+            <div className="file-panel-heading">
+              <div><strong>任务状态</strong><small>{selectedSession?.title ?? "当前工作区"}</small></div>
+              <div className="panel-heading-actions">
+                <button type="button" aria-label="刷新任务状态" onClick={() => void refreshOrchestration()}><Icon name="spark" /></button>
+                <button type="button" aria-label="关闭任务状态" onClick={() => setOrchestrationOpen(false)}><Icon name="close" /></button>
+              </div>
+            </div>
+            <div className="file-panel-root">Goal / Workflow / Child Agent · append-only state</div>
+            <div className="orchestration-list">
+              {orchestrationLoading && orchestration === null ? <p>正在读取任务状态……</p> : null}
+              {orchestration !== null ? (
+                <>
+                  <section className="orchestration-section">
+                    <h3>目标 <span>{orchestration.goals.length}</span></h3>
+                    {orchestration.goals.length === 0 ? <p className="orchestration-empty">当前没有持久目标</p> : orchestration.goals.map((goal) => (
+                      <div className="goal-row" key={goal.id}>
+                        <div className="orchestration-row-title"><strong>{goal.title}</strong><em className={`task-status ${goal.status}`}>{orchestrationStatusLabel(goal.status)}</em></div>
+                        {goal.description ? <p>{goal.description}</p> : null}
+                        {goal.steps.length > 0 ? <div className="goal-steps">{goal.steps.map((step) => <span className={step.status} key={step.id}><i />{step.text}</span>)}</div> : null}
+                        {goal.note ? <small>{goal.note}</small> : null}
+                        <code>{goal.id} · r{goal.revision}</code>
+                      </div>
+                    ))}
+                  </section>
+                  <section className="orchestration-section">
+                    <h3>工作流 <span>{orchestration.workflows.length}</span></h3>
+                    {orchestration.workflows.length === 0 ? <p className="orchestration-empty">还没有可复用工作流</p> : orchestration.workflows.map((workflow) => (
+                      <div className="workflow-row" key={workflow.id}>
+                        <div className="orchestration-row-title"><strong>{workflow.name}</strong><em>{workflow.steps.length} 步</em></div>
+                        {workflow.description ? <p>{workflow.description}</p> : null}
+                        <small>{workflow.steps.map((step) => step.instruction).join(" → ")}</small>
+                        <code>{workflow.id}</code>
+                      </div>
+                    ))}
+                  </section>
+                  <section className="orchestration-section">
+                    <h3>最近执行 <span>{orchestration.workflowRuns.length + orchestration.childRuns.length}</span></h3>
+                    {orchestration.workflowRuns.slice(-8).reverse().map((run) => (
+                      <div className="run-row" key={run.id}>
+                        <div className="orchestration-row-title"><strong>Workflow</strong><em className={`task-status ${run.status}`}>{orchestrationStatusLabel(run.status)}</em></div>
+                        <small>{run.steps.map((step) => `${step.stepId}:${orchestrationStatusLabel(step.status)}`).join(" · ")}</small>
+                        <code>{run.id}</code>
+                      </div>
+                    ))}
+                    {orchestration.childRuns.slice(-8).reverse().map((run) => (
+                      <div className="run-row" key={run.id}>
+                        <div className="orchestration-row-title"><strong>Child Agent</strong><em className={`task-status ${run.status}`}>{orchestrationStatusLabel(run.status)}</em></div>
+                        <p>{run.instruction}</p>
+                        {run.finalText ? <small>{run.finalText}</small> : null}
+                        <code>{run.id} · {run.childSessionId}</code>
+                      </div>
+                    ))}
+                  </section>
+                </>
+              ) : null}
             </div>
           </aside>
         ) : null}

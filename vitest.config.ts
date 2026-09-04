@@ -13,6 +13,7 @@ export default defineConfig({
       "@daoyin/harness-browser": fileURLToPath(new URL("./packages/browser/src/index.ts", import.meta.url)),
       "@daoyin/harness-cloud": fileURLToPath(new URL("./packages/cloud/src/index.ts", import.meta.url)),
       "@daoyin/harness-mcp": fileURLToPath(new URL("./packages/mcp/src/index.ts", import.meta.url)),
+      "@daoyin/harness-orchestration": fileURLToPath(new URL("./packages/orchestration/src/index.ts", import.meta.url)),
     },
   },
   test: {

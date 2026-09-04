@@ -73,8 +73,12 @@ export class ToolRegistry {
     for (const tool of pack.tools) this.register(tool);
   }
 
+  public definitions(): ToolDefinition[] {
+    return [...this.#tools.values()];
+  }
+
   public descriptors(): ToolDescriptor[] {
-    return [...this.#tools.values()].map(({ name, description, inputSchema, category, mutating }) => ({
+    return this.definitions().map(({ name, description, inputSchema, category, mutating }) => ({
       name,
       description,
       inputSchema,

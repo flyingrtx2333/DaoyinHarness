@@ -1,6 +1,6 @@
 # DaoyinHarness Local Protocol
 
-> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, Process Permission decisions, WebSocket live delivery/replay, Linux Bubblewrap Sandbox, controlled Browser, and explicit remote Streamable HTTP MCP tool mounting/status are implemented. Authentication, richer recovery/fork APIs, Windows/macOS Sandbox providers, interactive MCP/Browser management APIs, stdio MCP and idempotency remain planned.
+> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, Process Permission decisions, WebSocket live delivery/replay, Linux Bubblewrap Sandbox, controlled Browser, explicit remote Streamable HTTP MCP tool mounting/status, and append-only Goal/Workflow/Child Agent orchestration are implemented. Authentication, session fork/resume/search, richer crash recovery, Windows/macOS Sandbox providers, interactive capability management APIs, stdio MCP and idempotency remain planned.
 
 ## 1. Transport and versioning
 
@@ -68,6 +68,7 @@ Task-specific resources such as build checkpoints, previews, documents, workflow
 | `GET` | `/api/v1/health` | Process, catalog and workspace readiness |
 | `GET` | `/api/v1/bootstrap` | Issue the local HttpOnly session cookie and return CSRF token, workspace summary, recent sessions, mounted capability metadata and configured MCP server status |
 | `GET` | `/api/v1/workspace/files` | List files from the selected, policy-checked workspace |
+| `GET` | `/api/v1/orchestration?sessionId=<id>` | Read scoped Goal, Workflow, Workflow Run and Child Agent Run snapshots |
 | `GET` | `/api/v1/process/permissions?sessionId=<id>` | List append-only Process Permission state visible to the current local account/resource/session |
 | `POST` | `/api/v1/process/permissions/:requestId/decision` | Approve once or deny the exact pending Process Permission request; requires cookie + CSRF |
 | `GET` | `/api/v1/sessions` | List local sessions |
@@ -81,7 +82,7 @@ The bootstrap response sets `daoyin_harness_session` as an HttpOnly `SameSite=St
 
 ### Planned v1 surface
 
-Authentication (`/auth/*`), session fork/resume/search, runtime capability enable/disable, interactive MCP/Browser management, Windows/macOS Sandbox management and idempotency keys are still contract targets rather than implemented endpoints. Remote Streamable HTTP MCP itself is already mounted from explicit CLI startup configuration; the missing piece here is an authenticated browser/API management surface, not the MCP tool adapter. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
+Authentication (`/auth/*`), session fork/resume/search, runtime capability enable/disable, interactive MCP/Browser management, Windows/macOS Sandbox management and idempotency keys are still contract targets rather than implemented endpoints. Remote Streamable HTTP MCP itself is already mounted from explicit CLI startup configuration, and Goal/Workflow/Child Agent orchestration is already model-facing plus read-visible through `/api/v1/orchestration`; the missing pieces here are management/configuration surfaces and richer session recovery. Task-specific preview/checkpoint APIs belong to optional capability packs rather than the core session protocol.
 
 ## 4. Event envelope
 
@@ -184,7 +185,15 @@ MCP `tools/list` entries are normalized into ordinary `extension` ToolRegistry d
 
 stdio MCP remains planned because it starts local processes. Its transport must delegate process creation to the existing Process Permission/Sandbox boundary rather than introducing a parallel executable path.
 
-## 10. Errors
+## 10. Goals, workflows and child-Agent state
+
+The orchestration subsystem stores Goal revisions, Workflow definitions, Workflow Run snapshots and Child Agent Run snapshots in `orchestration/state.jsonl`. Goal records are session-scoped while reusable Workflow definitions are resource-scoped. Goal updates append a new revision and may include `expectedRevision`; stale updates fail with `GOAL_REVISION_CONFLICT` rather than silently overwriting newer visible task state.
+
+Child Agent delegation creates a new opaque child session and turn in the canonical Agent event store, plus a `ChildAgentRun` linking that child identity back to the parent session/turn. Child runs share the parent cancellation signal and have bounded Agent/tool budgets. The child capability snapshot excludes orchestration tools, `run_package_script`, and persistent Memory mutations. A Child Run is therefore auditable without recursive delegation, hidden package-script approval requests or invisible long-lived memory writes.
+
+A Workflow Run executes definition steps sequentially through Child Agents and persists running/terminal snapshots. If one child fails or is cancelled, the remaining steps do not run, the Workflow Run becomes `failed`/`cancelled`, and an optional linked Goal becomes `blocked`/`cancelled`. Only an all-success run can become `completed` and complete its linked Goal. `/api/v1/orchestration` exposes the current scoped read model to the local UI; model-facing mutation still occurs through the capability registry.
+
+## 11. Errors
 
 REST errors use a stable envelope:
 
@@ -200,9 +209,9 @@ REST errors use a stable envelope:
 }
 ```
 
-Known error families include `AUTH_*`, `WORKSPACE_*`, `WEB_*`, `BROWSER_*`, `SKILL_*`, `MEMORY_*`, `COMPACTION_*`, `PROCESS_*`, `MCP_*`, `TURN_*`, `TOOL_*`, `MODEL_*`, `EXTENSION_*`, and `POLICY_*`. Task-specific capability packs may define their own stable families. Unknown exceptions map to `INTERNAL_ERROR` in the client response and retain the original stack only in redacted local diagnostics.
+Known error families include `AUTH_*`, `WORKSPACE_*`, `WEB_*`, `BROWSER_*`, `SKILL_*`, `MEMORY_*`, `COMPACTION_*`, `PROCESS_*`, `MCP_*`, `GOAL_*`, `WORKFLOW_*`, `CHILD_AGENT_*`, `ORCHESTRATION_*`, `TURN_*`, `TOOL_*`, `MODEL_*`, `EXTENSION_*`, and `POLICY_*`. Task-specific capability packs may define their own stable families. Unknown exceptions map to `INTERNAL_ERROR` in the client response and retain the original stack only in redacted local diagnostics.
 
-## 11. Idempotency and concurrency
+## 12. Idempotency and concurrency
 
 - Turn submission and future state-creating operations should accept `Idempotency-Key`; this is not yet implemented in the current local slice.
 - Reusing a key with the same canonical request body returns the prior resource; the same key with a different body is a conflict.

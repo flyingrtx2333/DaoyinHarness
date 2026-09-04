@@ -12,12 +12,14 @@ import type { Workspace } from "@daoyin/harness-workspace";
 const MAX_WORKSPACE_GUIDANCE_CHARACTERS = 12_000;
 
 export type MemoryContextProvider = (input: PromptAssemblyInput) => string | null | Promise<string | null>;
+export type OrchestrationContextProvider = (input: PromptAssemblyInput) => string | null | Promise<string | null>;
 
 export interface LocalPromptContextOptions {
   workspace: Workspace;
   workspaceSummary: WorkspaceSummary;
   sandboxStatus?: SandboxRuntimeStatus;
   memoryContextProvider?: MemoryContextProvider;
+  orchestrationContextProvider?: OrchestrationContextProvider;
 }
 
 async function optionalWorkspaceText(workspace: Workspace, path: string): Promise<string | null> {
@@ -86,6 +88,12 @@ export function createLocalPromptRegistry(options: LocalPromptContextOptions): S
       JSON.stringify(catalog),
     ].join("\n");
   }));
+  if (options.orchestrationContextProvider !== undefined) {
+    registry.register(promptSection("orchestration_state", "dynamic", 1550, async (input) => {
+      const content = await options.orchestrationContextProvider?.(input);
+      return content?.trim() ? `Visible persistent goal/workflow state for this step:\n${content.trim()}` : null;
+    }));
+  }
   if (options.memoryContextProvider !== undefined) {
     registry.register(promptSection("memory", "dynamic", 1600, async (input) => {
       const content = await options.memoryContextProvider?.(input);

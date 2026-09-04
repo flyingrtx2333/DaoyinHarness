@@ -23,6 +23,7 @@ export interface RuntimeHealth {
     modelGateway: Readiness;
     browser: Readiness;
     mcp: Readiness;
+    orchestration: Readiness;
   };
 }
 
@@ -222,6 +223,71 @@ export interface McpServerSummary {
   toolCount: number;
   errorCode?: string;
   message?: string;
+}
+
+export type GoalStatus = "active" | "blocked" | "completed" | "cancelled";
+export type WorkflowRunStatus = "running" | "completed" | "failed" | "cancelled";
+export type ChildAgentRunStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface GoalRecord {
+  id: string;
+  accountId: string;
+  resourceScopeId: string;
+  sessionId: string;
+  title: string;
+  description: string;
+  status: GoalStatus;
+  steps: Array<{ id: string; text: string; status: "pending" | "in_progress" | "completed" | "blocked" | "cancelled" }>;
+  note: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  accountId: string;
+  resourceScopeId: string;
+  name: string;
+  description: string;
+  steps: Array<{ id: string; instruction: string }>;
+  createdAt: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  accountId: string;
+  resourceScopeId: string;
+  parentSessionId: string;
+  parentTurnId: string;
+  goalId: string | null;
+  status: WorkflowRunStatus;
+  steps: Array<{ stepId: string; status: "pending" | "running" | "completed" | "failed" | "cancelled"; childRunId: string | null; summary: string }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChildAgentRun {
+  id: string;
+  accountId: string;
+  resourceScopeId: string;
+  parentSessionId: string;
+  parentTurnId: string;
+  childSessionId: string;
+  childTurnId: string;
+  instruction: string;
+  status: ChildAgentRunStatus;
+  finalText: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrchestrationSnapshot {
+  goals: GoalRecord[];
+  workflows: WorkflowDefinition[];
+  workflowRuns: WorkflowRun[];
+  childRuns: ChildAgentRun[];
 }
 
 export interface RuntimeBootstrap {

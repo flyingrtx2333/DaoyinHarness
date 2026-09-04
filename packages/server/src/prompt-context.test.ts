@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 describe("local prompt context", () => {
-  it("assembles runtime, workspace guidance, skill catalog and optional memory as dynamic sections", async () => {
+  it("assembles runtime, workspace guidance, skill catalog, visible orchestration state and memory as dynamic sections", async () => {
     const { root, workspace } = await temporaryWorkspace();
     await writeFile(path.join(root, "AGENTS.md"), "Keep workspace changes focused.\n", "utf8");
     await mkdir(path.join(root, ".daoyin", "skills", "research"), { recursive: true });
@@ -30,6 +30,7 @@ describe("local prompt context", () => {
     const registry = createLocalPromptRegistry({
       workspace,
       workspaceSummary: { name: "demo", root, fileCount: 2 },
+      orchestrationContextProvider: ({ sessionId }) => JSON.stringify({ goals: [{ id: "goal_visible", title: "Visible goal", sessionId }] }),
       memoryContextProvider: ({ userMessage }) => `Remembered preference related to: ${userMessage}`,
     });
 
@@ -49,6 +50,8 @@ describe("local prompt context", () => {
     expect(assembled.dynamicText).toContain("Keep workspace changes focused");
     expect(assembled.dynamicText).toContain("skill_catalog");
     expect(assembled.dynamicText).toContain("Research with cited public evidence");
+    expect(assembled.dynamicText).toContain("orchestration_state");
+    expect(assembled.dynamicText).toContain("Visible goal");
     expect(assembled.dynamicText).toContain("memory");
     expect(assembled.dynamicText).toContain("Remembered preference related to: research this");
   });

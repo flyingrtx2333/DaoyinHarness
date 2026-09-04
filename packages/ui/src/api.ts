@@ -1,5 +1,6 @@
 import type {
   CreateSessionResponse,
+  OrchestrationSnapshot,
   ProcessPermissionRequest,
   RuntimeBootstrap,
   SessionEventsResponse,
@@ -84,6 +85,11 @@ export function cancelTurn(sessionId: string, turnId: string): Promise<{ status:
 
 export function getWorkspaceFiles(signal?: AbortSignal): Promise<WorkspaceFilesResponse> {
   return request<WorkspaceFilesResponse>("/api/v1/workspace/files", signal === undefined ? {} : { signal });
+}
+
+export function getOrchestrationSnapshot(sessionId?: string, signal?: AbortSignal): Promise<OrchestrationSnapshot> {
+  const query = sessionId === undefined ? "" : `?${new URLSearchParams({ sessionId }).toString()}`;
+  return request<OrchestrationSnapshot>(`/api/v1/orchestration${query}`, signal === undefined ? {} : { signal });
 }
 
 export function getProcessPermissions(sessionId: string, signal?: AbortSignal): Promise<ProcessPermissionRequest[]> {

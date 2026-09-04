@@ -92,6 +92,16 @@ High-impact changes display the exact scope to the user. Current Process Permiss
 - MCP descriptions, schemas, resources, results and errors are external untrusted data. They cannot grant authorization or override local runtime policy.
 - stdio MCP is not enabled yet because it launches local processes. Future support must delegate process creation to the existing Process Permission/Sandbox boundary.
 
+### Orchestration and child-Agent controls
+
+- Goals, Workflow definitions, Workflow Runs and Child Runs are explicit visible task artifacts, not persisted hidden chain-of-thought. Updates append snapshots/revisions rather than rewriting prior state.
+- Goal mutation may require an `expectedRevision`; stale writes fail instead of silently overwriting newer task state.
+- Every Child Agent receives an opaque child session/turn and its ordinary Agent events are persisted in the canonical event store with a separate `ChildAgentRun` parent link.
+- Child Agents inherit the parent cancellation signal and a bounded model/tool budget. Their capability snapshot intentionally excludes orchestration tools, `run_package_script`, and persistent Memory write/update/forget operations.
+- The exclusion prevents recursive delegation, child-created permission requests that are invisible in the parent UI, and unseen long-lived memory mutations. Child Agents may still perform ordinary capability side effects explicitly authorized by the delegated parent task; their tool evidence remains auditable in the child trajectory.
+- Workflow execution is sequential and fail-closed: one failed/cancelled child stops remaining steps and prevents the Workflow Run or linked Goal from being marked complete.
+- Orchestration state is scoped by account/resource/session and the local read API validates session identity before exposing session-scoped state.
+
 ## 6. Preview isolation
 
 Generated applications are untrusted, even when produced by the Agent.
@@ -132,6 +142,6 @@ Generated applications are untrusted, even when produced by the Agent.
 
 ## 10. Security acceptance
 
-Security tests must cover loopback exposure, Host/Origin/CSRF, OAuth replay, workspace traversal, symlink/junction escape, archive bombs, command injection, preview-origin isolation, secret redaction, SSRF, Browser proxy/private-target enforcement, MCP endpoint/credential validation, MCP audit redaction/failure isolation and cancellation of child processes.
+Security tests must cover loopback exposure, Host/Origin/CSRF, OAuth replay, workspace traversal, symlink/junction escape, archive bombs, command injection, preview-origin isolation, secret redaction, SSRF, Browser proxy/private-target enforcement, MCP endpoint/credential validation, MCP audit redaction/failure isolation, Goal revision conflicts, child capability isolation, parent/child trajectory links, workflow fail-closed semantics and cancellation propagation.
 
 A security policy violation may be shown as critical. Ordinary build, model, storage or network failures use normal warning/error presentation and an Agent-authored summary.

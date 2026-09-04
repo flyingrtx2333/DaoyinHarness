@@ -1,6 +1,6 @@
 # DaoyinHarness Architecture
 
-> Status: general-agent architecture baseline. The local process, REST/UI + WebSocket slice, append-only session transcript, multi-turn Agent loop, per-step System Prompt assembly, workspace/Web/Skills/Memory/Browser/Process capability packs, Linux Bubblewrap sandbox, standardized Daoyin Gateway client, and explicit remote Streamable HTTP MCP adapter are implemented. Main-platform OAuth/Gateway service integration, SQLite materialization, workflows/goals, sub-agents, stdio MCP under the Process policy, Windows/macOS sandbox providers and plugin discovery remain staged work.
+> Status: general-agent architecture baseline. The local process, REST/UI + WebSocket slice, append-only session transcript, multi-turn Agent loop, per-step System Prompt assembly, workspace/Web/Skills/Memory/Browser/Process capability packs, Linux Bubblewrap sandbox, standardized Daoyin Gateway client, explicit remote Streamable HTTP MCP adapter, and append-only Goals / Workflow / Child Agent orchestration are implemented. Main-platform OAuth/Gateway service integration, session fork/resume/search, SQLite materialization, stdio MCP under the Process policy, Windows/macOS sandbox providers and plugin/capability management remain staged work.
 
 ## 1. Product boundary
 
@@ -49,8 +49,8 @@ CLI / Local Server / Web UI
                  ├── Process / Sandbox        [Linux implemented]
                  ├── MCP remote HTTP           [implemented]
                  ├── Browser / Computer Use   [implemented baseline]
-                 ├── Workflow / Goals         [planned]
-                 └── Sub-agents               [planned]
+                 ├── Workflow / Goals         [implemented baseline]
+                 └── Child Agents             [implemented baseline]
 
 Daoyin cloud control plane
             ├── OAuth / account / membership
@@ -108,9 +108,9 @@ The workspace is a context source, not a mandatory semantic category. The defaul
 
 The core prompt is no longer one hard-coded string. `SystemPromptRegistry` resolves named sections in priority order and returns separate stable and dynamic text blocks.
 
-- **Stable sections** currently cover identity, general scope, tool behavior, safety/evidence and truthful completion. They are cached after first resolution and reused until the registry changes.
+- **Stable sections** currently cover identity, general scope, tool behavior, safety/evidence, process/browser/MCP/orchestration behavior and truthful completion. They are cached after first resolution and reused until the registry changes.
 - **Dynamic sections** are rebuilt before **every model step**, not merely once at turn start. Core dynamic sections include mounted capabilities, persisted recent tool evidence and turn-specific instructions.
-- The local Server composition root adds runtime time/OS metadata, selected workspace context, bounded workspace guidance from `.daoyin/AGENT.md` / `AGENTS.md`, an automatically discovered Skill catalog, and an optional provenance-bound memory provider seam.
+- The local Server composition root adds runtime time/OS metadata, selected workspace context, bounded workspace guidance from `.daoyin/AGENT.md` / `AGENTS.md`, an automatically discovered Skill catalog, visible scoped Goal/Workflow/Child Run state, and an optional provenance-bound memory provider seam.
 - Tool schemas are snapshotted from the current `ToolRegistry` for the same model step. A capability added or removed between steps can therefore change both the schema and dynamic capability section without changing the Agent loop.
 
 `ContextAssembler` is responsible for bounded historical dialogue plus per-step System Prompt assembly. Recent user/assistant turns are reconstructed from the append-only transcript. Historical tool execution is not inferred from assistant prose: `tool.started` now persists bounded JSON input, and completed/failed evidence is projected into the `recent_tool_evidence` dynamic section. Older transcripts without tool inputs remain readable and simply expose `null` input for that evidence.
@@ -179,6 +179,14 @@ Skills provide reusable instructions/workflows; MCP and plugins provide capabili
 
 stdio MCP is intentionally deferred because it launches local processes. It must reuse the Process Permission/Sandbox boundary instead of creating a second execution path. Generic plugin discovery is also still planned.
 
+### Goals, workflows and child Agents
+
+`packages/orchestration` implements visible task/orchestration facts as an append-only JSONL journal. Goal updates append a new revision and can require `expectedRevision` so an Agent cannot silently overwrite a newer task-state update. Workflow definitions are resource-scoped reusable data; Workflow Run and Child Run records append running/terminal snapshots and retain explicit parent session/turn links.
+
+`delegate_agent` creates a separate child session and turn in the canonical `SessionEventStore`, so the delegated work has its own normal Agent trajectory rather than an opaque internal model call. Child runs share the parent cancellation signal and a bounded step/tool budget. They reuse the parent model, prompt registry and ordinary environment capabilities, but the child ToolRegistry snapshot intentionally excludes orchestration tools, `run_package_script`, and persistent Memory mutations. This prevents recursive delegation, hidden package-script permission requests and unseen long-lived memory writes.
+
+`workflow_run` executes workflow steps sequentially through Child Agents. A failed or cancelled child persists a failed/cancelled Workflow Run and stops the remaining steps; an optionally linked visible Goal becomes `blocked`/`cancelled`. Only a run whose every step completed can produce a `completed` Workflow Run and complete the linked Goal. The local UI exposes Goal, Workflow, Workflow Run and Child Run state through `/api/v1/orchestration` and the task-state panel. The Dynamic Prompt receives a bounded visible orchestration-state summary; it never receives hidden chain-of-thought as a task artifact.
+
 The long-term invariant is **capabilities are composable, the loop stays small**.
 
 ## 4. Sources of truth
@@ -192,6 +200,7 @@ The long-term invariant is **capabilities are composable, the loop stays small**
 | Capability availability | Runtime capability registry | Bootstrap capability list |
 | Identity | Daoyin authorization server | Local browser/account session |
 | Memory | Versioned records with provenance | Retrieval indexes and summaries |
+| Goals / Workflows / Child Runs | `orchestration/state.jsonl` append-only revisions/snapshots plus child session trajectories | Dynamic prompt state and UI task panel |
 | Process permission decisions | Append-only permission snapshots keyed by exact fingerprint | UI pending/approved/denied/consumed state |
 
 An event is persisted before it becomes authoritative UI state. Derived stores must be rebuildable from facts where practical.
@@ -265,6 +274,7 @@ Each stored memory has a stable ID, kind, content, bounded keywords, confidence,
 - public Web tools reject private-network destinations and validate redirects;
 - the Browser capability is mounted only when a supported system browser is discovered; its traffic is forced through a loopback proxy that resolves/pins public targets and rejects local/private destinations, and each Harness session receives an ephemeral BrowserContext;
 - remote MCP endpoints are explicit startup configuration, use HTTPS except explicit loopback HTTP, reject URL credentials/query parameters and automatic redirects, and their tool metadata/results remain untrusted external data;
+- Goal/Workflow/Child Run state is append-only visible task data; Child Agents cannot recursively delegate, run permission-gated package scripts, or mutate persistent memory in the current baseline;
 - external content is data, never policy;
 - model-provider secrets are never sent to the browser;
 - no arbitrary shell-string tool exists; named read-only process operations are policy-checked and workspace-controlled executable code requires an exact one-shot permission. Linux uses the Bubblewrap provider when its startup probe passes; Windows/macOS currently report `osIsolation: none` rather than pretending to be sandboxed.
@@ -288,6 +298,7 @@ The gateway handles membership, quota, model policy and audit. Local capabilitie
 | `packages/cloud` | Daoyin AI Gateway model adapter and cloud credential-provider boundary |
 | `packages/browser` | System-browser discovery, session-isolated Playwright contexts and pinned public-network proxy |
 | `packages/mcp` | Explicit remote Streamable HTTP MCP lifecycle, tool discovery/call normalization and server status |
+| `packages/orchestration` | Append-only Goals/Workflow/Child Run state, bounded child Agent execution and workflow failure semantics |
 | `packages/process` | Confined process execution, named-operation policy and append-only permission grants |
 | `packages/workspace` | Safe local files, session transcript and local state primitives |
 | `packages/protocol` | Shared API/event/capability/error contracts |
@@ -295,4 +306,4 @@ The gateway handles membership, quota, model policy and audit. Local capabilitie
 | `packages/evaluator` | Optional task-specific evidence/evaluation adapters |
 | `packages/ui` | Task-neutral local React application |
 
-Likely future packages include a dedicated `skills` package, additional `sandbox` providers, `workflow`, richer `memory` and `plugins`. stdio MCP support should extend `packages/mcp` while delegating process creation to the controlled Process Service. Future packages should depend on explicit runtime interfaces rather than importing the UI or server routing layer.
+Likely future packages include a dedicated `skills` package, additional `sandbox` providers, richer `memory`, derived session/search indexes and `plugins`. stdio MCP support should extend `packages/mcp` while delegating process creation to the controlled Process Service. Session fork/resume/search should extend the existing session/catalog/event abstractions rather than introducing a second trajectory format. Future packages should depend on explicit runtime interfaces rather than importing the UI or server routing layer.

@@ -12,7 +12,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @daoyin/harness-protocol && npm run build --workspace @daoyin/harness-process && npm run build --workspace @daoyin/harness-workspace && npm run build --workspace @daoyin/harness-browser && npm run build --workspace @daoyin/harness-mcp && npm run build --workspace @daoyin/harness-tools && npm run build --workspace @daoyin/harness-agent-core && npm run build --workspace @daoyin/harness-cloud && npm run build --workspace @daoyin/harness-server && npm run build --workspace @daoyin/harness-ui && npm run build --workspace @daoyin/harness",
+    "build": "npm run build --workspace @daoyin/harness-protocol && npm run build --workspace @daoyin/harness-process && npm run build --workspace @daoyin/harness-workspace && npm run build --workspace @daoyin/harness-browser && npm run build --workspace @daoyin/harness-mcp && npm run build --workspace @daoyin/harness-tools && npm run build --workspace @daoyin/harness-agent-core && npm run build --workspace @daoyin/harness-orchestration && npm run build --workspace @daoyin/harness-cloud && npm run build --workspace @daoyin/harness-server && npm run build --workspace @daoyin/harness-ui && npm run build --workspace @daoyin/harness",
     "dev": "npm run build && npm start -- --no-open",
     "dev:ui": "npm run dev --workspace @daoyin/harness-ui",
     "lint": "node node_modules/eslint/bin/eslint.js .",
