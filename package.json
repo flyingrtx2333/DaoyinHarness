@@ -2,7 +2,7 @@
   "name": "daoyin-harness-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Clean-room local Agent runtime for Daoyin",
+  "description": "Shared local and cloud Agent runtime for Daoyin",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"
@@ -19,6 +19,7 @@
     "package:audit": "node scripts/audit-package.mjs",
     "package:verify": "node scripts/verify-packed-install.mjs",
     "start": "node packages/cli/dist/index.js",
+    "start:cloud": "node packages/server-cloud/dist/main.js",
     "smoke:runtime": "node scripts/smoke-runtime.mjs",
     "test": "node node_modules/vitest/vitest.mjs run",
     "typecheck": "npm run typecheck --workspaces --if-present"

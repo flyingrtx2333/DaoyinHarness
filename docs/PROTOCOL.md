@@ -1,6 +1,8 @@
 # DaoyinHarness Local Protocol
 
-> Status: evolving v1 contract for a task-neutral local Agent runtime. Bootstrap/workspace/session/turn REST, capability metadata, shared Agent events, local Skills, scoped append-only Memory, derived Context Compaction, Process Permission decisions, WebSocket live delivery/replay, Linux Bubblewrap Sandbox, controlled Browser, explicit remote Streamable HTTP MCP tool mounting/status, append-only Goal/Workflow/Child Agent orchestration, session fork/resume/search, and crash interruption recovery are implemented. Authentication, Windows/macOS Sandbox providers, interactive capability management APIs, stdio MCP and idempotency remain planned.
+This is the **local adapter** protocol. Cloud sessions/runs/events use `/api/v1/cloud/*`, documented in [server-cloud](../packages/server-cloud/README.md). The main platform's browser-facing `/api/company-assistant/agent/*` proxy and service-only `/api/internal/agent-public/v1/*` adapters are documented in [UNIFIED-AGENT.md](UNIFIED-AGENT.md). Cloud request idempotency is implemented independently of local turn submission. `ExecutionIdentity.expiresAt` is epoch milliseconds; event timestamps remain RFC 3339.
+
+> Status: local bootstrap/workspace/session/turn REST, OAuth integration, capability metadata, shared events, Skills, scoped Memory, Context Compaction, Process permissions, WebSocket replay, controlled Browser/MCP and local orchestration are implemented. Windows/macOS Sandbox providers, interactive capability management, stdio MCP and local submission idempotency remain staged. Cloud Run idempotency is implemented in the separate cloud protocol.
 
 ## 1. Transport and versioning
 

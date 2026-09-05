@@ -139,8 +139,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof CloudError) return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
     if (error instanceof ExecutionAccessError) return reply.code(401).send({ error: { code: error.code, message: "执行身份无效或授权已过期。" } });
-    if (error.validation !== undefined) return reply.code(400).send({ error: { code: "REQUEST_INVALID", message: "请求格式不正确；身份和权限不能通过请求正文指定。" } });
-    if (error.statusCode === 413) return reply.code(413).send({ error: { code: "REQUEST_TOO_LARGE", message: "请求内容过大。" } });
+    if (error instanceof Error && "validation" in error) return reply.code(400).send({ error: { code: "REQUEST_INVALID", message: "请求格式不正确；身份和权限不能通过请求正文指定。" } });
+    if (error instanceof Error && "statusCode" in error && error.statusCode === 413) return reply.code(413).send({ error: { code: "REQUEST_TOO_LARGE", message: "请求内容过大。" } });
     return reply.code(503).send({ error: { code: "CLOUD_REQUEST_FAILED", message: "请求未完成，请保留原请求标识并查询任务状态。" } });
   });
 

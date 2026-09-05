@@ -1,6 +1,19 @@
 # DaoyinHarness Roadmap
 
-> Status: implementation sequence for a general-purpose local Agent Harness. A phase is complete only when its exit criteria are met; website preview is an optional capability, not the definition of v1.
+> Current priority: a unified Agent platform with one shared engine and local/cloud adapters. A phase is complete only when its exit criteria have evidence. See [current implementation and verification](UNIFIED-AGENT.md).
+
+## Unified platform delivery sequence
+
+| Stage | Current state | Exit criterion |
+| --- | --- | --- |
+| Shared kernel and execution identity | Implemented contracts, tool checks and cloud session/run storage | Windows checks and isolation/recovery tests pass |
+| Public website bridge | Implemented platform grants, MySQL operation ledger, model/search adapters and browser proxy APIs | Real public corpus/model and website UI complete one replayable, cancellable session; explicitly configured sponsor |
+| Personal/organization applications | Identity contracts only | Explicit memberships, installations, entitlements and resource checks; no first-tenant fallback |
+| Story queries and paid jobs | Pending | One authorized job, durable job receipt, budget reservation and timeout reconciliation without repeated charges |
+| Youji and shared memory | Pending | Explicit cross-app consent, scoped retrieval, provenance, revocation and forgetting |
+| Builder products and channels | Pending | Separate build/runtime identities, immutable app versions, installations, deployments and client isolation |
+
+The following P0–P12 sections track local capabilities. They do not imply that those tools are available in the cloud. Production MySQL Harness storage, multi-worker leases, monetary settlement and historical data migration require separate implementation and acceptance.
 
 ## P0 — Repository and architecture baseline
 

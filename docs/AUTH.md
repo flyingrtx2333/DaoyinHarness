@@ -1,6 +1,12 @@
 # DaoyinHarness Authentication
 
-> Status: required main-platform contract for v1. The current Daoyin platform does not yet expose these OAuth endpoints.
+> This document covers the local OAuth client. Current unified platform evidence is in [UNIFIED-AGENT.md](UNIFIED-AGENT.md); production login availability must be verified live rather than inferred from this source document.
+
+## Cloud public execution authorization
+
+The public company entry uses an independent random, 30-minute visitor grant issued by the main platform, not a local OAuth token or an employee account. The platform stores only its hash, visitor ID, explicit sponsor membership, policy version, expiry and revocation. The browser receives an HttpOnly SameSite Cookie; state changes require the configured Origin and a CSRF token. Login/refresh/logout for local accounts remains separate.
+
+Harness introspects the visitor grant through the dedicated service-authenticated platform bridge, then rechecks the entire identity before and after model/tool work. Changing sponsor, policy revision or active membership invalidates the grant. Visitor permissions never inherit the sponsor's administrator role. See [ADR-0008](adr/0008-platform-public-bridge.md) and [the bridge protocol](../packages/server-cloud/README.md).
 
 ## 1. Decision
 

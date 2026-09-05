@@ -6,3 +6,4 @@ export {
   type CompanyKnowledgeClient, type CompanyKnowledgeQuery,
 } from "./company-profile.js";
 // The optional SQLite adapter lives at /sqlite so importing the API does not load node:sqlite.
+export { createPlatformAdapters, createPlatformCloudServer, type PlatformAdapterOptions } from "./platform-adapter.js";

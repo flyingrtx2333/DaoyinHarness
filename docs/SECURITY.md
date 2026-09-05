@@ -4,6 +4,8 @@
 
 ## 1. Trust boundaries
 
+The cloud adapter is a separate execution boundary, specified by [ADR-0008](adr/0008-platform-public-bridge.md). It mounts only explicit read-only business tools, uses platform-validated visitor grants, checks sponsor membership and grant revocation repeatedly, and never mounts the local workspace/process/browser registry. The platform BFF requires Origin/CSRF protection and does not expose bearer credentials in JSON. Fixed HTTPS platform origins (loopback HTTP for development only), no redirects, bounded responses and durable operation admissions constrain service calls. Operation-count limits are not monetary reservations. The local controls below remain applicable to local execution.
+
 DaoyinHarness handles four different trust levels:
 
 1. **Trusted local runtime code** distributed by Daoyin.

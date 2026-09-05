@@ -1,6 +1,8 @@
 # DaoyinHarness Testing and Reliability
 
-> Status: acceptance policy for future implementation. Passing one layer never implies a higher layer passed.
+> Current Windows verification for the unified platform is recorded in [UNIFIED-AGENT.md](UNIFIED-AGENT.md#验证记录). Results describe the tested working checkout; visual workbench and real-account acceptance remain separate.
+
+> Passing one layer never implies a higher layer passed. Platform-adapter tests use the real AgentEngine and SQLite with simulated HTTP/provider responses. Backend bridge tests run from Windows Docker Compose against isolated MySQL and FastAPI, with fixture memberships, provider and corpus; no production data or billable model calls.
 
 ## 1. Evidence levels
 

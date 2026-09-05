@@ -1,12 +1,22 @@
 # DaoyinHarness Architecture
 
-> Status: general-agent architecture baseline. The local process, REST/UI + WebSocket slice, append-only session transcript, multi-turn Agent loop, per-step System Prompt assembly, workspace/Web/Skills/Memory/Browser/Process capability packs, Linux Bubblewrap sandbox, standardized Daoyin Gateway client, explicit remote Streamable HTTP MCP adapter, and append-only Goals / Workflow / Child Agent orchestration are implemented. Main-platform OAuth/Gateway service integration, session fork/resume/search, SQLite materialization, stdio MCP under the Process policy, Windows/macOS sandbox providers and plugin/capability management remain staged work.
+> Current direction: one shared AgentEngine, local and cloud adapters, platform-owned governance and independently operated business capabilities. See [Unified Agent platform](UNIFIED-AGENT.md) for the current implementation matrix and Windows evidence. Sections describing local tools below apply only to the local adapter.
 
 ## 1. Product boundary
 
-DaoyinHarness is a **general-purpose local Agent Harness**. It is not a website builder and it is not defined by software projects. A coding repository may be the current workspace, but the same session model must also support research, document work, local file operations, analysis, browser tasks, workflows and other tool-backed work.
+DaoyinHarness is the **shared general-purpose Agent kernel** for Daoyin. `packages/agent-core` is the sole generic model/tool loop. `packages/server` adapts it to local files, processes and the workbench; `packages/server-cloud` adapts it to authorized business services. `packages/contracts` contains environment-neutral persistence and execution identity contracts.
 
-The browser is a view and input surface, not the owner of Agent state. The Daoyin cloud is the account/model control plane, not the executor for ordinary local tools.
+The browser is a view and input surface, not the owner of Agent state. The main platform owns accounts, spaces, installations, grants and payer attribution. Cloud execution runs in the separate Harness service and does not acquire local filesystem permissions. Business resources and long-running jobs remain owned by Story, Youji and Builder services.
+
+```text
+Local CLI / Workbench → local adapter ─┐
+                                     ├→ AgentEngine → authorized capability registry
+Website / business UI → platform BFF → cloud adapter ─┘
+                              │                 │
+                              └→ grants / payer └→ platform model + public knowledge APIs
+```
+
+The first cloud bridge is the public company profile. Anonymous visitor identity, public data ownership and sponsor membership are separate. Each operation is bound to an active grant and recorded before external work. Current cloud SQLite storage is a single-instance pilot; platform grants and operation admissions use MySQL transactions. Neither is evidence of distributed Harness scheduling or cross-business memory sharing.
 
 The architecture optimizes for five outcomes:
 

@@ -2,7 +2,7 @@
 
 ## Scope
 
-DaoyinHarness is a clean-room Node.js general-purpose local Agent Harness. It is task-neutral: coding, websites and previews are optional capability use cases, not the product boundary. Work only inside this repository unless the user explicitly authorizes a coordinated change to the Daoyin main platform.
+DaoyinHarness is the clean-room Node.js shared Agent kernel for Daoyin's local and cloud runtimes. It is task-neutral: coding, websites and previews are optional capabilities. The main platform owns identities, spaces, installations, authorization and billing; business backends own resources and jobs. See docs/UNIFIED-AGENT.md and ADR-0006 through ADR-0008. Work only inside this repository unless the user explicitly authorizes a coordinated change to the Daoyin main platform.
 
 The sibling directory `claude-code-main/` is local, read-only research material. It is ignored by Git and must never be copied, moved, renamed, patched, imported, packaged, or committed as part of DaoyinHarness.
 
@@ -21,7 +21,7 @@ The sibling directory `claude-code-main/` is local, read-only research material.
 - TypeScript strict mode, ESM, and no production `any`.
 - Fastify for the loopback HTTP server and WebSocket transport.
 - React and Vite for the local Web UI.
-- SQLite for queryable indexes; append-only JSONL for the canonical event transcript.
+- Local runtime: SQLite for queryable indexes; append-only JSONL for the canonical event transcript. Cloud pilot: append-only SQL events through CloudRepository; single-instance SQLite is not a production distributed scheduler.
 
 The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harness`.
 
@@ -36,7 +36,7 @@ The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harn
 ## Data invariants
 
 - A session transcript is append-only. Never rewrite or delete prior events during normal operation.
-- SQLite is an index and materialized state store, not the sole record of a session. It must be rebuildable from append-only transcript facts and capability-owned manifests where applicable.
+- In the local runtime, SQLite is an index and materialized state store, not the sole session record. It must be rebuildable from append-only transcript facts and capability-owned manifests. Cloud storage follows ADR-0006: immutable events are stored transactionally and never replaced by mutable run summaries.
 - Task-specific checkpoints/artifacts, when a capability defines them, are immutable evidence and must never replace a last-known-good result after a failed turn.
 - Mutating writes are serialized for the same protected resource scope. Reads may run concurrently only when they cannot observe a partial write.
 - User cancellation stops future tool work and records `turn.cancelled`; it does not erase completed events.
@@ -50,7 +50,7 @@ The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harn
 - Validate `Host` and `Origin`, use HttpOnly SameSite cookies, and require CSRF protection for state-changing browser requests.
 - Daoyin login uses OAuth 2.1 Authorization Code + PKCE. Do not collect the user's Daoyin password in the local UI.
 - Never store access or refresh tokens in localStorage, source files, logs, transcripts, tool results, or plaintext SQLite.
-- Never send model-provider secrets to the local server or browser. Model calls go through a user-authenticated Daoyin AI Gateway.
+- Never send model-provider secrets to either Harness runtime or the browser. Local model calls use the authenticated Daoyin AI Gateway; cloud calls use a platform-validated execution grant and the corresponding scoped gateway adapter.
 
 ## Workspace and tool safety
 

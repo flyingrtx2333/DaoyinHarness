@@ -16,7 +16,7 @@ describe("execution identity contracts (pure policy, no auth/provider I/O)", () 
   });
 
   it.each([
-    ["missing identity", () => undefined],
+    ["missing identity", (): unknown => undefined],
     ["missing payer", () => ({ ...identity(), billingAccountId: undefined })],
     ["expired grant", () => ({ ...identity(), expiresAt: Date.now() - 1 })],
     ["foreign personal owner", () => ({ ...identity(), space: { kind: "personal", id: "alice-personal", ownerUserId: "bob" } })],

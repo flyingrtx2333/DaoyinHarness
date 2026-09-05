@@ -1,8 +1,12 @@
 # DaoyinHarness
 
+DaoyinHarness 现定位为**道引统一 Agent 平台的共享执行内核**：本地 CLI / 工作台和云端业务入口共用 `AgentEngine`；主平台 backend 负责身份、空间、应用安装、授权和费用归属，短剧、文旅、Builder 保留业务服务与任务状态。
+
+本轮补齐官网只读桥：主平台访客授权、MySQL 操作去重与调用额度、公开知识检索、单步模型接口、Cookie/CSRF 会话代理，以及 Harness 平台适配器和 `npm run start:cloud`。官网现有界面尚未切换，生产配置、真实模型验收与多 Worker 调度仍待完成。当前架构、配置和证据以 [统一 Agent 平台说明](docs/UNIFIED-AGENT.md) 为准。
+
 > **项目状态：通用本地 Agent 纵向闭环已打通，模型网关客户端、受控 Browser、远程 Streamable HTTP MCP、Goals / Workflow / Child Agent orchestration，以及 session fork/resume/search + crash interruption recovery 已落地，主平台 OAuth / Gateway 服务端仍待联调。** CLI、本地 API、React Web UI、安全工作区、append-only trajectory、每步 Prompt/Context 装配、Capability Registry、Skills、公共 Web、Browser、MCP、provenance-bound Memory、Context Compaction、持久 Goal/Workflow/Child Run、受控 Process Service + 一次性 Permission Gate，以及标准化 Daoyin AI Gateway `ModelClient` 已经串联。Linux Bubblewrap OS Sandbox 已实现并带启动探测；Windows/macOS Sandbox、插件/能力管理、SQLite materialization/语义检索与正式 npm 发布仍待完成。
 
-DaoyinHarness 是道引的本地通用 Agent Harness，不是网页生成器，也不把“软件项目”当成所有任务的默认形态。用户启动一个本地运行时并使用道引账号登录后，同一个 Agent 可以在持续会话中聊天、检索公开网页、操作受控本地浏览器、调用显式配置的 MCP 扩展、处理本地文件与资料、维护可见任务目标、运行可复用 Workflow、委派有独立 trajectory 的 Child Agent、执行受控工具并完成软件工程任务；Skills、Sandbox、后续插件与更多运行时能力继续通过同一 capability seam 扩展。
+本地运行形态继续保留：用户通过道引账号登录后，同一个 Agent 可以在持续会话中聊天、检索公开网页、操作受控本地浏览器、调用显式配置的 MCP 扩展、处理本地文件、维护任务目标和运行 Workflow。云端通过受限的业务 Profile 装配能力，不加载本机工具或自动同步本地历史。
 
 项目采用净室实现。仓库旁的 `claude-code-main/` 只用于研究持久 Agent 的行为与交互模式，不是 DaoyinHarness 的代码基础，也不会进入 Git、npm 包或发布产物。
 
@@ -30,7 +34,7 @@ npx @daoyin/harness
 5. 在持续会话中按需使用本地文件、网页检索、受控进程与后续扩展能力；写代码和预览网页只是可选任务类型之一。
 6. 重启进程或刷新页面后，从 transcript 与派生状态恢复，不丢失已经完成的工具证据。
 
-## v1 范围
+## 本地 v1 范围
 
 v1 必须完成一个不依赖云端任务队列的本地通用 Agent 闭环：
 
@@ -173,7 +177,7 @@ Orchestration 现在提供 `goal_create / goal_list / goal_update / workflow_cre
 
 长会话现在有独立 Context Compaction：达到阈值后生成带 `sourceStartSeq..sourceEndSeq` 的派生摘要，只从模型的原始多轮输入中移走已覆盖旧 turn；原 JSONL trajectory 不删除、不改写。Compaction 摘要和最近未覆盖 Tool Evidence 分开进入 Dynamic Prompt，避免重复。
 
-标准化 Daoyin AI Gateway 客户端已接入 `ModelClient` 边界：它只接受 HTTPS（回环开发地址例外）、将凭据限制在请求头、限制响应大小/超时、验证 assistant/tool-call 响应结构，并把 401/配额/限流/5xx 等错误映射成稳定的 `MODEL_*` 失败码。主平台 OAuth 尚未提供时，可仅在开发环境通过 `DAOYIN_HARNESS_GATEWAY_URL` + `DAOYIN_HARNESS_GATEWAY_CREDENTIAL`（可选 `DAOYIN_HARNESS_MODEL`）注入一次进程内凭据；该桥接不会写入本地状态，正式 v1 仍必须换成 OAuth + OS Credential Store。未配置模型时任务会明确失败而不伪造执行。开发期使用 `npm run smoke:runtime` 验证通用 Agent 纵向闭环。主平台 OAuth/Gateway 服务端、Windows/macOS Sandbox、stdio MCP 安全接入、插件/能力设置、SQLite materialization 与语义/向量级长期记忆增强仍在后续阶段。
+标准化 Daoyin AI Gateway 客户端已接入本地 `ModelClient` 边界：它接受 HTTPS（回环开发例外），限制凭据用途、响应大小和超时，验证模型回复并映射稳定失败码。正式本地路径使用 OAuth + OS Credential Store；开发仍可显式配置 `DAOYIN_HARNESS_GATEWAY_URL`、`DAOYIN_HARNESS_GATEWAY_CREDENTIAL` 和可选的 `DAOYIN_HARNESS_MODEL`，仅保存进程内凭据。未配置模型时任务明确失败。`npm run smoke:runtime` 验证本地纵向闭环，`node scripts/smoke-cloud.mjs` 验证新的云端启动与拒绝路径。主平台 OAuth/Gateway 服务端已经有源码；真实账号验收、Windows/macOS Sandbox、stdio MCP、插件设置、本地 SQLite 索引和语义记忆增强继续独立跟踪。
 
 ## 路线图
 
