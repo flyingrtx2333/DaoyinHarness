@@ -1,5 +1,5 @@
 import type { AgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
-import type { SessionCompactionStore } from "@daoyin/harness-workspace";
+import type { SessionCompactionStore } from "@daoyin/harness-contracts";
 
 export interface ContextCompactorOptions {
   store: SessionCompactionStore;

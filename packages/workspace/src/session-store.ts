@@ -4,10 +4,8 @@ import type { AgentEvent, AgentEventType, PendingAgentEvent } from "@daoyin/harn
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-export interface SessionEventStore {
-  append<TType extends AgentEventType>(event: PendingAgentEvent<TType>): Promise<AgentEvent>;
-  read(sessionId: string, afterEventSeq?: number): Promise<AgentEvent[]>;
-}
+import type { SessionEventStore } from "@daoyin/harness-contracts";
+export type { SessionEventStore } from "@daoyin/harness-contracts";
 
 function assertSafeId(id: string, label: string): void {
   if (!SAFE_ID.test(id)) {

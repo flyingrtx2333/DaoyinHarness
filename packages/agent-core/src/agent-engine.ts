@@ -5,10 +5,11 @@ import type {
   JsonValue,
   PendingAgentEvent,
 } from "@daoyin/harness-protocol";
-import { ToolRegistry, type ToolExecution } from "@daoyin/harness-tools";
-import type { SessionCompactionStore, SessionEventStore } from "@daoyin/harness-workspace";
+import type { ToolRegistry, ToolDescriptor, ToolExecution, ToolExecutionContext } from "@daoyin/harness-tools/registry";
+import { snapshotExecutionIdentity, type ExecutionIdentity, type SessionCompactionStore, type SessionEventStore } from "@daoyin/harness-contracts";
 import { ContextAssembler } from "./context-assembler.js";
 import { ContextCompactor } from "./context-compactor.js";
+import { modelToolResult } from "./model-tool-result.js";
 import type { ModelClient, ModelConversationItem, ModelReply, ModelToolCall } from "./model.js";
 import { createDefaultPromptRegistry, SystemPromptRegistry } from "./prompt-registry.js";
 
@@ -20,6 +21,8 @@ export interface AgentTurnInput {
   userMessage: string;
   systemInstruction?: string;
   inheritedEvents?: readonly AgentEvent[];
+  /** Cloud adapters supply an authenticated identity; local callers remain compatible. */
+  executionIdentity?: ExecutionIdentity;
   signal?: AbortSignal;
 }
 
@@ -45,13 +48,6 @@ export interface AgentEngineOptions {
   compactionTriggerCharacters?: number;
   compactionMaxSummaryCharacters?: number;
   onEvent?: (event: AgentEvent) => void | Promise<void>;
-}
-
-function modelToolResult(result: ToolExecution): string {
-  if (result.ok) {
-    return JSON.stringify({ ok: true, summary: result.summary, result: result.evidence.result });
-  }
-  return JSON.stringify({ ok: false, code: result.code, message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) });
 }
 
 function isUsableToolCall(call: ModelToolCall): boolean {
@@ -136,6 +132,15 @@ export class AgentEngine {
 
   public async runTurn(input: AgentTurnInput): Promise<AgentRunResult> {
     const signal = input.signal ?? new AbortController().signal;
+    const executionIdentity = input.executionIdentity === undefined ? undefined : snapshotExecutionIdentity(input.executionIdentity);
+    if (executionIdentity !== undefined && executionIdentity.actorUserId !== input.accountId) {
+      throw new Error("Agent account does not match its authenticated execution identity.");
+    }
+    const executionContext: ToolExecutionContext = {
+      accountId: input.accountId, scopeId: input.scopeId,
+      sessionId: input.sessionId, turnId: input.turnId, sourceEventIds: [],
+      ...(executionIdentity === undefined ? {} : { executionIdentity }),
+    };
     let lastEventSeq = 0;
     let toolCallCount = 0;
     const seenToolCalls = new Set<string>();
@@ -182,11 +187,16 @@ export class AgentEngine {
       if (signal.aborted) {
         const finalText = "任务已停止。";
         await append("assistant.delta", { contentBlockId: `block_${crypto.randomUUID()}`, delta: finalText });
-        await append("turn.cancelled", { status: "cancelled", source: "user", lastCompletedEventSeq: lastEventSeq });
+        await append("turn.cancelled", { status: "cancelled", source: signal.reason === "runtime" ? "runtime" : "user", lastCompletedEventSeq: lastEventSeq });
         return { status: "cancelled", finalText, lastEventSeq };
       }
 
-      const tools = this.#tools.descriptors();
+      let tools: ToolDescriptor[];
+      try {
+        tools = await this.#tools.descriptorsFor(executionContext);
+      } catch {
+        return this.#fail(append, "AGENT_AUTHORIZATION_DENIED", "执行身份或工具授权已失效。");
+      }
       const context = await this.#context.assembleStep({
         turn: input,
         priorEvents,
@@ -211,7 +221,7 @@ export class AgentEngine {
         if (signal.aborted) {
           const finalText = "任务已停止。";
           await append("assistant.delta", { contentBlockId: `block_${crypto.randomUUID()}`, delta: finalText });
-          await append("turn.cancelled", { status: "cancelled", source: "user", lastCompletedEventSeq: lastEventSeq });
+          await append("turn.cancelled", { status: "cancelled", source: signal.reason === "runtime" ? "runtime" : "user", lastCompletedEventSeq: lastEventSeq });
           return { status: "cancelled", finalText, lastEventSeq };
         }
         const failure = modelFailure(error);
@@ -267,10 +277,7 @@ export class AgentEngine {
           input: toJsonValue(this.#tools.auditInput(call.name, call.input)),
         });
         const result = await this.#tools.execute(call, signal, {
-          accountId: input.accountId,
-          scopeId: input.scopeId,
-          sessionId: input.sessionId,
-          turnId: input.turnId,
+          ...executionContext,
           sourceEventIds: [turnStartedEvent.id, toolStartedEvent.id],
         });
         if (result.ok) {

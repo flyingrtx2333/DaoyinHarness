@@ -35,6 +35,7 @@ describe("MCP tool adapter", () => {
     const result = await registry.execute(
       { id: "call_1", name: "mcp_demo_lookup_abcd1234", input: { secret: "should reach MCP only" } },
       new AbortController().signal,
+      { accountId: "test-account", scopeId: "test-scope", sessionId: "test-session", turnId: "test-turn", sourceEventIds: [] },
     );
 
     expect(result).toMatchObject({

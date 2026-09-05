@@ -58,6 +58,41 @@ const turnInput = {
 } as const;
 
 describe("AgentEngine", () => {
+  it("continues after a 2000-file result while retaining full append-only evidence", async () => {
+    const files = Array.from({ length: 2000 }, (_, index) => `docs/${index}/${"long-folder/".repeat(6)}file.md`);
+    const root = await temporaryDirectory();
+    const store = new JsonlSessionStore(path.join(root, ".events"));
+    const requests: ModelRequest[] = [];
+    const model: ModelClient = {
+      async complete(request) {
+        requests.push(request);
+        for (const message of request.messages) {
+          if (message.content.length > 100_000) throw Object.assign(new Error("Gateway 422: string_too_long"), { code: "MODEL_CONTEXT_TOO_LARGE" });
+        }
+        return requests.length === 1
+          ? { kind: "tool_calls", calls: [{ id: "call_large_list", name: "list_files", input: { path: "." } }] }
+          : { kind: "assistant", content: "已读取目录预览，可继续按子目录查看。" };
+      },
+    };
+    const tools = new ToolRegistry([{
+      name: "list_files", description: "Large file list replay fixture", category: "workspace", mutating: false, inputSchema: { type: "object" },
+      async execute() {
+        return { ok: true, summary: "Listed 2000 files.", evidence: { schemaVersion: 1, toolName: "list_files", result: { files }, artifacts: [], diagnostics: [] } };
+      },
+    }]);
+    const engine = new AgentEngine({ model, tools, events: store });
+    const result = await engine.runTurn({ ...turnInput, userMessage: "浏览本地文件" });
+    expect(result.status).toBe("completed");
+    expect(requests).toHaveLength(2);
+    const returned = requests[1]?.messages.at(-1);
+    expect(returned).toMatchObject({ role: "tool", toolCallId: "call_large_list", toolName: "list_files" });
+    expect(JSON.parse(returned?.content ?? "{}")).toHaveProperty("modelContext.truncated", true);
+    const events = await store.read(turnInput.sessionId);
+    const completed = events.find(event => event.type === "tool.completed");
+    expect(completed).toMatchObject({ payload: { evidence: { result: { files } } } });
+    expect(events.at(-1)?.type).toBe("turn.completed");
+  });
+
   it("runs a tool loop, persists evidence, and returns a final response", async () => {
     const model = new ReplayModel([
       {

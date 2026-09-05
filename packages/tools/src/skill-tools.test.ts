@@ -40,6 +40,7 @@ describe("workspace skills", () => {
     const result = await tools.execute(
       { id: "call_skill", name: "load_skill", input: { name: "notes" } },
       new AbortController().signal,
+      { accountId: "test-account", scopeId: "test-scope", sessionId: "test-session", turnId: "test-turn", sourceEventIds: [] },
     );
 
     expect(result).toMatchObject({

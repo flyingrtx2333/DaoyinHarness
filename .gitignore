@@ -40,4 +40,9 @@ Thumbs.db
 # Test artifacts
 playwright-report/
 test-results/
+# Disposable fixture workspaces, not acceptance reports/screenshots.
+/evidence/workspace-management/run-*/
+# Editor recovery files; do not ignore intentional .bak assets or documentation.
+*.swp
+*.swo
 

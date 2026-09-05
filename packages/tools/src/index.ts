@@ -1,5 +1,7 @@
 export {
   ToolRegistry,
+  type ToolAuthorization,
+  type ToolRegistryOptions,
   type ToolDefinition,
   type ToolDescriptor,
   type ToolExecution,

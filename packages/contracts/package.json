@@ -1,5 +1,5 @@
 {
-  "name": "@daoyin/harness-workspace",
+  "name": "@daoyin/harness-contracts",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,6 @@
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@daoyin/harness-contracts": "*",
     "@daoyin/harness-protocol": "*"
   }
 }

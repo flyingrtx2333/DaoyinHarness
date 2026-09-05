@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   resolve: {
     alias: {
+      "@daoyin/harness-contracts": fileURLToPath(new URL("./packages/contracts/src/index.ts", import.meta.url)),
+      "@daoyin/harness-tools/registry": fileURLToPath(new URL("./packages/tools/src/registry.ts", import.meta.url)),
+      "@daoyin/harness-server-cloud/sqlite": fileURLToPath(new URL("./packages/server-cloud/src/sqlite-repository.ts", import.meta.url)),
+      "@daoyin/harness-server-cloud": fileURLToPath(new URL("./packages/server-cloud/src/index.ts", import.meta.url)),
       "@daoyin/harness-protocol": fileURLToPath(new URL("./packages/protocol/src/index.ts", import.meta.url)),
       "@daoyin/harness-server": fileURLToPath(new URL("./packages/server/src/index.ts", import.meta.url)),
       "@daoyin/harness-workspace": fileURLToPath(new URL("./packages/workspace/src/index.ts", import.meta.url)),

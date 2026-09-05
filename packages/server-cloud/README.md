@@ -1,0 +1,76 @@
+# 道引共享 Agent 云端基础
+
+状态：第一阶段源码与测试用例；Windows 验收及真实平台联调尚未完成。此包不是已经部署的生产服务。
+
+## 范围
+
+`createCloudServer` 创建 Fastify 服务实例，直接使用 `@daoyin/harness-agent-core` 的 `AgentEngine`，不另写一套模型循环。不自动监听端口，不加载本地文件、进程、浏览器或任意 MCP 工具，不改变现有 CLI、本地 Web UI 和 OAuth 启动方式。
+
+必须由服务器代码提供以下适配器，缺失时不能创建服务：
+
+- `authenticate`：验证 Bearer，解析当前用户、个人或企业空间、应用安装实例、付款账户和授权期限。
+- `isAuthorizationActive`：检查授权撤销、成员关系及应用权益。每个请求、模型调用和工具操作都要复查。
+- `resolveProfile`：由可信安装配置解析版本化规则与显式只读业务工具；浏览器不能指定工具清单、身份或系统提示词。
+- `createModel`：创建与本次身份和 Run 绑定的模型网关客户端。记录付款账户不是实际扣费，本包不实现余额冻结与结算。
+- `repository`：持久化会话、Run、事件和压缩摘要。
+
+现已增加 `createCompanyPublicProfile`、官网只读知识工具及 public 空间的参数/结果校验，但真实知识客户端仍须由可信主平台适配器注入。主平台授权签发写入和现有知识库接线被工具安全检查阻断，官网路由/前端尚未切换。Story 查询、云端前端和付费业务工具尚未实现。测试中的认证和模型替身不能作为部署配置。详见 [ADR-0007 实际交付与阻断](../../docs/adr/0007-company-public-platform-adapter.md)。
+
+## 身份和授权
+
+会话固定绑定 `actorUserId + space.kind + space.id + ownerUserId/tenantId + appInstallationId`。相同账号切换企业或应用，不自动获得原会话访问权。付款账户和授权 ID 记录在 Run 上，不用于合并会话。请求正文禁止自带身份字段。
+
+工具先经过发现过滤，执行时再校验授权、输入 Schema 和目标资源。每个 `CloudToolBinding` 都必须提供 `validateInput`、非空 `requiredPermissions` 和 `authorizeResource`。服务工厂只接受 `extension` 分类的只读工具；这不替代适配器对实际 HTTP 目标、返回内容和资源所有权的校验。
+
+`contracts` 包中的记忆作用域和分享授权目前只是契约，不是已运行的跨业务记忆服务。不会读取、同步或合并本地历史。
+
+## 接口
+
+所有 `/api/v1/cloud/*` 请求需要有效 Bearer；浏览器请求的 Origin 必须在服务器配置的 `allowedOrigins` 内。本包不启用跨域 CORS，初期通过同源服务端网关接入。不要把平台或供应商凭据放在浏览器存储中。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/health` | 基础状态；`productionReady` 始终为 false，不代表平台联调完成 |
+| POST / GET | `/api/v1/cloud/sessions` | 创建或列出当前作用域的会话 |
+| GET | `/api/v1/cloud/sessions/:sessionId` | 读取会话 |
+| POST / GET | `/api/v1/cloud/sessions/:sessionId/runs` | 提交或列出任务 |
+| GET | `/api/v1/cloud/sessions/:sessionId/events?after=0` | 按事件序号回放，每页最多 200 条 |
+| GET | `/api/v1/cloud/runs/:runId` | 查询原任务状态 |
+| POST | `/api/v1/cloud/runs/:runId/cancel` | 请求取消，正文为 `{}` |
+
+创建会话正文为 `{ "title": "会话标题" }`。提交任务正文为 `{ "requestId": "客户端生成的唯一请求ID", "message": "用户目标" }`。同一会话中同一 requestId 和正文返回原 Run；不同正文返回 409。重试已经结束或中断的请求，不会重新调用模型。即使配置更新或执行容量已满，已有请求仍可查询并返回原结果。
+
+任务接收先写数据库，再启动执行。接口返回 202 不表示任务已完成。事件回放使用响应的 `nextEventSeq` 继续读取；断线后不要换一个 requestId 重新执行。取消只停止后续执行及等待，不保证供应商已经开始的推理立即终止或不产生费用。
+
+会话保存 Profile ID 与版本；配置版本改变后原记录仍可读取，但新执行必须新建会话。本版会话、任务列表各返回最近 100 条，不是完整分页管理后台。
+
+## SQLite 试运行适配
+
+`SqliteCloudRepository` 通过 `@daoyin/harness-server-cloud/sqlite` 单独导出，使用 Node 内置 `node:sqlite`。它是独立临时数据库测试和单实例试运行适配，不是主平台数据库迁移，不是生产多 Worker MySQL 方案。
+
+会话、请求和事件采用事务写入。相同会话最多一个 running Run；终态之后拒绝追加迟到结果。摘要只追加，原事件保留。目录与数据库文件的访问权限、磁盘配额、备份和保留策略由部署方提供。
+
+默认不会在打开数据库时接管 running 任务。只有运维确认旧实例停止后，才可在非 HTTP 管理流程中调用 `recoverInterruptedRuns()`；它追加中断事实，不重放模型或外部操作。不要让两个服务进程共享本适配器进行执行调度；跨进程租约与恢复仍待实现。
+
+## Windows 验证
+
+共享 checkout 的依赖和验收只能在 Windows PowerShell 运行，不能在 WSL 安装或执行测试。使用仓库 `.node-version` 固定的 Node 版本。新增 workspace 的链接和 lockfile 必须由 Windows npm 确认；在确认 lockfile 与工作区清单同步前，不把 `npm ci` 的成功作为既成事实。
+
+```powershell
+Set-Location D:\AllProjects\DaoyinHarness
+npm install
+npm run typecheck
+npm run lint
+$env:NODE_OPTIONS = '--experimental-sqlite'
+npm test
+Remove-Item Env:NODE_OPTIONS
+npm run build
+```
+
+需要保留既有 NODE_OPTIONS 时，在本机将该选项追加到原值并在测试后恢复。Node 22.12 的 SQLite 模块需要实验标志；仓库固定版本较新，但这里保留兼容运行方式。
+
+新增测试位于 `contracts/src/execution-identity.test.ts`、`tools/src/registry.test.ts`、`server-cloud/src/sqlite-repository.test.ts` 和 `server-cloud/src/app.test.ts`。覆盖身份边界、隐藏工具直接调用、撤销授权、幂等冲突、事件游标、数据库重开、中断标记和取消后的迟到回复。HTTP 测试使用真实 Fastify、共享 AgentEngine 和隔离 SQLite；认证、模型和业务 I/O 使用测试替身，不证明真实平台登录、付费链路或线上效果。
+
+## 下一阶段
+
+在主平台补齐明确的空间与应用授权接口，再实现对应的可信适配器和官网只读知识工具。生产数据库、受控业务写入、账务预留、前端及跨业务记忆在各自验收通过后接入，不通过放开当前只读限制代替这些实现。

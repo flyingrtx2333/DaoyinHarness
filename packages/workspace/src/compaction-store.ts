@@ -4,19 +4,8 @@ import type { SessionCompaction } from "@daoyin/harness-protocol";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 
-export interface AppendCompactionInput {
-  sessionId: string;
-  sourceStartSeq: number;
-  sourceEndSeq: number;
-  summary: string;
-  strategy: string;
-}
-
-export interface SessionCompactionStore {
-  append(input: AppendCompactionInput): Promise<SessionCompaction>;
-  list(sessionId: string): Promise<SessionCompaction[]>;
-  latest(sessionId: string): Promise<SessionCompaction | undefined>;
-}
+import type { AppendCompactionInput, SessionCompactionStore } from "@daoyin/harness-contracts";
+export type { AppendCompactionInput, SessionCompactionStore } from "@daoyin/harness-contracts";
 
 function assertSafeId(value: string, label: string): void {
   if (!SAFE_ID.test(value)) throw new Error(`${label} must contain only letters, numbers, underscores, or hyphens.`);
