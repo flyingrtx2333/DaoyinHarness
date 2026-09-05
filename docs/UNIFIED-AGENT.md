@@ -116,6 +116,6 @@ docker compose -f docker-compose-agent-test.yml down
 
 ## 待完成的独立阶段
 
-官网已经接入，真实配置与模型链路已验收。结构化来源卡片、个人/企业空间与应用权益适配、Story/Youji 长任务、金额冻结与结算、跨应用记忆授权、Builder 构建/客户运行身份、Harness MySQL 多 Worker 调度尚未交付。现有记忆类型不是跨业务记忆服务，费用归属日志不是统一钱包扣费。后续按 [路线图](ROADMAP.md) 执行，不能据此把只读接口开放为任意业务调用。
+官网已经接入，支持公开来源展示、多轮对话按时间顺序恢复，真实配置与模型链路已验收。个人/企业空间与应用权益适配、Story/Youji 长任务、金额冻结与结算、跨应用记忆授权、Builder 构建/客户运行身份、Harness MySQL 多 Worker 调度尚未交付。现有记忆类型不是跨业务记忆服务，费用归属日志不是统一钱包扣费。后续按 [路线图](ROADMAP.md) 执行，不能据此把只读接口开放为任意业务调用。
 
 决策依据：[ADR-0006](adr/0006-shared-engine-cloud-foundation.md)、[ADR-0007](adr/0007-company-public-platform-adapter.md)、[ADR-0008](adr/0008-platform-public-bridge.md)。
