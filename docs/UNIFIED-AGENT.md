@@ -1,6 +1,6 @@
 # 道引统一 Agent 平台
 
-更新时间：2026-09-05。当前交付为共享内核与官网只读桥的源码、自动化验证和单实例运行入口；未切换生产官网。
+更新时间：2026-09-05。官网已切换至共享内核的单实例只读服务，真实模型、公开检索、事件回放与取消接口已验证。生产版本与验收证据见 [上线记录](../deployment/RELEASE-20260905.md)。
 
 ## 职责与边界
 
@@ -39,6 +39,7 @@ backend 使用以下显式环境配置；关闭时新接口返回 503，旧官�
 | 变量 | 含义 |
 | --- | --- |
 | `AGENT_PUBLIC_ENABLED=1` | 启用新桥 |
+| `AGENT_PUBLIC_WEBSITE_ENABLED=1` | 官网配置返回 harness；前端使用新桥，不在失败后自动转旧链路 |
 | `AGENT_PUBLIC_SERVICE_TOKEN` | 专用服务凭据，至少 32 字符，不能复用供应商密钥 |
 | `AGENT_PUBLIC_SPONSOR_TENANT_ID` / `AGENT_PUBLIC_SPONSOR_USER_ID` | 明确承担费用且有效的租户成员，不提供默认值 |
 | `AGENT_PUBLIC_POLICY_VERSION` | 授权策略版本；修改会使旧授权失效 |
@@ -46,7 +47,7 @@ backend 使用以下显式环境配置；关闭时新接口返回 503，旧官�
 | `AGENT_PUBLIC_CLOUD_URL` | Harness 服务地址 |
 | `AGENT_PUBLIC_DAILY_OPERATIONS` | 全站每日操作次数，1–10000，默认 1000 |
 
-数据库迁移位于主平台 `backend/db/migrations/20260905_agent_public_bridge.sql`，目前包含可执行 DDL，必须在显式部署流程中应用；应用启动不自动执行。本轮仅在隔离测试数据库应用。
+数据库迁移位于主平台 `backend/db/migrations/20260905_agent_public_bridge.sql`，已通过指定 backend 的发布流程应用到生产；应用启动不自动执行迁移。
 
 Harness 配置：`DAOYIN_CLOUD_PLATFORM_URL` 指向 backend；`DAOYIN_CLOUD_SERVICE_TOKEN` 与平台专用凭据一致；`DAOYIN_CLOUD_DATABASE` 为受保护目录中的绝对 SQLite 路径，父目录必须存在；`DAOYIN_CLOUD_PORT` 默认 4700。服务只绑定 `127.0.0.1`，端口冲突直接失败，适合受保护的同机反向代理。两端 URL 接受 HTTPS，开发环境仅允许 loopback HTTP；Docker 跨容器部署需明确的 HTTPS 服务入口，不能直接改成任意明文主机。
 
@@ -115,6 +116,6 @@ docker compose -f docker-compose-agent-test.yml down
 
 ## 待完成的独立阶段
 
-真实官网界面接入及来源展示、真实配置/模型验收、个人/企业空间与应用权益适配、Story/Youji 长任务、金额冻结与结算、跨应用记忆授权、Builder 构建/客户运行身份、Harness MySQL 多 Worker 调度尚未交付。现有记忆类型不是跨业务记忆服务，费用归属日志不是统一钱包扣费。后续按 [路线图](ROADMAP.md) 执行，不能据此把只读接口开放为任意业务调用。
+官网已经接入，真实配置与模型链路已验收。结构化来源卡片、个人/企业空间与应用权益适配、Story/Youji 长任务、金额冻结与结算、跨应用记忆授权、Builder 构建/客户运行身份、Harness MySQL 多 Worker 调度尚未交付。现有记忆类型不是跨业务记忆服务，费用归属日志不是统一钱包扣费。后续按 [路线图](ROADMAP.md) 执行，不能据此把只读接口开放为任意业务调用。
 
 决策依据：[ADR-0006](adr/0006-shared-engine-cloud-foundation.md)、[ADR-0007](adr/0007-company-public-platform-adapter.md)、[ADR-0008](adr/0008-platform-public-bridge.md)。

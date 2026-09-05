@@ -4,7 +4,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/coverage/**", "claude-code-main/**"],
+    ignores: ["**/dist/**", "**/coverage/**", ".cache/**", "claude-code-main/**"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

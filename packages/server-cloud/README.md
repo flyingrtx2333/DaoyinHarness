@@ -1,6 +1,6 @@
 # 道引共享 Agent 云端基础
 
-状态：共享内核与主平台官网桥已经实现并进行 Windows 自动化验证。真实模型/官网界面/生产部署仍待验收。配置、接口和当前结果见 [统一平台说明](../../docs/UNIFIED-AGENT.md)。
+状态：共享内核与主平台官网桥已完成 Windows 自动化验证，并部署为官网单实例只读服务。真实模型、公开检索与取消接口已验收。配置、接口和当前结果见 [统一平台说明](../../docs/UNIFIED-AGENT.md) 与 [上线记录](../../deployment/RELEASE-20260905.md)。
 
 ## 范围
 
@@ -14,7 +14,7 @@
 - `createModel`：创建与本次身份和 Run 绑定的模型网关客户端。记录付款账户不是实际扣费，本包不实现余额冻结与结算。
 - `repository`：持久化会话、Run、事件和压缩摘要。
 
-`createPlatformAdapters` 通过固定平台地址提供认证、复查、Profile 和单步模型适配；`createPlatformCloudServer` 将其接入服务工厂。`createCompanyPublicProfile` 调用真实主平台公开知识检索接口。主平台已经实现访客签发、操作账本与浏览器代理，旧官网前端尚未切换。Story 查询和付费业务工具仍待实现，测试替身不能作为部署配置。详见 [ADR-0008](../../docs/adr/0008-platform-public-bridge.md)。
+`createPlatformAdapters` 通过固定平台地址提供认证、复查、Profile 和单步模型适配；`createPlatformCloudServer` 将其接入服务工厂。`createCompanyPublicProfile` 调用真实主平台公开知识检索接口。主平台已经实现访客签发、操作账本与浏览器代理，官网已切换至新链路。Story 查询和付费业务工具仍待实现，测试替身不能作为部署配置。详见 [ADR-0008](../../docs/adr/0008-platform-public-bridge.md)。
 
 ## 身份和授权
 
@@ -73,4 +73,4 @@ npm run build
 
 ## 下一阶段
 
-完成真实官网配置、前端回放与取消接入、真实模型/资料验收；随后补齐个人与企业应用授权、Story 查询与长任务。生产多 Worker 存储、受控业务写入、账务预留及跨业务记忆独立验收，不通过放开只读限制代替实现。
+官网已完成单实例上线，后续补齐个人与企业应用授权、Story 查询与长任务。生产多 Worker 存储、受控业务写入、账务预留及跨业务记忆独立验收，不通过放开只读限制代替实现。

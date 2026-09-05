@@ -13,7 +13,7 @@ Harness 是本地与云端共用的通用 Agent 内核。主平台拥有账号�
 
 主平台以 MySQL 事务锁定授权记录，原子登记操作与次数额度。同一授权、Run、操作编号和正文只执行一次；重复完成请求返回原结果，正文冲突或未知结果拒绝重新收费。次数上限是防滥用门禁，不是金额预算或账务结算。错误、进程中断后的未完成操作需核对，不自动重跑。
 
-官网新 API 通过 HttpOnly SameSite Cookie、严格 Origin 与 CSRF 校验代理会话、Run、回放及取消。访客令牌不出现在 JSON、浏览器存储或 transcript。旧官网 chat 保留，由后续界面接入和真实验收决定切换；禁止同一消息双跑。
+官网新 API 通过 HttpOnly SameSite Cookie、严格 Origin 与 CSRF 校验代理会话、Run、回放及取消。访客令牌不出现在 JSON、浏览器存储或 transcript。2026-09-05 官网已切换共享内核，旧 chat 保留为显式回滚路径，禁止失败时自动双跑。版本与证据见 [上线记录](../../deployment/RELEASE-20260905.md)。
 
 ## 持久化边界
 
