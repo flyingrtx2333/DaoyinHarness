@@ -1,0 +1,24 @@
+[Unit]
+Description=Daoyin shared Agent public runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=daoyin-agent
+Group=daoyin-agent
+WorkingDirectory=/opt/daoyin-harness/current
+EnvironmentFile=/etc/daoyin-harness/cloud.env
+ExecStart=/opt/daoyin-harness/node/bin/node /opt/daoyin-harness/current/main.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=150
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/daoyin-harness
+
+[Install]
+WantedBy=multi-user.target
