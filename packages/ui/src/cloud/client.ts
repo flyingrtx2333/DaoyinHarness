@@ -16,7 +16,7 @@ export class WorkbenchError extends Error {
 export class WorkbenchClient {
   #csrf = "";
   readonly #receipts = new Map<string, PendingRequest>();
-  public constructor(private readonly storage: StoragePort, private readonly fetcher: typeof fetch = fetch) {
+  public constructor(private readonly storage: StoragePort, private readonly fetcher: typeof fetch = (input, init) => fetch(input, init)) {
     try {
       const data: unknown = JSON.parse(storage.getItem(RECEIPTS) ?? "[]");
       if (Array.isArray(data)) for (const item of data) {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WorkbenchClient, type CloudRun } from "./client.js";
 
 function memory() {
@@ -9,6 +9,14 @@ const json = (value: unknown, status = 200): Response => new Response(JSON.strin
 const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request_1", userMessage: "介绍产品", status: "completed", finalText: "回答", lastEventSeq: 2, cancelRequested: false, authorizationId: "grant_1", billingAccountId: "payer_1", createdAt: "2026-09-05T12:00:00Z" };
 
 describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
+  it("does not bind the native browser fetch receiver to the client instance", async () => {
+    const native = vi.spyOn(globalThis, "fetch").mockImplementation(async function (this: unknown) {
+      if (this instanceof WorkbenchClient) throw new TypeError("Illegal invocation");
+      return json({ csrfToken: "csrf", expiresAt: Date.now() + 1800000 });
+    });
+    try { await expect(new WorkbenchClient(memory()).bootstrap()).resolves.toBeGreaterThan(Date.now()); }
+    finally { native.mockRestore(); }
+  });
   it("preserves the exact request across an uncertain response and a page reload", async () => {
     const store = memory();
     const submitted: string[] = [];
