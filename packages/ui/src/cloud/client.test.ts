@@ -9,6 +9,16 @@ const json = (value: unknown, status = 200): Response => new Response(JSON.strin
 const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request_1", userMessage: "介绍产品", status: "completed", finalText: "回答", lastEventSeq: 2, cancelRequested: false, authorizationId: "grant_1", billingAccountId: "payer_1", createdAt: "2026-09-05T12:00:00Z" };
 
 describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
+  it("checks the server session profile before the selected plugin can start model work", async () => {
+    let calls = 0;
+    const client = new WorkbenchClient(memory(), async (_url, init) => {
+      calls++;
+      expect(JSON.parse(String(init?.body))).toEqual({ title: "问题" });
+      return json({ session: { id: "session_1", profileId: "unexpected-profile" } });
+    });
+    await expect(client.createSession("问题", "company-public")).rejects.toThrow("插件与选择不一致");
+    expect(calls).toBe(1);
+  });
   it("does not bind the native browser fetch receiver to the client instance", async () => {
     const native = vi.spyOn(globalThis, "fetch").mockImplementation(async function (this: unknown) {
       if (this instanceof WorkbenchClient) throw new TypeError("Illegal invocation");

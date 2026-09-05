@@ -63,8 +63,10 @@ export class WorkbenchClient {
   public async sessions(signal?: AbortSignal): Promise<CloudSession[]> {
     return (await this.#request<{ sessions: CloudSession[] }>("/sessions", undefined, signal)).sessions;
   }
-  public async createSession(title: string): Promise<CloudSession> {
-    return (await this.#request<{ session: CloudSession }>("/sessions", { title: title.slice(0, 80) })).session;
+  public async createSession(title: string, expectedProfileId = "company-public"): Promise<CloudSession> {
+    const session = (await this.#request<{ session: CloudSession }>("/sessions", { title: title.slice(0, 80) })).session;
+    if (session.profileId !== expectedProfileId) throw new WorkbenchError("服务端返回的插件与选择不一致，请重新连接后查看会话。");
+    return session;
   }
   public async runs(sessionId: string, signal?: AbortSignal): Promise<CloudRun[]> {
     const runs = (await this.#request<{ runs: CloudRun[] }>(`/sessions/${encodeURIComponent(sessionId)}/runs`, undefined, signal)).runs;
