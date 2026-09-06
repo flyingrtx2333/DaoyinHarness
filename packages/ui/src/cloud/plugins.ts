@@ -1,11 +1,11 @@
-/** Release inventory, not authorization. Only a successful server bootstrap unlocks private plugins. */
+/** Private integrations use the current account; server bootstrap verifies existing business access. */
 export interface WorkbenchPlugin {
   id: string;
   name: string;
   mark: string;
   description: string;
   capabilities: readonly string[];
-  status: "available" | "authorization_required" | "pending";
+  status: "available" | "account_required" | "pending";
   profileId?: string;
   note: string;
 }
@@ -14,10 +14,10 @@ export const PLUGINS: readonly WorkbenchPlugin[] = [
   { id: "company-knowledge", name: "官网知识", mark: "知", status: "available", profileId: "company-public",
     description: "检索道引产品与方案的公开资料",
     capabilities: ["公开资料检索", "产品问答", "来源引用"], note: "访客空间可用，仅查询公开资料。" },
-  { id: "saishi", name: "赛事只读", mark: "赛", status: "authorization_required", profileId: "saishi-readonly",
-    description: "查询已授权赛事、素材与任务",
+  { id: "saishi", name: "赛事只读", mark: "赛", status: "account_required", profileId: "saishi-readonly",
+    description: "查询当前账号的赛事、素材与任务",
     capabilities: ["赛事查询", "设备与素材", "地图与点位", "个人时间线", "任务进度"],
-    note: "需在赛事后台签发授权；不修改配置、成绩或触发生成。" },
+    note: "登录道引账号后直接使用已有赛事读取权限。" },
   { id: "story", name: "短剧制作", mark: "剧", status: "pending",
     description: "从剧本到视频成片",
     capabilities: ["剧本生成", "角色与场景", "分镜编辑", "视频生成", "字幕与导出"],
@@ -32,7 +32,7 @@ export const PLUGINS: readonly WorkbenchPlugin[] = [
 
 export function selectablePlugin(id: string, authorizedProfiles: readonly string[] = []): WorkbenchPlugin | undefined {
   return PLUGINS.find((plugin) => plugin.id === id && plugin.profileId &&
-    (plugin.status === "available" || (plugin.status === "authorization_required" && authorizedProfiles.includes(plugin.profileId))));
+    (plugin.status === "available" || (plugin.status === "account_required" && authorizedProfiles.includes(plugin.profileId))));
 }
 
 /** A session profile is supplied by the authenticated server, never by the model. */
@@ -43,6 +43,6 @@ export function sessionPlugin(profileId: string): WorkbenchPlugin | undefined {
 export function filterPlugins(query: string, authorizedProfiles: readonly string[] = []): readonly WorkbenchPlugin[] {
   const needle = query.trim().toLocaleLowerCase();
   return PLUGINS.filter((plugin) => [plugin.name, plugin.description, ...plugin.capabilities].join(" ").toLocaleLowerCase().includes(needle))
-    .map((plugin) => plugin.status === "authorization_required" && plugin.profileId && authorizedProfiles.includes(plugin.profileId)
-      ? { ...plugin, status: "available" as const, note: "当前授权范围可用，仅执行只读查询。" } : plugin);
+    .map((plugin) => plugin.status === "account_required" && plugin.profileId && authorizedProfiles.includes(plugin.profileId)
+      ? { ...plugin, status: "available" as const, note: "使用当前账号的赛事读取权限。" } : plugin);
 }

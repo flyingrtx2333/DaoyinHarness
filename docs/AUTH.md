@@ -2,6 +2,10 @@
 
 > This document covers the local OAuth client. Current unified platform evidence is in [UNIFIED-AGENT.md](UNIFIED-AGENT.md); production login availability must be verified live rather than inferred from this source document.
 
+## Automatic account access for all business plugins
+
+All Harness business plugins must inherit the signed-in account's full existing permissions for the selected space, including reads, writes, generation and management, without per-plugin consent, manual grants, scope checkboxes or pasted credentials. Reuse valid account connections and issue execution credentials internally. Authentication and business access checks remain required; do not create an Agent-only permission subset. External services without a usable connection may require their own sign-in, but Harness adds no extra plugin consent. [ADR-0012](adr/0012-first-party-account-access.md) defines this rule and the distinction between implemented Saishi reads and pending business capabilities.
+
 ## Cloud public execution authorization
 
 The public company entry uses an independent random, 30-minute visitor grant issued by the main platform, not a local OAuth token or an employee account. The platform stores only its hash, visitor ID, explicit sponsor membership, policy version, expiry and revocation. The browser receives an HttpOnly SameSite Cookie; state changes require the configured Origin and a CSRF token. Login/refresh/logout for local accounts remains separate.
@@ -41,7 +45,7 @@ state=<cryptographically-random-value>
 scope=openid profile harness:use
 ```
 
-The platform authenticates the user in its own first-party page, displays the requesting product and scopes, and redirects only after consent or a safe denial. Existing platform login cookies may be reused by the platform page; they are never shared with the local origin.
+The platform authenticates the user in its own first-party page and validates the registered Harness client, redirect URI and PKCE challenge. The product requirement is to reuse an existing platform login and complete the first-party connection without an additional scope-consent screen; when no valid login exists, show platform sign-in. Existing platform login cookies are never shared with the local origin. This requirement does not claim that every local OAuth or business adapter has already been delivered; track current implementation separately.
 
 Authorization codes are single-use, expire after 60 seconds, are bound to the client, exact redirect URI and PKCE challenge, and contain no user data visible to the browser.
 

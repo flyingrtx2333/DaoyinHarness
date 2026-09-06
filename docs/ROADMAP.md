@@ -10,7 +10,7 @@
 | Public website bridge | Implemented platform grants, MySQL operation ledger, model/search adapters and browser proxy APIs | Real public corpus/model and website UI complete one replayable, cancellable session; explicitly configured sponsor |
 | Personal/organization applications | Identity contracts only | Explicit memberships, installations, entitlements and resource checks; no first-tenant fallback |
 | Story queries and paid jobs | Pending | One authorized job, durable job receipt, budget reservation and timeout reconciliation without repeated charges |
-| Youji and shared memory | Pending | Explicit cross-app consent, scoped retrieval, provenance, revocation and forgetting |
+| Youji and shared memory | Pending | Automatic inheritance of full existing account permissions across apps, scoped retrieval, provenance, revocation and forgetting; no per-plugin consent (ADR-0012) |
 | Builder products and channels | Pending | Separate build/runtime identities, immutable app versions, installations, deployments and client isolation |
 
 The following P0–P12 sections track local capabilities. They do not imply that those tools are available in the cloud. Production MySQL Harness storage, multi-worker leases, monetary settlement and historical data migration require separate implementation and acceptance.

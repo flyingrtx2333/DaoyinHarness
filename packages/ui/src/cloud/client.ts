@@ -9,21 +9,27 @@ const BASE = "/api/company-assistant/agent";
 const identifier = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{1,160}$/u.test(value);
 
 export class WorkbenchError extends Error {
-  public constructor(message: string, public readonly status = 0) { super(message); }
+  public constructor(message: string, public readonly status = 0, public readonly loginUrl?: string) { super(message); }
 }
 
-/** Fixed same-origin BFFs. Application tokens enter only through connectApplication,
- * never through model messages, local storage or arbitrary service URLs. */
+/** First-party applications inherit the signed-in account through their same-origin BFF. */
 export class WorkbenchClient {
   #csrf = "";
+  #accountScope = "";
   readonly #base: string;
-  readonly #receiptKey: string;
+  #receiptKey: string;
   readonly #receipts = new Map<string, PendingRequest>();
+  public get accountScope(): string { return this.#accountScope; }
   public constructor(private readonly storage: StoragePort, private readonly fetcher: typeof fetch = (input, init) => fetch(input, init), public readonly application: "company" | "saishi" = "company") {
     this.#base = application === "saishi" ? "/api/agent-apps/saishi/workbench" : BASE;
     this.#receiptKey = application === "saishi" ? `${RECEIPTS}:saishi` : RECEIPTS;
+    if (application === "company") this.#restoreReceipts();
+  }
+
+  #restoreReceipts(): void {
+    this.#receipts.clear();
     try {
-      const data: unknown = JSON.parse(storage.getItem(this.#receiptKey) ?? "[]");
+      const data: unknown = JSON.parse(this.storage.getItem(this.#receiptKey) ?? "[]");
       if (Array.isArray(data)) for (const item of data) {
         if (typeof item === "object" && item !== null && identifier(item.sessionId) && identifier(item.requestId) &&
             typeof item.message === "string" && item.message.length > 0 && item.message.length <= 10000) {
@@ -42,13 +48,24 @@ export class WorkbenchClient {
     try {
       const response = await this.fetcher(this.#base + path, {
         method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", redirect: "error",
-        headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json", "x-agent-csrf": this.#csrf }) },
+        headers: { Accept: "application/json", ...(this.#accountScope && path !== "/bootstrap" ? { "x-agent-account": this.#accountScope } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json", "x-agent-csrf": this.#csrf }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: controller.signal,
       });
       if (!response.ok) {
         if (response.status === 401 || (this.application === "saishi" && response.status === 403)) {
           this.#csrf = "";
-          throw new WorkbenchError(this.application === "saishi" ? "赛事授权已失效或范围不足，请重新连接。" : "访客授权已过期，请重新进入工作台。", response.status);
+          this.#accountScope = "";
+          if (this.application === "saishi") {
+            this.#receipts.clear();
+            let loginUrl: string | undefined;
+            if (response.status === 401) {
+              const detail: unknown = await response.json().catch(() => null);
+              if (typeof detail === "object" && detail !== null && "loginUrl" in detail && typeof detail.loginUrl === "string" &&
+                  /^\/api\/agent-apps\/saishi\/workbench\/login(?:\?[A-Za-z0-9%=&_.-]*)?$/u.test(detail.loginUrl)) loginUrl = detail.loginUrl;
+            }
+            throw new WorkbenchError(response.status === 401 ? "请登录道引账号，登录后即可使用该账号的赛事数据。" : "当前账号没有此赛事数据的访问权限。", response.status, loginUrl);
+          }
+          throw new WorkbenchError("访客授权已过期，请重新进入工作台。", response.status);
         }
         if (response.status === 429) throw new WorkbenchError("当前使用次数已达上限，请稍后重试。", 429);
         if (response.status === 409) throw new WorkbenchError("原任务仍在处理中，或原请求内容已改变。请刷新查看原任务。", 409);
@@ -62,22 +79,25 @@ export class WorkbenchClient {
     } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
   }
 
-  public async connectApplication(token: string): Promise<void> {
-    if (this.application !== "saishi" || !/^saishi_agent_[A-Za-z0-9_-]{64}$/u.test(token)) throw new WorkbenchError("请输入赛事后台签发的只读授权。");
-    await this.#request("/connect", { token });
-    this.#csrf = "";
-    this.#receipts.clear();
-    this.storage.removeItem(this.#receiptKey);
-  }
   public async disconnectApplication(): Promise<void> {
     await this.#request("/logout", {});
     this.#csrf = "";
+    this.#accountScope = "";
     this.#receipts.clear();
     this.storage.removeItem(this.#receiptKey);
   }
   public async bootstrap(): Promise<number> {
-    const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string }>("/bootstrap", {});
-    if (!result.csrfToken || !Number.isFinite(result.expiresAt) || (this.application === "saishi" && result.profileId !== "saishi-readonly")) throw new WorkbenchError("工作台授权响应无效，请重新进入。");
+    const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string }>("/bootstrap", {});
+    if (!result.csrfToken || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() ||
+        (this.application === "saishi" && (result.profileId !== "saishi-readonly" || result.authentication !== "account" || !identifier(result.accountScope)))) {
+      this.#csrf = ""; this.#accountScope = ""; this.#receipts.clear();
+      throw new WorkbenchError("账号工作台尚未接通，请稍后重新连接。");
+    }
+    if (this.application === "saishi") {
+      this.#accountScope = result.accountScope!;
+      this.#receiptKey = `${RECEIPTS}:saishi:${this.#accountScope}`;
+      this.#restoreReceipts();
+    }
     this.#csrf = result.csrfToken;
     return result.expiresAt;
   }
@@ -85,7 +105,7 @@ export class WorkbenchClient {
     return (await this.#request<{ sessions: CloudSession[] }>("/sessions", undefined, signal)).sessions;
   }
   public async createSession(title: string, expectedProfileId = "company-public"): Promise<CloudSession> {
-    if (/saishi_agent_[A-Za-z0-9_-]{64}/u.test(title)) throw new WorkbenchError("检测到赛事授权凭证，请使用专用授权表单，不要发送到聊天。");
+    if (/saishi_agent_[A-Za-z0-9_-]{64}/u.test(title)) throw new WorkbenchError("检测到访问凭证，请勿发送到聊天。业务数据使用当前登录账号访问。");
     const session = (await this.#request<{ session: CloudSession }>("/sessions", { title: title.slice(0, 80) })).session;
     if (session.profileId !== expectedProfileId) throw new WorkbenchError("服务端返回的插件与选择不一致，请重新连接后查看会话。");
     return session;
@@ -119,7 +139,8 @@ export class WorkbenchClient {
     try { this.#persist(); } catch { /* A stale durable receipt still reuses the same accepted request. */ }
   }
   public async submit(sessionId: string, message: string): Promise<CloudRun> {
-    if (/saishi_agent_[A-Za-z0-9_-]{64}/u.test(message)) throw new WorkbenchError("检测到赛事授权凭证，请使用专用授权表单，不要发送到聊天。");
+    if (this.application === "saishi" && !this.#accountScope) throw new WorkbenchError("请先连接当前道引账号。", 401);
+    if (/saishi_agent_[A-Za-z0-9_-]{64}/u.test(message)) throw new WorkbenchError("检测到访问凭证，请勿发送到聊天。业务数据使用当前登录账号访问。");
     const existing = this.pending(sessionId);
     if (existing && existing.message !== message) throw new WorkbenchError("上次提交结果尚未确认，请先恢复原提交。");
     const receipt = existing ?? { sessionId, requestId: crypto.randomUUID(), message };

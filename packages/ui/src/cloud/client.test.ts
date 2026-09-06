@@ -9,6 +9,49 @@ const json = (value: unknown, status = 200): Response => new Response(JSON.strin
 const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request_1", userMessage: "介绍产品", status: "completed", finalText: "回答", lastEventSeq: 2, cancelRequested: false, authorizationId: "grant_1", billingAccountId: "payer_1", createdAt: "2026-09-05T12:00:00Z" };
 
 describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
+  it("bootstraps an account without a pasted grant and sends its boundary on every business request", async () => {
+    const calls: string[] = [];
+    const client = new WorkbenchClient(memory(), async (url, init) => {
+      calls.push(String(url));
+      expect(init?.credentials).toBe("same-origin");
+      expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+      if (String(url).endsWith("/bootstrap")) {
+        expect(JSON.parse(String(init?.body))).toEqual({});
+        return json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "saishi-readonly", authentication: "account", accountScope: "account_a" });
+      }
+      expect(new Headers(init?.headers).get("x-agent-account")).toBe("account_a");
+      return json({ sessions: [] });
+    }, "saishi");
+    await client.bootstrap(); await client.sessions();
+    expect(calls).toEqual(["/api/agent-apps/saishi/workbench/bootstrap", "/api/agent-apps/saishi/workbench/sessions"]);
+  });
+  it("isolates uncertain submissions across accounts and restores only the same account receipt", async () => {
+    const store = memory();
+    let scope = "account_a";
+    const client = new WorkbenchClient(store, async (url) => {
+      if (String(url).endsWith("/bootstrap")) return json({ csrfToken: "csrf", expiresAt: Date.now() + 60000,
+        profileId: "saishi-readonly", authentication: "account", accountScope: scope });
+      throw new Error("uncertain result");
+    }, "saishi");
+    await expect(client.submit("session_1", "问题")).rejects.toThrow("账号");
+    await client.bootstrap();
+    await expect(client.submit("session_1", "问题")).rejects.toThrow("连接中断");
+    const pending = client.pending("session_1");
+    scope = "account_b"; await client.bootstrap();
+    expect(client.pending("session_1")).toBeUndefined();
+    scope = "account_a"; await client.bootstrap();
+    expect(client.pending("session_1")).toEqual(pending);
+  });
+  it("rejects legacy grant bootstrap and accepts only the fixed first-party login route", async () => {
+    const legacy = new WorkbenchClient(memory(), async () => json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "saishi-readonly" }), "saishi");
+    await expect(legacy.bootstrap()).rejects.toThrow("账号工作台尚未接通");
+    for (const loginUrl of ["https://evil.example", "//evil.example", "/api/agent-apps/saishi/workbench/login"]) {
+      const client = new WorkbenchClient(memory(), async () => json({ loginUrl }, 401), "saishi");
+      await expect(client.bootstrap()).rejects.toMatchObject({ status: 401, loginUrl: loginUrl.startsWith("/api/") ? loginUrl : undefined });
+    }
+    const denied = new WorkbenchClient(memory(), async () => json({}, 403), "saishi");
+    await expect(denied.bootstrap()).rejects.toThrow("没有此赛事数据的访问权限");
+  });
   it("checks the server session profile before the selected plugin can start model work", async () => {
     let calls = 0;
     const client = new WorkbenchClient(memory(), async (_url, init) => {

@@ -1,5 +1,25 @@
 # 赛事只读插件
 
+## 同账号直接访问（当前源码，尚未部署）
+
+2026-09-06 按用户要求取消第一方工作台的二次授权。登录道引账号后，平台自动派生当前账号及业务空间的只读身份，不需要签发凭证、选择 Agent 专用赛事清单或粘贴字符串；后台仍逐次验证有效成员身份、应用订阅与资源归属。这里的只读是当前八项工具的交付范围；所有后续业务插件及赛事写入、生成、管理能力接入后都自动继承账号已有完整权限，无需补充授权，见 [ADR-0012](adr/0012-first-party-account-access.md)。
+
+主平台密码/短信登录建立 HttpOnly 的第一方账号会话。已有登录可通过平台登录页用现有平台令牌升级会话，令牌不会传给 Harness。工作台 bootstrap 返回 `authentication: account` 与不含凭据的 `accountScope`，后续请求携带 `x-agent-account`，防止旧标签页在账号切换后提交旧问题。退出主平台或赛事后台会撤销账号会话，后台执行身份同时失效；切回工作台会重新核对账号并移除旧视图。
+
+赛事读取跟随登录账号的当前租户，保留原有业务应用订阅检查。当前租户没有赛事业务访问权时明确拒绝，不借用其他用户或官网付款身份。内部执行凭据刷新不改变同账号/租户的会话空间；已有手动授权产生的历史不迁移。模型用量仍使用平台的赛事场景与次数限制。
+
+配套修改位于 DaoyinTechnology 的 `first_party_accounts.py`、`agent_app_access.py`、账号/工作台路由与赛事只读能力层。需先应用 `backend/db/migrations/20260906_harness_account_sessions.sql`，再协调发布两个仓库；本轮没有执行生产迁移或部署。`AGENT_ACCOUNT_ENABLED` 默认继承 `AGENT_SAISHI_ENABLED`；`FIRST_PARTY_ACCOUNT_ORIGINS` 默认仅允许官网与赛事官网，开发环境须显式指定来源。账号 Cookie 在正式道引子域之间共享，其他主机为 host-only。
+
+供外部 MCP 客户端连接道引服务的手动凭据接口仍独立保留，不是 Harness 插件的授权流程。道引业务即使通过 MCP 接入 Harness，也必须自动继承当前账号权限。旧 `/workbench/connect` 返回 410，不能再用外部客户端凭据登录第一方工作台。
+
+### 当前改造验证
+
+Windows / Node 22.23.2：全仓 typecheck、lint、build 通过。客户端与插件专项 14 项测试通过；全仓测试为 292 通过、1 项已有本地崩溃恢复断言失败（`packages/server/src/app.test.ts`，`recoveryPrompt` 为空），未修改该无关逻辑。
+
+本地 Edge 使用正式打包方式的预览与模拟平台接口，通过 9 组检查：1280/1920/390/320px 的会话、插件页和选择器，账号切换、退出状态、同账号草稿保留、官网访客入口，以及主平台已有登录直接跳回 Harness。截图与报告见 `output/playwright/account-access/`，可用 `node scripts/verify-account-access.mjs` 重跑；该脚本需要配套主平台官网先构建。没有真实模型或生产 Cookie 验收。
+
+## 已部署版本的历史记录
+
 2026-09-06：第一阶段已部署。运行时与工作台版本 `70061947e58ec61afda8a9a7203d797af56ee282`；主平台、赛事后端和赛事 Web 为 `8ab0b0aebfbf78b3226b7bd37bf87ce9e9e71a8b`。Windows CI 发布包构建成功，生产健康、资源哈希和未授权拒绝已检查；未运行测试套件或真实模型调用。入口为 `https://www.daoyintech.com/harness/?app=saishi`。
 
 ## 执行方式
@@ -12,7 +32,7 @@ Profile 从主平台获取 Saishi 的受控能力定义，校验八个工具名�
 
 模型仍由 Harness 的通用循环驱动，主平台仅完成单轮工具调用模型请求，使用独立的 `saishi.agent_readonly` 场景。模型参数和工具定义不能由浏览器任意改写。次数上限和用量台账由主平台维护，不使用官网访客赞助或 Builder 钱包。
 
-## 工作台入口
+## 首期工作台入口（已被上述源码改造替代，线上尚待更新）
 
 插件目录增加「赛事只读」，未授权时显示授权入口，不冒充已接通。选择后通过现有页面的 `?app=saishi` 切换到固定赛事 BFF，页面重载隔离上一插件的显示与客户端状态。
 

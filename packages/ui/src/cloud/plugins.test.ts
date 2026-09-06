@@ -21,9 +21,17 @@ describe("workbench plugin inventory and session binding", () => {
     expect(html).toContain("检索道引产品与方案的公开资料");
     expect(html.match(/待接入/gu)).toHaveLength(3);
     expect(html.match(/aria-label="使用/gu)).toHaveLength(1);
+    expect(html).toContain('aria-label="打开赛事只读"');
+    expect(html).not.toContain("连接授权");
+    expect(html).toContain('aria-label="使用官网知识"');
     expect(html).not.toContain("尚未接入此工作台");
     expect(html).not.toContain("plugin-capabilities");
-    expect(html).not.toContain("plugin-card-bottom");
     expect(html).not.toContain("安装插件");
+  });
+  it("requires a verified account profile before enabling private model work", () => {
+    expect(selectablePlugin("saishi")).toBeUndefined();
+    expect(selectablePlugin("saishi", ["company-public"])).toBeUndefined();
+    expect(selectablePlugin("saishi", ["saishi-readonly"])?.profileId).toBe("saishi-readonly");
+    expect(filterPlugins("赛事", ["saishi-readonly"])[0]?.status).toBe("available");
   });
 });

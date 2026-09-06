@@ -2,6 +2,8 @@
 
 DaoyinHarness 现定位为**道引统一 Agent 平台的共享执行内核**：本地 CLI / 工作台和云端业务入口共用 `AgentEngine`；主平台 backend 负责身份、空间、应用安装、授权和费用归属，短剧、文旅、Builder 保留业务服务与任务状态。
 
+所有业务插件的接入规则：登录后自动继承当前账号已有的完整业务权限，包括读写、生成和管理，无需逐插件授权、勾选范围或粘贴凭证。当前赛事读取免二次授权代码已完成、尚未部署；其他能力的接入进度独立记录，详见 [完整权限规则](docs/adr/0012-first-party-account-access.md) 和 [插件盘点](docs/PLUGINS.md)。
+
 官网已上线共享 AgentEngine 的单实例只读服务，接入主平台访客授权、MySQL 操作去重与调用额度、公开知识检索、单步模型及 Cookie/CSRF 会话代理。真实模型、检索、回放与取消接口已验证；多 Worker 调度与跨业务写操作仍待完成。当前架构见 [统一 Agent 平台说明](docs/UNIFIED-AGENT.md)，生产版本和证据见 [上线记录](deployment/RELEASE-20260905.md)。
 
 > **项目状态：通用本地 Agent 纵向闭环已打通，模型网关客户端、受控 Browser、远程 Streamable HTTP MCP、Goals / Workflow / Child Agent orchestration，以及 session fork/resume/search + crash interruption recovery 已落地，主平台 OAuth / Gateway 服务端仍待联调。** CLI、本地 API、React Web UI、安全工作区、append-only trajectory、每步 Prompt/Context 装配、Capability Registry、Skills、公共 Web、Browser、MCP、provenance-bound Memory、Context Compaction、持久 Goal/Workflow/Child Run、受控 Process Service + 一次性 Permission Gate，以及标准化 Daoyin AI Gateway `ModelClient` 已经串联。Linux Bubblewrap OS Sandbox 已实现并带启动探测；Windows/macOS Sandbox、插件/能力管理、SQLite materialization/语义检索与正式 npm 发布仍待完成。

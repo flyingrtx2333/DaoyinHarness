@@ -12,7 +12,7 @@ export function PluginCatalog({ onSelect, busy, authorizedProfiles = [] }: Plugi
     <div className="plugin-grid">{matches.map((plugin) => <article className={`plugin-card ${plugin.status}`} key={plugin.id} aria-labelledby={`catalog-${plugin.id}`}>
       <span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span>
       <div className="plugin-card-copy"><h2 id={`catalog-${plugin.id}`}>{plugin.name}</h2><p className="plugin-description">{plugin.description}</p></div>
-      {plugin.status !== "pending" ? <button className="plugin-use" aria-label={`${plugin.status === "authorization_required" ? "连接授权" : "使用"}${plugin.name}`} disabled={busy} onClick={() => onSelect(plugin.id)}>{plugin.status === "authorization_required" ? "授权" : "使用"}</button> : <span className="plugin-state">待接入</span>}
+      {plugin.status !== "pending" ? <button className="plugin-use" aria-label={`${plugin.status === "account_required" ? "打开" : "使用"}${plugin.name}`} disabled={busy} onClick={() => onSelect(plugin.id)}>{plugin.status === "account_required" ? "打开" : "使用"}</button> : <span className="plugin-state">待接入</span>}
     </article>)}</div>
     {matches.length === 0 && <p className="plugin-no-results" role="status">没有找到匹配的插件</p>}
   </section>;
@@ -38,7 +38,7 @@ export function PluginPicker({ selectedId, onSelect, onBrowse, busy, authorizedP
     {open && <div className="plugin-picker" id="plugin-picker" role="dialog" aria-label="选择会话插件" ref={panel}>
       <div className="plugin-picker-heading">选择插件<button type="button" className="plugin-close" aria-label="关闭插件选择" onClick={() => close(true)}>×</button></div>
       <div className="plugin-options">{filterPlugins("", authorizedProfiles).map((plugin) => plugin.status !== "pending" ?
-        <button type="button" className="plugin-option" key={plugin.id} aria-pressed={selectedId === plugin.id} disabled={busy} onClick={() => { onSelect(plugin.id); close(true); }}><span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span><span>{plugin.name}</span><span className="plugin-option-state">{plugin.status === "authorization_required" ? "连接授权" : selectedId === plugin.id ? "已选" : "选择"}</span></button> :
+        <button type="button" className="plugin-option" key={plugin.id} aria-pressed={selectedId === plugin.id} disabled={busy} onClick={() => { onSelect(plugin.id); close(true); }}><span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span><span>{plugin.name}</span><span className="plugin-option-state">{plugin.status === "account_required" ? "打开" : selectedId === plugin.id ? "已选" : "选择"}</span></button> :
         <div className="plugin-option pending" key={plugin.id}><span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span><span>{plugin.name}</span><span className="plugin-option-state">待接入</span></div>)}</div>
       <button type="button" className="plugin-browse" onClick={() => { close(false); onBrowse(); }}>浏览全部插件 <span aria-hidden="true">↗</span></button>
     </div>}
