@@ -55,3 +55,10 @@
 @media(max-width:900px) { .plugin-grid { grid-template-columns:1fr; } .plugin-catalog-toolbar { align-items:flex-start; flex-direction:column; gap:14px; } .plugin-catalog-toolbar label,.plugin-catalog-toolbar input { width:100%; } }
 @media(max-width:640px) { .plugin-catalog { padding:22px 18px 36px; } .plugin-card { padding:20px; } .plugin-catalog-toolbar { margin-bottom:20px; } }
 @media(max-width:420px) { .composer-busy { display:none; } }
+
+/* Selected Aurora Fold mark: shared at sidebar, empty state, and assistant scale. */
+.brand-mark,.empty-mark,.mini-mark { display:inline-grid; place-items:center; flex:0 0 auto; background:transparent; color:inherit; border-radius:0; font-family:inherit; }
+.harness-logo { display:block; width:100%; height:100%; }
+.brand-mark { width:40px; height:40px; font-size:initial; }
+.empty-mark { width:42px; height:46px; font-size:initial; }
+.mini-mark { width:24px; height:26px; border-radius:0; font-size:initial; }

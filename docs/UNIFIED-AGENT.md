@@ -58,6 +58,10 @@ npm run start:cloud
 
 不要将运行数据库放进源码/证据目录或提交 Git。`/health` 只说明进程可响应，`productionReady: false`；不会用它声称平台认证、模型或检索已就绪。
 
+## Harness 品牌资源
+
+Harness 自有界面统一使用 Aurora Fold 重绘标志，唯一发布资源为 `packages/ui/public/assets/harness-logo.png`。云端工作台的侧栏、欢迎区、助手标识和浏览器图标共用同一文件；后续本地工作台也必须遵循此规则。完整的资源、使用与变更要求见 [Harness 品牌资源](HARNESS-BRANDING.md)。
+
 ## 浏览器接入协议
 
 所有路径前缀为 `/api/company-assistant/agent`，仅使用同源 Cookie，不向浏览器返回访客 bearer。

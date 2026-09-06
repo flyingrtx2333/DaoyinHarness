@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { filterPlugins, PLUGINS, type WorkbenchPlugin } from "./plugins.js";
+import { PluginIcon } from "./WorkbenchIcon.js";
 
 interface PluginActions { selectedId: string; onSelect: (id: string) => void; busy: boolean }
 
@@ -9,7 +10,7 @@ export function PluginCatalog({ selectedId, onSelect, busy }: PluginActions): Re
   return <section className="plugin-catalog" aria-label="业务插件">
     <div className="plugin-catalog-toolbar"><p>选择可用插件，在会话中使用。</p><label><span className="sr-only">搜索插件</span><input type="search" placeholder="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} /></label></div>
     <div className="plugin-grid">{matches.map((plugin) => <article className="plugin-card" key={plugin.id}>
-      <div className="plugin-card-heading"><span className={`plugin-mark plugin-mark-${plugin.id}`} aria-hidden="true">{plugin.mark}</span><h2>{plugin.name}</h2><span className={`plugin-state ${plugin.status}`}>{plugin.status === "available" ? "可用" : "待接入"}</span></div>
+      <div className="plugin-card-heading"><span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span><h2>{plugin.name}</h2><span className={`plugin-state ${plugin.status}`}>{plugin.status === "available" ? "可用" : "待接入"}</span></div>
       <p className="plugin-description">{plugin.description}</p>
       <ul className="plugin-capabilities">{plugin.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul>
       <div className="plugin-card-bottom"><p>{plugin.note}</p>{plugin.status === "available" ? <button className="primary" disabled={busy} onClick={() => onSelect(plugin.id)}>{selectedId === plugin.id ? "返回会话使用" : "使用插件"}</button> : <span className="plugin-unavailable">暂不可选</span>}</div>
@@ -36,10 +37,10 @@ export function PluginPicker({ selectedId, onSelect, onBrowse, busy }: PluginAct
   return <div className="plugin-control" ref={container} onKeyDown={(event) => { if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); close(true); } }} onBlur={(event) => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
     <button type="button" className="plugin-add" ref={trigger} aria-label="选择插件" aria-haspopup="dialog" aria-expanded={open} aria-controls="plugin-picker" onClick={() => setOpen(!open)}><span aria-hidden="true">＋</span></button>
     {open && <div className="plugin-picker" id="plugin-picker" role="dialog" aria-label="选择会话插件" ref={panel}>
-      <div className="plugin-picker-heading">会话插件<button type="button" className="plugin-close" aria-label="关闭插件选择" onClick={() => close(true)}>×</button></div>
+      <div className="plugin-picker-heading">选择插件<button type="button" className="plugin-close" aria-label="关闭插件选择" onClick={() => close(true)}>×</button></div>
       <div className="plugin-options">{PLUGINS.map((plugin: WorkbenchPlugin) => plugin.status === "available" ?
-        <button type="button" className="plugin-option" key={plugin.id} aria-pressed={selectedId === plugin.id} disabled={busy} onClick={() => { onSelect(plugin.id); close(true); }}><span className={`plugin-mark plugin-mark-${plugin.id}`} aria-hidden="true">{plugin.mark}</span><span>{plugin.name}<small>{plugin.capabilities.join(" · ")}</small></span><span className="plugin-option-state">{selectedId === plugin.id ? "已选" : "选择"}</span></button> :
-        <div className="plugin-option pending" key={plugin.id}><span className={`plugin-mark plugin-mark-${plugin.id}`} aria-hidden="true">{plugin.mark}</span><span>{plugin.name}</span><span className="plugin-option-state">待接入</span></div>)}</div>
+        <button type="button" className="plugin-option" key={plugin.id} aria-pressed={selectedId === plugin.id} disabled={busy} onClick={() => { onSelect(plugin.id); close(true); }}><span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span><span>{plugin.name}</span><span className="plugin-option-state">{selectedId === plugin.id ? "已选" : "选择"}</span></button> :
+        <div className="plugin-option pending" key={plugin.id}><span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span><span>{plugin.name}</span><span className="plugin-option-state">待接入</span></div>)}</div>
       <button type="button" className="plugin-browse" onClick={() => { close(false); onBrowse(); }}>浏览全部插件 <span aria-hidden="true">↗</span></button>
     </div>}
   </div>;
