@@ -37,6 +37,7 @@ try {
   page.on("pageerror", error => errors.push(error.message));
   let account = "a";
   let brokenAvatar = false;
+  let unavailable = false;
   await page.route("https://images.example/avatar.png", route => route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=", "base64") }));
   await page.route("https://images.example/missing.png", route => route.fulfill({ status: 404, body: "" }));
   const requests = [];
@@ -50,8 +51,9 @@ try {
     }
     const company = path.includes("company-assistant");
     if (path.endsWith("/bootstrap")) {
+      if (unavailable) return route.fulfill({ status: 503, json: {} });
       if (!company && !account) return route.fulfill({ status: 401, json: { loginUrl: "/api/agent-apps/saishi/workbench/login" } });
-      return route.fulfill({ json: { csrfToken: "fixture-csrf", expiresAt: Date.now()+3600000,
+      return route.fulfill({ json: { csrfToken: "fixture-csrf", expiresAt: Date.now() + (company ? 3600000 : 30 * 86400000),
         ...(company ? {} : { profileId: "saishi-readonly", authentication: "account", accountScope: account,
           account: { username: account === "a" ? "张小明" : "李小红", avatarUrl: account === "a" ? `https://images.example/${brokenAvatar ? "missing" : "avatar"}.png` : null } }) } });
     }
@@ -68,6 +70,11 @@ try {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(base + "/harness/?app=saishi");
     await page.getByText("账号 a 的回答", { exact: true }).waitFor();
+    if (width === 1280) {
+      await page.waitForTimeout(500);
+      assert.equal(requests.filter(request => request.path.endsWith("/bootstrap")).length, 1, "30-day account must stay connected without an expiry reconnect loop");
+      checks.push("30-day account remains ready without repeated bootstrap requests");
+    }
     await page.waitForFunction(() => document.querySelector(".account-avatar img")?.naturalWidth > 0);
     assert.equal(await page.locator(".account-username").textContent(), "张小明");
     assert.equal(await page.getByText("账号空间", { exact: true }).count(), 0);
@@ -101,6 +108,14 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.waitForFunction(() => document.querySelector(".account-avatar img")?.naturalWidth > 0);
   checks.push("profile avatar loads under production CSP, falls back on failure and refreshes");
+  unavailable = true;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.getByRole("button", { name: "重新连接工作台", exact: true }).waitFor();
+  assert.equal(await page.getByText("正在连接工作台…", { exact: true }).count(), 0);
+  unavailable = false;
+  await page.getByRole("button", { name: "重新连接工作台", exact: true }).click();
+  await page.getByText("账号 a 的回答", { exact: true }).waitFor();
+  checks.push("temporary connection failure exits the spinner and can be retried");
   account = "b";
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.getByText("账号 b 的回答", { exact: true }).waitFor();

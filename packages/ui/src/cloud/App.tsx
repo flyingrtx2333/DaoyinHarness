@@ -8,6 +8,7 @@ import { selectablePlugin, sessionPlugin } from "./plugins.js";
 import { HarnessLogo } from "./HarnessLogo.js";
 import { WorkbenchIcon } from "./WorkbenchIcon.js";
 import { AccountIdentity } from "./AccountIdentity.js";
+import { scheduleExpiry } from "./expiry.js";
 
 const APPLICATION = new URLSearchParams(window.location.search).get("app") === "saishi" ? "saishi" : "company";
 const SELECTED = "daoyin-harness-cloud-selected-v1" + (APPLICATION === "saishi" ? ":saishi" : "");
@@ -90,13 +91,12 @@ export function App(): React.JSX.Element {
   }, []);
   useEffect(() => {
     if (phase !== "ready") return;
-    const timer = window.setTimeout(() => {
+    return scheduleExpiry(expiresAt, () => {
       if (APPLICATION === "saishi") { void connect(); return; }
       setPhase("expired"); setRuns([]); setEvents([]); setSessions([]);
       setSelected(""); setDraft("");
       setError("访客授权已到期。重新进入将创建新的访客空间，旧空间的会话不会转入。");
-    }, Math.max(0, expiresAt - Date.now()));
-    return () => window.clearTimeout(timer);
+    });
   }, [phase, expiresAt]);
   useEffect(() => {
     setRuns([]); setEvents([]); nearBottom.current = true;
@@ -228,6 +228,7 @@ export function App(): React.JSX.Element {
         {error && <div className="error-message" role="alert">{error}</div>}
         {APPLICATION === "saishi" && loginUrl && phase !== "ready" && phase !== "connecting" && <button type="button" className="primary reconnect" onClick={() => window.location.assign(loginUrl)}>登录道引账号</button>}
         {APPLICATION === "company" && phase !== "ready" && phase !== "connecting" && <button className="primary reconnect" onClick={() => { void connect(); }}>重新进入工作台</button>}
+        {APPLICATION === "saishi" && !loginUrl && phase !== "ready" && phase !== "connecting" && <button className="primary reconnect" onClick={() => { void connect(); }}>重新连接工作台</button>}
         {pending && phase === "ready" && !submitting && <div className="recovery"><span>上次提交结果尚未确认。</span><button disabled={loading || !!active} onClick={() => { void send(pending.message); }}>恢复原提交</button></div>}
         <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
           <label htmlFor="message" className="sr-only">发送给 Harness 的问题</label>
