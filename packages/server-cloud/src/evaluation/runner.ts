@@ -33,7 +33,6 @@ export async function runTrial(options: TrialOptions): Promise<Trial> {
     if (kind === "agent") modelCalls++; else judgeCalls++;
     options.onStage?.(kind === "agent" ? `模型调用 ${modelCalls}` : "独立判分");
   } };
-  let events: AgentEvent[] = [];
   try {
     signal.throwIfAborted();
     const fixture = await createFixture(test, repository, identity);
@@ -83,7 +82,7 @@ export async function runTrial(options: TrialOptions): Promise<Trial> {
       finalRun = await repository.getRun(identity, runId);
       throw new EvaluationError(409, options.signal.aborted ? "EVAL_CANCELLED" : "EVAL_TRIAL_TIMEOUT", "该次试验已停止，未自动重跑。");
     }
-    events = await repository.bindRun(identity, sessionId, runId).events.read(sessionId);
+    const events: AgentEvent[] = await repository.bindRun(identity, sessionId, runId).events.read(sessionId);
     checks.push({ name: "任务完成", passed: finalRun?.status === "completed", detail: `实际状态：${finalRun?.status ?? "unknown"}` });
     const allowed = new Set(fixture.profile.tools.map(t => t.definition.name));
     checks.push({ name: "工具和资源边界", passed: attempted.every(t => allowed.has(t)) && fixture.forbiddenAttempts.count === 0,

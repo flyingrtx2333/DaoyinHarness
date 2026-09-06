@@ -33,6 +33,6 @@ export function PluginWorkspace(props: React.ComponentProps<typeof PluginCatalog
     {tab === "catalog" && <PluginCatalog {...props} />}
     {tab === "evaluation" && checking && <p role="status">正在验证管理员身份…</p>}
     {tab === "evaluation" && scope && <div hidden={checking}><EvaluationWorkbench key={scope} client={client} onDenied={() => { client.reset(); setScope(""); }} /></div>}
-    {tab === "evaluation" && !checking && !scope && <div className="evaluation-denied" role="alert"><p>测试评估仅向已验证的超级管理员开放。</p><button type="button" onClick={() => select("catalog")}>返回插件目录</button></div>}
+    {tab === "evaluation" && !checking && !scope && <div className="evaluation-denied" role="alert"><p>测试评估仅向已验证的超级管理员开放。</p><p><a href="/login?redirect=%2Fharness%2F%23plugins-evaluation">登录道引账号</a></p><button type="button" onClick={() => select("catalog")}>返回插件目录</button></div>}
   </div>;
 }
