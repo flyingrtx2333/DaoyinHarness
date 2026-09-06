@@ -2,6 +2,20 @@ import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { CloudRun, CloudSession } from "../../../server-cloud/src/repository.js";
 
 export type { CloudRun, CloudSession };
+export interface AccountProfile { username: string; avatarUrl: string | null }
+
+function accountProfile(value: unknown): AccountProfile | undefined {
+  if (typeof value !== "object" || value === null || !("username" in value) ||
+      typeof value.username !== "string" || !value.username.trim()) return undefined;
+  let avatarUrl: string | null = null;
+  if ("avatarUrl" in value && typeof value.avatarUrl === "string") {
+    try {
+      const url = new URL(value.avatarUrl);
+      if (url.protocol === "https:" && !url.username && !url.password) avatarUrl = url.href;
+    } catch { /* Missing or invalid avatars use the username initial. */ }
+  }
+  return { username: value.username, avatarUrl };
+}
 export interface PendingRequest { sessionId: string; requestId: string; message: string }
 interface StoragePort { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
 const RECEIPTS = "daoyin-harness-cloud-receipts-v1";
@@ -16,10 +30,12 @@ export class WorkbenchError extends Error {
 export class WorkbenchClient {
   #csrf = "";
   #accountScope = "";
+  #account: AccountProfile | undefined;
   readonly #base: string;
   #receiptKey: string;
   readonly #receipts = new Map<string, PendingRequest>();
   public get accountScope(): string { return this.#accountScope; }
+  public get account(): AccountProfile | undefined { return this.#account; }
   public constructor(private readonly storage: StoragePort, private readonly fetcher: typeof fetch = (input, init) => fetch(input, init), public readonly application: "company" | "saishi" = "company") {
     this.#base = application === "saishi" ? "/api/agent-apps/saishi/workbench" : BASE;
     this.#receiptKey = application === "saishi" ? `${RECEIPTS}:saishi` : RECEIPTS;
@@ -55,6 +71,7 @@ export class WorkbenchClient {
         if (response.status === 401 || (this.application === "saishi" && response.status === 403)) {
           this.#csrf = "";
           this.#accountScope = "";
+          this.#account = undefined;
           if (this.application === "saishi") {
             this.#receipts.clear();
             let loginUrl: string | undefined;
@@ -83,11 +100,13 @@ export class WorkbenchClient {
     await this.#request("/logout", {});
     this.#csrf = "";
     this.#accountScope = "";
+    this.#account = undefined;
     this.#receipts.clear();
     this.storage.removeItem(this.#receiptKey);
   }
   public async bootstrap(): Promise<number> {
-    const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string }>("/bootstrap", {});
+    this.#account = undefined;
+    const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string; account?: unknown }>("/bootstrap", {});
     if (!result.csrfToken || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() ||
         (this.application === "saishi" && (result.profileId !== "saishi-readonly" || result.authentication !== "account" || !identifier(result.accountScope)))) {
       this.#csrf = ""; this.#accountScope = ""; this.#receipts.clear();
@@ -95,6 +114,7 @@ export class WorkbenchClient {
     }
     if (this.application === "saishi") {
       this.#accountScope = result.accountScope!;
+      this.#account = accountProfile(result.account);
       this.#receiptKey = `${RECEIPTS}:saishi:${this.#accountScope}`;
       this.#restoreReceipts();
     }

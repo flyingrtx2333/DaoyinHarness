@@ -9,6 +9,23 @@ const json = (value: unknown, status = 200): Response => new Response(JSON.strin
 const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request_1", userMessage: "介绍产品", status: "completed", finalText: "回答", lastEventSeq: 2, cancelRequested: false, authorizationId: "grant_1", billingAccountId: "payer_1", createdAt: "2026-09-05T12:00:00Z" };
 
 describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
+  it("refreshes only server-provided account display fields and clears them after failed authentication", async () => {
+    let account: unknown = { username: "张小明", avatarUrl: "https://images.example/a.png", email: "private@example.test" };
+    let status = 200;
+    const client = new WorkbenchClient(memory(), async () => json({ csrfToken: "csrf", expiresAt: Date.now() + 60000,
+      profileId: "saishi-readonly", authentication: "account", accountScope: "account_a", account }, status), "saishi");
+    await client.bootstrap();
+    expect(client.account).toEqual({ username: "张小明", avatarUrl: "https://images.example/a.png" });
+    for (const avatarUrl of [null, "javascript:alert(1)", "data:image/svg+xml,test", "http://images.example/a.png", "https://user:pass@images.example/a.png"]) {
+      account = { username: "李小红", avatarUrl }; await client.bootstrap();
+      expect(client.account).toEqual({ username: "李小红", avatarUrl: null });
+    }
+    status = 401;
+    await expect(client.sessions()).rejects.toMatchObject({ status: 401 });
+    expect(client.account).toBeUndefined();
+    status = 200; account = { username: "" }; await client.bootstrap();
+    expect(client.account).toBeUndefined();
+  });
   it("bootstraps an account without a pasted grant and sends its boundary on every business request", async () => {
     const calls: string[] = [];
     const client = new WorkbenchClient(memory(), async (url, init) => {

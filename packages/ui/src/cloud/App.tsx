@@ -7,6 +7,7 @@ import { PluginCatalog, PluginPicker } from "./PluginBrowser.js";
 import { selectablePlugin, sessionPlugin } from "./plugins.js";
 import { HarnessLogo } from "./HarnessLogo.js";
 import { WorkbenchIcon } from "./WorkbenchIcon.js";
+import { AccountIdentity } from "./AccountIdentity.js";
 
 const APPLICATION = new URLSearchParams(window.location.search).get("app") === "saishi" ? "saishi" : "company";
 const SELECTED = "daoyin-harness-cloud-selected-v1" + (APPLICATION === "saishi" ? ":saishi" : "");
@@ -201,6 +202,7 @@ export function App(): React.JSX.Element {
         </nav>
       </section>
       {APPLICATION === "company" && <footer className="sidebar-footer"><div className="account-actions" aria-label="道引账号入口"><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div></footer>}
+      {APPLICATION === "saishi" && phase === "ready" && client.account && <footer className="sidebar-footer"><AccountIdentity key={client.accountScope} account={client.account} /></footer>}
     </aside>
     <main id="conversation" className="main" tabIndex={-1}>
       <button className="mobile-menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
