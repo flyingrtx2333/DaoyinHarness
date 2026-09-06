@@ -147,8 +147,8 @@ export function EvaluationWorkbench({ client, onDenied }: { client: EvaluationCl
           </details>)}
         </div>}
         <div className="evaluation-options">
-          <label className="evaluation-field">执行方式<select value={mode} disabled={busy} onChange={event => { setMode(event.target.value as "live" | "replay"); setConfirmed(false); }}><option value="replay">程序回放（非真实模型）</option><option value="live" disabled={!catalog.liveAvailable}>真实模型＋隔离数据{catalog.liveAvailable ? "" : "（未配置）"}</option></select></label>
-          <label className="evaluation-field">每题重复次数<select value={repetitions} disabled={busy} onChange={event => { setRepetitions(Number(event.target.value)); setConfirmed(false); }}>{[1, 2, 3, 4, 5].map(n => <option key={n}>{n}</option>)}</select></label>
+          <label className="evaluation-field">执行方式<select aria-label="执行方式" value={mode} disabled={busy} onChange={event => { setMode(event.target.value as "live" | "replay"); setConfirmed(false); }}><option value="replay">程序回放（非真实模型）</option><option value="live" disabled={!catalog.liveAvailable}>真实模型＋隔离数据{catalog.liveAvailable ? "" : "（未配置）"}</option></select></label>
+          <label className="evaluation-field">每题重复次数<select aria-label="每题重复次数" value={repetitions} disabled={busy} onChange={event => { setRepetitions(Number(event.target.value)); setConfirmed(false); }}>{[1, 2, 3, 4, 5].map(n => <option key={n}>{n}</option>)}</select></label>
           <label className="evaluation-field">每题模型调用上限<input type="number" min={2} max={12} value={maxCalls} disabled={busy} onChange={event => { setMaxCalls(Number(event.target.value)); setConfirmed(false); }} /></label>
         </div>
         {mode === "replay" ? <p className="evaluation-fixture">回放回复来自固定脚本，只检查协议与已配置的硬性条件，不证明真实模型任务能力。</p> : <>
