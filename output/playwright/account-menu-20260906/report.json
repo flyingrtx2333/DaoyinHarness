@@ -1,0 +1,22 @@
+{
+  "evidence": "Windows Edge; local committed release; mocked platform APIs; no real model or production deployment",
+  "checks": [
+    "30-day account remains ready without repeated bootstrap requests",
+    "signed-in, picker, catalog and layout 1280px",
+    "signed-in, picker, catalog and layout 1920px",
+    "signed-in, picker, catalog and layout 390px",
+    "signed-in, picker, catalog and layout 320px",
+    "same-account reconnection preserves the draft",
+    "coalesced background identity check preserves composer, draft and conversation without a spinner",
+    "profile avatar loads under production CSP, falls back on failure and refreshes",
+    "temporary connection failure exits the spinner and can be retried",
+    "account switch removes old transcript",
+    "signed-out state has platform login without grant entry",
+    "company visitor entry includes platform login and registration links on narrow and desktop screens",
+    "existing platform login enters Harness without password or grant prompts",
+    "account menu, keyboard focus, persistent settings and confirmed logout pass at desktop and narrow widths"
+  ],
+  "errors": [],
+  "revision": "007876f854bb0aa6ad6dcc0c56cb3be69a77efe7",
+  "preview": false
+}

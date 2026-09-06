@@ -1,0 +1,15 @@
+{
+  "revision": "007876f854bb0aa6ad6dcc0c56cb3be69a77efe7",
+  "checkedAt": "2026-09-06T07:11:15.273Z",
+  "checks": [
+    "Production HTTPS: all committed artifact hashes and avatar CSP match",
+    "Production API: anonymous access and foreign Origin rejected",
+    "Production browser: anonymous login redirects to platform login",
+    "Production assets with mocked account: menu/settings and background check preserve draft",
+    "Production assets/CSP with MOCKED 30-day account API: one bootstrap, usable composer, username/avatar at 1280px",
+    "Production assets with mocked account: menu/settings and background check preserve draft",
+    "Production assets/CSP with MOCKED 30-day account API: one bootstrap, usable composer, username/avatar at 390px"
+  ],
+  "errors": [],
+  "evidence": "Production artifacts, anonymous API and login; authenticated account display uses mocked fixtures, not user login"
+}

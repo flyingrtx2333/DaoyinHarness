@@ -242,6 +242,6 @@ try {
   checks.push("account menu, keyboard focus, persistent settings and confirmed logout pass at desktop and narrow widths");
   assert.equal(requests.some(req => req.path.endsWith("/connect")), false);
   assert.deepEqual(errors, []);
-  await writeFile(resolve(output, "report.json"), JSON.stringify({ evidence: "Windows Edge; local release preview; mocked platform APIs; no real model or production deployment", checks, errors }, null, 2));
+  await writeFile(resolve(output, "report.json"), JSON.stringify({ revision: release.revision, preview: release.preview, evidence: `Windows Edge; local ${release.preview ? "worktree preview" : "committed release"}; mocked platform APIs; no real model or production deployment`, checks, errors }, null, 2));
   console.log(JSON.stringify({ checks, output }, null, 2));
 } finally { await browser.close(); await new Promise(done => server.close(done)); }
