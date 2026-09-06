@@ -10,6 +10,8 @@ import { WorkbenchIcon } from "./WorkbenchIcon.js";
 
 const APPLICATION = new URLSearchParams(window.location.search).get("app") === "saishi" ? "saishi" : "company";
 const SELECTED = "daoyin-harness-cloud-selected-v1" + (APPLICATION === "saishi" ? ":saishi" : "");
+const ACCOUNT_LOGIN_PATH = "/login?redirect=%2Fharness%2F%3Fapp%3Dsaishi";
+const ACCOUNT_REGISTER_PATH = "/login?mode=register&redirect=%2Fharness%2F%3Fapp%3Dsaishi";
 const storage = {
   getItem: (key: string): string | null => window.sessionStorage.getItem(key),
   setItem: (key: string, value: string): void => window.sessionStorage.setItem(key, value),
@@ -199,7 +201,10 @@ export function App(): React.JSX.Element {
         </nav>
       </section>
       <footer className="sidebar-footer">
-        <div className="scope"><WorkbenchIcon name="user" /><div>{APPLICATION === "saishi" ? "账号空间" : "访客空间"} <span className="scope-dot" aria-hidden="true" /><small>{APPLICATION === "saishi" ? phase === "ready" ? "道引账号已连接" : "使用道引账号" : expiresAt && phase === "ready" ? `授权至 ${new Date(expiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "每次授权 30 分钟"}</small></div></div>
+        <div className="account-entry">
+          <div className="scope"><WorkbenchIcon name="user" /><div>{APPLICATION === "saishi" ? "账号空间" : "访客空间"} <span className="scope-dot" aria-hidden="true" /><small>{APPLICATION === "saishi" ? phase === "ready" ? "道引账号已连接" : "使用道引账号" : "登录后可查看你的赛事和专属数据"}</small></div></div>
+          {APPLICATION === "company" && <div className="account-actions" aria-label="道引账号入口"><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div>}
+        </div>
         <a className="site-link" href="/" target="_blank" rel="noopener noreferrer">官网 <span aria-hidden="true">↗</span></a>
       </footer>
     </aside>
@@ -210,7 +215,7 @@ export function App(): React.JSX.Element {
         <div className="conversation-content">
           {phase === "connecting" && <p className="connection-message" role="status"><span className="spinner" /> 正在连接工作台…</p>}
           {phase === "ready" && loading && <p className="connection-message" role="status">正在恢复会话…</p>}
-          {phase === "ready" && !loading && turns.length === 0 && <section className="empty-state"><span className="empty-mark" aria-hidden="true"><HarnessLogo /></span><h2>今天，想完成什么？</h2><div className="suggestions">{(APPLICATION === "saishi" ? [{ label: "查看我的赛事", text: "列出我当前账号的赛事", icon: "book" as const }, { label: "检查素材状态", text: "查询我的赛事素材处理状态", icon: "pin" as const }] : [{ label: "了解道引的产品", text: "道引科技有哪些产品？", icon: "book" as const }, { label: "查看文旅方案", text: "介绍一下互动文旅方案", icon: "pin" as const }]).map(({ label, text, icon }) => <button key={text} onClick={() => { setDraft(text); document.getElementById("message")?.focus(); }}><WorkbenchIcon name={icon} />{label}<WorkbenchIcon name="chevron" /></button>)}</div></section>}
+          {phase === "ready" && !loading && turns.length === 0 && <section className="empty-state"><span className="empty-mark" aria-hidden="true"><HarnessLogo /></span><h2>今天，想完成什么？</h2><div className="suggestions">{(APPLICATION === "saishi" ? [{ label: "查看我的赛事", text: "列出我当前账号的赛事", icon: "book" as const }, { label: "检查素材状态", text: "查询我的赛事素材处理状态", icon: "pin" as const }] : [{ label: "了解道引的产品", text: "道引科技有哪些产品？", icon: "book" as const }, { label: "查看文旅方案", text: "介绍一下互动文旅方案", icon: "pin" as const }]).map(({ label, text, icon }) => <button key={text} onClick={() => { setDraft(text); document.getElementById("message")?.focus(); }}><WorkbenchIcon name={icon} />{label}<WorkbenchIcon name="chevron" /></button>)}</div>{APPLICATION === "company" && <div className="visitor-account-prompt"><span>想查看你的赛事和专属数据？</span><div><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div></div>}</section>}
           {turns.map((turn) => <article className="turn" key={turn.run.id} aria-label="一轮对话">
             <div className="user-message"><span className="message-label">你</span><p>{turn.run.userMessage}</p></div>
             <div className="assistant-message"><div className="assistant-label"><span className="mini-mark" aria-hidden="true"><HarnessLogo /></span> Harness <span className="run-status">{statusText[turn.run.status]}</span></div>

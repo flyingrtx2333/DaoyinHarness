@@ -8,7 +8,7 @@
     "same-account reconnection preserves the draft",
     "account switch removes old transcript",
     "signed-out state has platform login without grant entry",
-    "company visitor entry unchanged",
+    "company visitor entry includes platform login and registration links on narrow and desktop screens",
     "existing platform login enters Harness without password or grant prompts"
   ],
   "errors": []
