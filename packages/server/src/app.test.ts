@@ -14,7 +14,7 @@ let app: FastifyInstance | undefined;
 const cleanupDirectories: string[] = [];
 
 async function temporaryDirectory(prefix: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), prefix));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   cleanupDirectories.push(directory);
   return directory;
 }
@@ -30,7 +30,7 @@ async function browserExecutableFixture(): Promise<string> {
 afterEach(async () => {
   await app?.close();
   app = undefined;
-  await Promise.all(cleanupDirectories.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(cleanupDirectories.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 })));
 });
 
 describe("local server security boundary", () => {

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import { ProcessService } from "./process-service.js";
 const temporaryDirectories: string[] = [];
 
 async function fixture(): Promise<{ root: string; service: ProcessService }> {
-  const root = await mkdtemp(path.join(os.tmpdir(), "daoyin-process-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "daoyin-process-")));
   temporaryDirectories.push(root);
   return { root, service: await ProcessService.create(root, { sandboxMode: "off" }) };
 }

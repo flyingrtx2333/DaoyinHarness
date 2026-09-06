@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,8 @@ let app: FastifyInstance;
 let directory: string;
 const host = { host: "127.0.0.1:4677" };
 async function fixture(extra: Partial<CreateAppOptions> = {}) {
-  directory = await mkdtemp(join(tmpdir(), "daoyin-workspace-switch-"));
+  // Windows CI TEMP may be an 8.3 alias; runtime paths are canonical realpaths.
+  directory = await realpath(await mkdtemp(join(tmpdir(), "daoyin-workspace-switch-")));
   const a = join(directory, "project-a");
   const b = join(directory, "项目 B");
   const dataDir = join(directory, "data");
