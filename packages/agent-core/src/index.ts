@@ -32,3 +32,5 @@ export {
   type PromptSectionProvider,
   type ResolvedPromptSection,
 } from "./prompt-registry.js";
+
+export type { AgentMemoryProvider, MemoryContextRequest, MemoryContextSnapshot } from "./memory-context.js";

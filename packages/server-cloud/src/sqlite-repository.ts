@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { SqliteMemoryRepository } from "./memory-repository.js";
 import { assertExecutionIdentity, executionScopeKey, type AppendCompactionInput, type ExecutionIdentity, type ExecutionScope } from "@daoyin/harness-contracts";
 import type { AgentEvent, AgentEventType, PendingAgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
 import { CloudError, type BoundRunStores, type CloudRepository, type CloudRun, type CloudSession } from "./repository.js";
@@ -31,6 +32,7 @@ function run(row: Row): CloudRun {
  * The caller owns the protected database directory and the connection lifecycle.
  */
 export class SqliteCloudRepository implements CloudRepository {
+  public readonly memory: SqliteMemoryRepository;
   readonly #db: DatabaseSync;
 
   public constructor(filename: string) {
@@ -66,6 +68,7 @@ export class SqliteCloudRepository implements CloudRepository {
         body TEXT NOT NULL, PRIMARY KEY(session_id, source_end_seq)
       ) STRICT;
     `);
+    this.memory = new SqliteMemoryRepository(this.#db, (operation) => this.#transaction(operation));
   }
 
   public close(): void { this.#db.close(); }

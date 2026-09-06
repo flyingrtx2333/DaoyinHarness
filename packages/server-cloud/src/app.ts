@@ -1,8 +1,9 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import { AgentEngine, type ModelClient } from "@daoyin/harness-agent-core";
+import { AgentEngine, type AgentMemoryProvider, type ModelClient } from "@daoyin/harness-agent-core";
 import { ToolRegistry, type ToolDefinition, type ToolRequest } from "@daoyin/harness-tools/registry";
 import { assertExecutionIdentity, ExecutionAccessError, sameExecutionScope, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import { CloudError, type CloudRepository, type CloudRun } from "./repository.js";
+import { registerMemoryRoutes } from "./memory-routes.js";
 
 export interface CloudToolBinding {
   definition: ToolDefinition;
@@ -32,6 +33,8 @@ export interface CloudServerOptions {
   allowedOrigins?: readonly string[];
   maxConcurrentRuns?: number;
   runTimeoutMs?: number;
+  /** Trusted platform check; absence disables cross-application memory sharing. */
+  authorizeMemoryShare?(identity: ExecutionIdentity, targetAppId: string, signal: AbortSignal): Promise<boolean>;
 }
 
 const SYSTEM_PROMPT = `你是道引通用 Agent。根据用户目标调用本次提供的业务工具；没有工具证据时不要声称操作完成。
@@ -218,8 +221,26 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             }
           },
         };
+        const memoryStore = options.repository.memory;
+        const memory: AgentMemoryProvider | undefined = memoryStore === undefined || identity.space.kind === "public" ? undefined : {
+          load: async (request) => {
+            await ensureActive(identity, request.signal);
+            const snapshot = memoryStore.prepare(identity, {
+              sessionId: run.sessionId, turnId: run.id, step: request.step,
+              query: request.turn.userMessage, events: [...request.inheritedEvents, ...request.priorEvents],
+            });
+            return {
+              ...snapshot,
+              assertCurrent: async (signal: AbortSignal) => {
+                await ensureActive(identity, signal);
+                await snapshot.assertCurrent(signal);
+              },
+            };
+          },
+        };
         const engine = new AgentEngine({
           model, tools, events: stores.events, compactionStore: stores.compactions,
+          ...(memory === undefined ? {} : { memory }),
           systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}`,
           maxSteps: 12, maxToolCalls: 24,
         });
@@ -287,6 +308,17 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
       execution.controller.abort("user");
     }
     return { run, cancellationRequested: run.cancelRequested };
+  });
+
+  const authorizeMemoryShare = options.authorizeMemoryShare;
+  registerMemoryRoutes(app, {
+    repository: options.repository,
+    identityFor,
+    ensureActive,
+    ...(authorizeMemoryShare === undefined ? {} : {
+      authorizeShareTarget: (identity: ExecutionIdentity, targetAppId: string, signal: AbortSignal) =>
+        abortable(() => authorizeMemoryShare(identity, targetAppId, signal), signal),
+    }),
   });
 
   app.addHook("preClose", async () => {

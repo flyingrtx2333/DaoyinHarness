@@ -10,6 +10,7 @@ import { snapshotExecutionIdentity, type ExecutionIdentity, type SessionCompacti
 import { ContextAssembler } from "./context-assembler.js";
 import { ContextCompactor } from "./context-compactor.js";
 import { modelToolResult } from "./model-tool-result.js";
+import { memoryContextView, memoryOperation, type AgentMemoryProvider, type MemoryContextSnapshot } from "./memory-context.js";
 import type { ModelClient, ModelConversationItem, ModelReply, ModelToolCall } from "./model.js";
 import { createDefaultPromptRegistry, SystemPromptRegistry } from "./prompt-registry.js";
 
@@ -40,6 +41,8 @@ export interface AgentEngineOptions {
   promptRegistry?: SystemPromptRegistry;
   maxSteps?: number;
   maxToolCalls?: number;
+  /** Trusted, namespace-bound long-term memory. The model cannot select its identity or scope. */
+  memory?: AgentMemoryProvider;
   historyMaxTurns?: number;
   historyMaxCharacters?: number;
   compactionStore?: SessionCompactionStore;
@@ -62,7 +65,7 @@ function modelFailure(error: unknown): { code: string; message: string } {
   const message = error instanceof Error ? error.message : "Model request failed.";
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = (error as { code?: unknown }).code;
-    if (typeof code === "string" && /^MODEL_[A-Z0-9_]{1,80}$/u.test(code)) return { code, message };
+    if (typeof code === "string" && /^(?:MODEL|AGENT)_[A-Z0-9_]{1,80}$/u.test(code)) return { code, message };
   }
   return { code: "MODEL_REQUEST_FAILED", message };
 }
@@ -101,6 +104,7 @@ export class AgentEngine {
   readonly #compactor: ContextCompactor | null;
   readonly #maxSteps: number;
   readonly #maxToolCalls: number;
+  readonly #memory: AgentMemoryProvider | undefined;
   readonly #onEvent: ((event: AgentEvent) => void | Promise<void>) | undefined;
 
   public constructor(options: AgentEngineOptions) {
@@ -127,6 +131,7 @@ export class AgentEngine {
     });
     this.#maxSteps = options.maxSteps ?? 16;
     this.#maxToolCalls = options.maxToolCalls ?? 32;
+    this.#memory = options.memory;
     this.#onEvent = options.onEvent;
   }
 
@@ -168,14 +173,10 @@ export class AgentEngine {
 
     const priorEvents = await this.#events.read(input.sessionId);
     const inheritedEvents = input.inheritedEvents ?? [];
-    const compaction = await this.#compactor?.compactIfNeeded(input.sessionId, priorEvents);
-    const conversation: ModelConversationItem[] = [
-      ...this.#context.historicalDialogueSources([
-        ...(inheritedEvents.length === 0 ? [] : [{ events: inheritedEvents }]),
-        { events: priorEvents, ...(compaction === undefined ? {} : { compaction }) },
-      ]),
-      { role: "user", content: input.userMessage },
-    ];
+    // Legacy compactions do not record durable-memory dependencies. Rebuild from the
+    // still-valid transcript when memory is enabled so forgotten facts cannot resurface.
+    const compaction = this.#memory === undefined ? await this.#compactor?.compactIfNeeded(input.sessionId, priorEvents) : undefined;
+    const conversation: ModelConversationItem[] = [{ role: "user", content: input.userMessage }];
 
     const turnStartedEvent = await append("turn.started", {
       status: "running",
@@ -197,26 +198,53 @@ export class AgentEngine {
       } catch {
         return this.#fail(append, "AGENT_AUTHORIZATION_DENIED", "执行身份或工具授权已失效。");
       }
-      const context = await this.#context.assembleStep({
-        turn: input,
-        priorEvents,
-        ...(inheritedEvents.length === 0 ? {} : { inheritedEvents }),
-        ...(compaction === undefined ? {} : { compaction }),
-        step,
-        tools,
-      });
       let reply: ModelReply;
+      let memorySnapshot: MemoryContextSnapshot | undefined;
+      let contextPriorEvents = priorEvents;
+      let contextInheritedEvents = inheritedEvents;
       try {
+        const memory = this.#memory;
+        if (memory !== undefined) {
+          memorySnapshot = await memoryOperation((memorySignal) => memory.load({
+            turn: input, step, priorEvents, inheritedEvents, signal: memorySignal,
+          }), signal);
+          contextPriorEvents = memoryContextView(memorySnapshot, priorEvents);
+          contextInheritedEvents = memoryContextView(memorySnapshot, inheritedEvents);
+        }
+        const context = await this.#context.assembleStep({
+          turn: input,
+          priorEvents: contextPriorEvents,
+          ...(contextInheritedEvents.length === 0 ? {} : { inheritedEvents: contextInheritedEvents }),
+          ...(compaction === undefined ? {} : { compaction }),
+          step,
+          tools,
+        });
+        const memoryText = memorySnapshot?.text ? "\n\n" + memorySnapshot.text : "";
+        const history = this.#context.historicalDialogueSources([
+          ...(contextInheritedEvents.length === 0 ? [] : [{ events: contextInheritedEvents }]),
+          { events: contextPriorEvents, ...(compaction === undefined ? {} : { compaction }) },
+        ]);
+        const snapshotBeforeModel = memorySnapshot;
+        if (snapshotBeforeModel !== undefined) {
+          await memoryOperation((memorySignal) => snapshotBeforeModel.assertCurrent(memorySignal), signal);
+        }
         reply = await this.#model.complete({
-          messages: [context.systemMessage, ...conversation],
+          messages: [{ role: "system", content: context.systemMessage.content + memoryText }, ...history, ...conversation],
           tools,
           systemPrompt: {
             stableText: context.prompt.stableText,
-            dynamicText: context.prompt.dynamicText,
-            sections: context.prompt.sections.map((section) => ({ id: section.id, kind: section.kind })),
+            dynamicText: context.prompt.dynamicText + memoryText,
+            sections: [
+              ...context.prompt.sections.map((section) => ({ id: section.id, kind: section.kind })),
+              ...(memoryText.length === 0 ? [] : [{ id: "confirmed_memory", kind: "dynamic" as const }]),
+            ],
           },
           signal,
         });
+        const snapshotAfterModel = memorySnapshot;
+        if (snapshotAfterModel !== undefined) {
+          await memoryOperation((memorySignal) => snapshotAfterModel.assertCurrent(memorySignal), signal);
+        }
       } catch (error) {
         if (signal.aborted) {
           const finalText = "任务已停止。";
@@ -270,6 +298,21 @@ export class AgentEngine {
           continue;
         }
         seenToolCalls.add(call.id);
+        const snapshotBeforeTool = memorySnapshot;
+        if (snapshotBeforeTool !== undefined) {
+          try {
+            await memoryOperation((memorySignal) => snapshotBeforeTool.assertCurrent(memorySignal), signal);
+          } catch (error) {
+            if (signal.aborted) {
+              const finalText = "Task stopped.";
+              await append("assistant.delta", { contentBlockId: "block_" + crypto.randomUUID(), delta: finalText });
+              await append("turn.cancelled", { status: "cancelled", source: signal.reason === "runtime" ? "runtime" : "user", lastCompletedEventSeq: lastEventSeq });
+              return { status: "cancelled", finalText, lastEventSeq };
+            }
+            const failure = modelFailure(error);
+            return this.#fail(append, failure.code, failure.message);
+          }
+        }
         const toolStartedEvent = await append("tool.started", {
           toolCallId: call.id,
           toolName: call.name,

@@ -1,4 +1,5 @@
 import type { AgentEvent, TurnStatus } from "@daoyin/harness-protocol";
+import type { CloudMemoryRepository } from "./memory-repository.js";
 import type { ExecutionIdentity, ExecutionScope, SessionCompactionStore, SessionEventStore } from "@daoyin/harness-contracts";
 
 export class CloudError extends Error {
@@ -39,6 +40,7 @@ export interface BoundRunStores {
 
 /** Every user-facing lookup is scoped. Implementations must atomically claim requests. */
 export interface CloudRepository {
+  readonly memory?: CloudMemoryRepository;
   createSession(scope: ExecutionScope, input: Omit<CloudSession, "id" | "createdAt">): Promise<CloudSession>;
   listSessions(scope: ExecutionScope): Promise<CloudSession[]>;
   getSession(scope: ExecutionScope, sessionId: string): Promise<CloudSession>;
