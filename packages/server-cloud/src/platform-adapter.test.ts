@@ -27,6 +27,11 @@ describe("platform adapter (real engine/SQLite, explicitly simulated platform an
       if (path === "authorize") return Response.json({ active: true });
       if (path === "search") return Response.json({ schemaVersion: 1, sources: [source] });
       models += 1;
+      expect(new Headers(init?.headers).get("accept")).toBe("application/x-ndjson");
+      if (models === 2) return new Response([
+        { type: "text", delta: "道引提供" }, { type: "text", delta: "公开互动项目。" },
+        { type: "result", value: { schemaVersion: 1, output: { kind: "assistant", content: "道引提供公开互动项目。" } } },
+      ].map(frame => JSON.stringify(frame) + "\n").join(""), { headers: { "content-type": "application/x-ndjson" } });
       return Response.json({ schemaVersion: 1, output: models === 1
         ? { kind: "tool_calls", content: "", calls: [{ id: "call_1", name: "search_company_knowledge", input: { query: "介绍项目" } }] }
         : { kind: "assistant", content: "道引提供公开互动项目。" } });

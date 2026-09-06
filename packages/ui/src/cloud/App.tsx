@@ -10,6 +10,7 @@ import { WorkbenchIcon } from "./WorkbenchIcon.js";
 import { AccountIdentity } from "./AccountIdentity.js";
 import { scheduleExpiry } from "./expiry.js";
 import { SettingsDialog } from "./SettingsDialog.js";
+import { ToolActivity } from "./ToolActivity.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
 
 const APPLICATION = new URLSearchParams(window.location.search).get("app") === "saishi" ? "saishi" : "company";
@@ -22,6 +23,12 @@ const storage = {
   removeItem: (key: string): void => window.sessionStorage.removeItem(key),
 };
 const statusText = { queued: "等待中", running: "进行中", completed: "已完成", failed: "未完成", cancelled: "已停止", interrupted: "已中断" };
+
+function MessageTime({ value }: { value: string }): React.JSX.Element | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return <time className="message-time" dateTime={value}>{new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date)}</time>;
+}
 
 export function App(): React.JSX.Element {
   const [client] = useState(() => new WorkbenchClient(storage, undefined, APPLICATION));
@@ -41,6 +48,7 @@ export function App(): React.JSX.Element {
   const [loginUrl, setLoginUrl] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [revision, setRevision] = useState(0);
   const [sidebar, setSidebar] = useState(false);
@@ -56,6 +64,7 @@ export function App(): React.JSX.Element {
   currentDraft.current = draft;
   const bottom = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
+  const feed = useRef<{ key: string; events: AgentEvent[] }>({ key: "", events: [] });
   const active = runs.find((run) => run.status === "running" || run.status === "queued");
   const pending = selected ? client.pending(selected) : undefined;
   const turns = projectTurns(runs, events);
@@ -69,7 +78,7 @@ export function App(): React.JSX.Element {
     setLoginUrl(cause instanceof WorkbenchError ? cause.loginUrl : undefined);
     if (cause instanceof WorkbenchError && (cause.status === 401 || (APPLICATION === "saishi" && cause.status === 403))) {
       accountEpoch.current++;
-      setAccount(undefined); setSettingsOpen(false);
+      setAccount(undefined); setSettingsOpen(false); setSendingMessage("");
       setPhase("expired"); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft("");
     }
   }
@@ -80,7 +89,7 @@ export function App(): React.JSX.Element {
     const savedDraft = currentDraft.current;
     connecting.current = true;
     if (!quiet) { setPhase("connecting"); setError(""); setLoginUrl(undefined); }
-    function resetAccount(): void { accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft(""); }
+    function resetAccount(): void { accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSendingMessage(""); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft(""); }
     if (APPLICATION === "saishi" && !quiet) resetAccount();
     try {
       const expiry = await client.bootstrap(quiet);
@@ -128,23 +137,34 @@ export function App(): React.JSX.Element {
     });
   }, [phase, expiresAt]);
   useEffect(() => {
-    setRuns([]); setEvents([]); nearBottom.current = true;
-    if (!selected || phase !== "ready") { setLoading(false); return; }
+    const key = phase === "ready" && selected ? `${accountEpoch.current}:${selected}` : "";
+    const changed = feed.current.key !== key;
+    if (changed) { feed.current = { key, events: [] }; setRuns([]); setEvents([]); nearBottom.current = true; }
+    if (!key) { setLoading(false); return; }
     const controller = new AbortController();
     let timer: number | undefined;
-    let accumulated: AgentEvent[] = [];
-    setLoading(true);
+    let accumulated = feed.current.events;
+    let recoveryError = "";
+    if (changed) setLoading(true);
     try { storage.setItem(SELECTED, selected); } catch { /* No model work occurs here. */ }
     async function refresh(): Promise<void> {
       try {
-        const nextRuns = await client.runs(selected, controller.signal);
-        const additions = await client.events(selected, accumulated.at(-1)?.eventSeq ?? 0, controller.signal);
+        const [nextRuns, additions] = await Promise.all([
+          client.runs(selected, controller.signal),
+          client.events(selected, accumulated.at(-1)?.eventSeq ?? 0, controller.signal),
+        ]);
         if (controller.signal.aborted) return;
         accumulated = [...accumulated, ...additions];
+        feed.current = { key, events: accumulated };
         setRuns(nextRuns); setEvents(accumulated); setLoading(false);
-        if (nextRuns.some((run) => run.status === "running" || run.status === "queued")) timer = window.setTimeout(() => { void refresh(); }, 1400);
+        if (recoveryError) { const recovered = recoveryError; setError(current => current === recovered ? "" : current); recoveryError = ""; }
+        if (nextRuns.some((run) => run.status === "running" || run.status === "queued" || run.lastEventSeq > (accumulated.at(-1)?.eventSeq ?? 0))) timer = window.setTimeout(() => { void refresh(); }, 500);
       } catch (cause) {
-        if (!controller.signal.aborted) { setLoading(false); fail(cause); }
+        if (!controller.signal.aborted) {
+          recoveryError = cause instanceof WorkbenchError ? cause.message : "连接未完成，请重试。";
+          setLoading(false); fail(cause);
+          if (!(cause instanceof WorkbenchError && [401, 403].includes(cause.status ?? 0))) timer = window.setTimeout(() => { void refresh(); }, 2000);
+        }
       }
     }
     void refresh();
@@ -152,7 +172,7 @@ export function App(): React.JSX.Element {
   }, [selected, phase, revision, client]);
   useEffect(() => {
     if (preferences.autoScroll && nearBottom.current) bottom.current?.scrollIntoView({ block: "end" });
-  }, [events.length, runs.length, preferences.autoScroll]);
+  }, [events.length, runs.length, sendingMessage, preferences.autoScroll]);
 
   function savePreferences(value: WorkbenchPreferences): void {
     setPreferences(value);
@@ -210,7 +230,7 @@ export function App(): React.JSX.Element {
   async function send(message = draft.trim()): Promise<void> {
     if (!message || submission.current || active || phase !== "ready" || loading) return;
     if (!plugin?.profileId) { setError("当前会话的插件尚未支持，请新建会话并选择可用插件。"); return; }
-    setSubmitting(true); setError("");
+    setSubmitting(true); setSendingMessage(message); setError(""); nearBottom.current = true;
     const epoch = accountEpoch.current;
     const operation = (async (): Promise<CloudRun> => {
       let id = selected;
@@ -223,9 +243,13 @@ export function App(): React.JSX.Element {
     })();
     submission.current = operation;
     try {
-      await operation; if (epoch === accountEpoch.current) { setDraft(""); nearBottom.current = true; }
+      const accepted = await operation;
+      if (epoch === accountEpoch.current) {
+        setRuns((current) => [accepted, ...current.filter((run) => run.id !== accepted.id)]);
+        setDraft(""); nearBottom.current = true;
+      }
     } catch (cause) { if (epoch === accountEpoch.current) fail(cause); }
-    finally { submission.current = null; setSubmitting(false); if (epoch === accountEpoch.current) setRevision((value) => value + 1); }
+    finally { submission.current = null; setSubmitting(false); setSendingMessage(""); if (epoch === accountEpoch.current) setRevision((value) => value + 1); }
   }
   async function cancel(): Promise<void> {
     if (cancelling) return;
@@ -265,17 +289,19 @@ export function App(): React.JSX.Element {
       <div className="transcript" hidden={view !== "chat"} onScroll={(event) => { const element = event.currentTarget; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160; }}>
         <div className="conversation-content">
           {phase === "connecting" && <p className="connection-message" role="status"><span className="spinner" /> 正在连接工作台…</p>}
-          {phase === "ready" && loading && <p className="connection-message" role="status">正在恢复会话…</p>}
-          {phase === "ready" && !loading && turns.length === 0 && <section className="empty-state"><span className="empty-mark" aria-hidden="true"><HarnessLogo /></span><h2>今天，想完成什么？</h2><div className="suggestions">{(APPLICATION === "saishi" ? [{ label: "查看我的赛事", text: "列出我当前账号的赛事", icon: "book" as const }, { label: "检查素材状态", text: "查询我的赛事素材处理状态", icon: "pin" as const }] : [{ label: "了解道引的产品", text: "道引科技有哪些产品？", icon: "book" as const }, { label: "查看文旅方案", text: "介绍一下互动文旅方案", icon: "pin" as const }]).map(({ label, text, icon }) => <button key={text} onClick={() => { setDraft(text); document.getElementById("message")?.focus(); }}><WorkbenchIcon name={icon} />{label}<WorkbenchIcon name="chevron" /></button>)}</div>{APPLICATION === "company" && <div className="visitor-account-prompt"><span>想查看你的赛事和专属数据？</span><div><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div></div>}</section>}
+          {phase === "ready" && loading && !sendingMessage && <p className="connection-message" role="status">正在恢复会话…</p>}
+          {phase === "ready" && !loading && !sendingMessage && turns.length === 0 && <section className="empty-state"><span className="empty-mark" aria-hidden="true"><HarnessLogo /></span><h2>今天，想完成什么？</h2><div className="suggestions">{(APPLICATION === "saishi" ? [{ label: "查看我的赛事", text: "列出我当前账号的赛事", icon: "book" as const }, { label: "检查素材状态", text: "查询我的赛事素材处理状态", icon: "pin" as const }] : [{ label: "了解道引的产品", text: "道引科技有哪些产品？", icon: "book" as const }, { label: "查看文旅方案", text: "介绍一下互动文旅方案", icon: "pin" as const }]).map(({ label, text, icon }) => <button key={text} onClick={() => { setDraft(text); document.getElementById("message")?.focus(); }}><WorkbenchIcon name={icon} />{label}<WorkbenchIcon name="chevron" /></button>)}</div>{APPLICATION === "company" && <div className="visitor-account-prompt"><span>想查看你的赛事和专属数据？</span><div><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div></div>}</section>}
           {turns.map((turn) => <article className="turn" key={turn.run.id} aria-label="一轮对话">
-            <div className="user-message"><span className="message-label">你</span><p>{turn.run.userMessage}</p></div>
-            <div className="assistant-message"><div className="assistant-label"><span className="mini-mark" aria-hidden="true"><HarnessLogo /></span> Harness <span className="run-status">{statusText[turn.run.status]}</span></div>
-              {turn.tools.length > 0 && <div className="tools">{turn.tools.map((tool) => <div className="tool-line" key={tool.id}>{tool.status === "running" ? <span className="spinner" /> : <span aria-hidden="true">{tool.status === "completed" ? "✓" : "·"}</span>}{tool.text}</div>)}</div>}
-              <div className="markdown">{turn.text ? <MarkdownMessage text={turn.text} /> : turn.run.status === "running" ? <p className="thinking"><span className="spinner" /> 正在处理你的问题…</p> : null}</div>
+            <div className="user-message"><div className="message-meta"><span className="message-label">你</span><MessageTime value={turn.run.createdAt} /></div><p>{turn.run.userMessage}</p></div>
+            <div className="assistant-message"><div className="assistant-label"><span className="mini-mark" aria-hidden="true"><HarnessLogo /></span><span>Harness</span><span className="run-status">{statusText[turn.run.status]}</span><MessageTime value={turn.assistantOccurredAt} /></div>
+              {turn.tools.length > 0 && <ToolActivity tools={turn.tools} />}
+              <div className="markdown">{turn.text && <MarkdownMessage text={turn.text} />}</div>
+              {(turn.run.status === "running" || turn.run.status === "queued") && !turn.tools.some((tool) => tool.status === "running") && <p className="thinking" role="status"><span className="spinner" />{turn.run.status === "queued" ? "正在等待处理…" : turn.text ? "正在回复…" : "正在处理你的问题…"}</p>}
               {turn.sources.length > 0 && <details className="sources"><summary>参考资料 <span>{turn.sources.length}</span></summary>{turn.sources.map((source) => <details className="source" key={source.id}><summary>{source.title || "公开资料"}{source.location && <small>{source.location}</small>}</summary><p>{source.content}</p></details>)}</details>}
               {turn.run.cancelRequested && turn.run.status === "running" && <p role="status" className="muted">正在停止，已完成的记录会保留。</p>}
             </div>
           </article>)}
+          {sendingMessage && <article className="turn" aria-label="正在发送的问题"><div className="user-message"><span className="message-label">你</span><p>{sendingMessage}</p></div><p className="thinking" role="status"><span className="spinner" />正在发送…</p></article>}
           <div ref={bottom} />
         </div>
       </div>

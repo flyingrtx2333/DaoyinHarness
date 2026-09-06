@@ -22,6 +22,8 @@ export interface ModelRequest {
   tools: readonly ToolDescriptor[];
   systemPrompt: ModelSystemPromptMetadata;
   signal: AbortSignal;
+  /** Awaited public answer chunks; reasoning and tool arguments must never enter this channel. */
+  onTextDelta?: (delta: string) => Promise<void>;
 }
 
 export type ModelReply =

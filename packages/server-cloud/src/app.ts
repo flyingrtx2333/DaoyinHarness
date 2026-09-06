@@ -229,7 +229,14 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             const modelSignal = AbortSignal.any([request.signal, controller.signal]);
             try {
               await ensureActive(identity, modelSignal);
-              const reply = await abortable(() => baseModel.complete({ ...request, signal: modelSignal }), modelSignal);
+              let validatedAt = Date.now();
+              const reply = await abortable(() => baseModel.complete({ ...request, signal: modelSignal,
+                ...(request.onTextDelta ? { onTextDelta: async (delta: string) => {
+                  modelSignal.throwIfAborted();
+                  if (Date.now() - validatedAt >= 1000) { await ensureActive(identity, modelSignal); validatedAt = Date.now(); }
+                  await request.onTextDelta?.(delta);
+                } } : {}),
+              }), modelSignal);
               await ensureActive(identity, modelSignal);
               if (Buffer.byteLength(JSON.stringify(reply), "utf8") > 96_000) throw new Error("Model output exceeds limit.");
               return reply;

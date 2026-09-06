@@ -4,6 +4,7 @@ import { createCloudServer, type CloudServerOptions } from "./app.js";
 import { createCompanyPublicProfile, isCompanyPublicIdentity, COMPANY_KNOWLEDGE_TOOL, parseCompanyKnowledgeQuery } from "./company-profile.js";
 import { CloudError } from "./repository.js";
 import { createSaishiProfile, isSaishiIdentity } from "./saishi-profile.js";
+import { readModelStream } from "./model-stream.js";
 
 export interface PlatformAdapterOptions {
   /** Fixed trusted origin, HTTPS except explicit loopback development. */
@@ -51,7 +52,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   if (options.appServiceToken !== undefined && (!/^[\x21-\x7e]{32,256}$/u.test(options.appServiceToken) || options.appServiceToken === options.serviceToken)) throw new Error("Invalid private application service key.");
   const transport = options.fetch ?? fetch;
 
-  async function post(path: BridgePath, input: unknown, parent: AbortSignal, privateApp = false): Promise<unknown> {
+  async function post(path: BridgePath, input: unknown, parent: AbortSignal, privateApp = false, onTextDelta?: (delta: string) => Promise<void>): Promise<unknown> {
     parent.throwIfAborted();
     const secret = privateApp ? options.appServiceToken : options.serviceToken;
     if (!secret) throw new CloudError(503, "APP_BRIDGE_DISABLED", "私有业务插件尚未配置。");
@@ -61,13 +62,14 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
     try {
       const response = await transport(new URL(`/api/internal/${privateApp ? "agent-apps" : "agent-public"}/v1/${path}`, base), {
         method: "POST", redirect: "error", signal,
-        headers: { "content-type": "application/json", "x-agent-service-token": secret }, body: JSON.stringify(input),
+        headers: { "content-type": "application/json", "x-agent-service-token": secret, ...(onTextDelta ? { Accept: "application/x-ndjson" } : {}) }, body: JSON.stringify(input),
       });
       if (!response.ok) {
         await response.body?.cancel();
         const status = [400, 401, 403, 404, 409, 413, 429].includes(response.status) ? response.status : 503;
         throw new CloudError(status, "PLATFORM_BRIDGE_REJECTED", "平台授权或业务调用未完成，请保留原请求标识。");
       }
+      if (onTextDelta && response.headers.get("content-type")?.includes("application/x-ndjson")) return await readModelStream(response, onTextDelta, signal);
       const reader = response.body?.getReader();
       if (reader === undefined) throw new Error("Empty platform response.");
       const chunks: Uint8Array[] = [];
@@ -142,7 +144,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
           input: { schemaVersion: 1, messages: request.messages,
             tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
             systemPrompt: request.systemPrompt },
-        }, request.signal, privateApp);
+        }, request.signal, privateApp, request.onTextDelta);
         return reply(value, privateApp ? (name, input) => request.tools.some((tool) => tool.name === name) &&
           bindings.some((binding) => binding.definition.name === name && binding.validateInput(input)) : undefined);
       } };

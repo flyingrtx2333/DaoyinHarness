@@ -235,6 +235,8 @@ export class AgentEngine {
       const descriptors = new Map(tools.map((tool) => [tool.name, tool]));
       if (finalStep) tools = [];
       let reply: ModelReply;
+      let streamed = "";
+      const contentBlockId = `block_${crypto.randomUUID()}`;
       let memorySnapshot: MemoryContextSnapshot | undefined;
       try {
         let contextEvents = priorEvents;
@@ -266,7 +268,16 @@ export class AgentEngine {
         try {
           const snapshot = memorySnapshot;
           if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
-          raw = await modelResponse(() => this.#model.complete({ messages, tools, systemPrompt, signal: modelSignal }), modelSignal);
+          raw = await modelResponse(() => this.#model.complete({ messages, tools, systemPrompt, signal: modelSignal,
+            onTextDelta: async (delta) => {
+              modelSignal.throwIfAborted();
+              if (typeof delta !== "string" || streamed.length + delta.length > 16_000) throw new Error("Invalid model stream.");
+              if (!delta) return;
+              if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
+              await append("assistant.delta", { contentBlockId, delta });
+              streamed += delta;
+            },
+          }), modelSignal);
           if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
         }
         catch (error) {
@@ -275,6 +286,7 @@ export class AgentEngine {
         }
         if (signal.aborted) return cancel();
         reply = validateModelReply(raw, seenIds);
+        if (streamed && streamed !== (reply.content ?? "")) throw new Error("Model stream did not match the final response.");
       } catch (error) {
         if (signal.aborted) return cancel();
         const failure = modelFailure(error);
@@ -285,7 +297,7 @@ export class AgentEngine {
         if (!content) return this.#fail(append, "MODEL_EMPTY_RESPONSE", "模型没有返回可显示的结果。");
         if (stop !== undefined) return this.#fail(append, stop.code, stop.message, content);
         if (signal.aborted) return cancel();
-        await append("assistant.delta", { contentBlockId: `block_${crypto.randomUUID()}`, delta: content });
+        if (!streamed) await append("assistant.delta", { contentBlockId, delta: content });
         if (signal.aborted) return cancel();
         await append("turn.completed", { status: "completed", assistantMessageId: `msg_${crypto.randomUUID()}`, outcomeSummary: content });
         return { status: "completed", finalText: content, lastEventSeq };
@@ -294,6 +306,7 @@ export class AgentEngine {
       if (attempts + reply.calls.length > this.#maxToolCalls) return this.#fail(append, "AGENT_TOOL_LIMIT", "本批次超过剩余工具预算，整批未执行。");
       for (const call of reply.calls) seenIds.add(call.id);
       current.push({ role: "assistant_tool_calls", content: reply.content ?? "", calls: reply.calls });
+      if (reply.content && !streamed) await append("assistant.delta", { contentBlockId, delta: reply.content });
       for (const call of reply.calls) {
         if (signal.aborted) return cancel();
         const snapshot = memorySnapshot;

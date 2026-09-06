@@ -58,6 +58,26 @@ const turnInput = {
 } as const;
 
 describe("AgentEngine", () => {
+  it("persists real model chunks before completion without duplicating the final reply", async () => {
+    let release!: () => void;
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    let received!: () => void;
+    const first = new Promise<void>(resolve => { received = resolve; });
+    const { engine, store } = await fixture({ complete: async request => {
+      await request.onTextDelta?.("第一段"); received(); await paused;
+      await request.onTextDelta?.("，第二段");
+      return { kind: "assistant", content: "第一段，第二段" };
+    } });
+    const running = engine.runTurn(turnInput);
+    await first;
+    const during = await store.read(turnInput.sessionId);
+    expect(during.at(-1)).toMatchObject({ type: "assistant.delta", payload: { delta: "第一段" } });
+    expect(during.some(event => event.type === "turn.completed")).toBe(false);
+    release(); await running;
+    const events = await store.read(turnInput.sessionId);
+    expect(events.filter(event => event.type === "assistant.delta").map(event => event.payload.delta).join("")).toBe("第一段，第二段");
+    expect(events.at(-1)?.type).toBe("turn.completed");
+  });
   it("continues after a 2000-file result while retaining full append-only evidence", async () => {
     const files = Array.from({ length: 2000 }, (_, index) => `docs/${index}/${"long-folder/".repeat(6)}file.md`);
     const root = await temporaryDirectory();
