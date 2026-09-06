@@ -1,6 +1,6 @@
 # 赛事只读插件
 
-## 同账号直接访问（当前源码，尚未部署）
+## 同账号直接访问（2026-09-06 已部署）
 
 2026-09-06 按用户要求取消第一方工作台的二次授权。登录道引账号后，平台自动派生当前账号及业务空间的只读身份，不需要签发凭证、选择 Agent 专用赛事清单或粘贴字符串；后台仍逐次验证有效成员身份、应用订阅与资源归属。这里的只读是当前八项工具的交付范围；所有后续业务插件及赛事写入、生成、管理能力接入后都自动继承账号已有完整权限，无需补充授权，见 [ADR-0012](adr/0012-first-party-account-access.md)。
 
@@ -8,13 +8,13 @@
 
 赛事读取跟随登录账号的当前租户，保留原有业务应用订阅检查。当前租户没有赛事业务访问权时明确拒绝，不借用其他用户或官网付款身份。内部执行凭据刷新不改变同账号/租户的会话空间；已有手动授权产生的历史不迁移。模型用量仍使用平台的赛事场景与次数限制。
 
-配套修改位于 DaoyinTechnology 的 `first_party_accounts.py`、`agent_app_access.py`、账号/工作台路由与赛事只读能力层。需先应用 `backend/db/migrations/20260906_harness_account_sessions.sql`，再协调发布两个仓库；本轮没有执行生产迁移或部署。`AGENT_ACCOUNT_ENABLED` 默认继承 `AGENT_SAISHI_ENABLED`；`FIRST_PARTY_ACCOUNT_ORIGINS` 默认仅允许官网与赛事官网，开发环境须显式指定来源。账号 Cookie 在正式道引子域之间共享，其他主机为 host-only。
+配套修改位于 DaoyinTechnology 的 `first_party_accounts.py`、`agent_app_access.py`、账号/工作台路由与赛事只读能力层。账号表迁移、两个后端、两个前端和 Harness 工作台已发布，版本与验证见 [上线记录](../deployment/RELEASE-20260906-ACCOUNT-ACCESS.md)。`AGENT_ACCOUNT_ENABLED` 默认继承 `AGENT_SAISHI_ENABLED`；`FIRST_PARTY_ACCOUNT_ORIGINS` 默认仅允许官网与赛事官网，开发环境须显式指定来源。账号 Cookie 在正式道引子域之间共享，其他主机为 host-only。
 
 供外部 MCP 客户端连接道引服务的手动凭据接口仍独立保留，不是 Harness 插件的授权流程。道引业务即使通过 MCP 接入 Harness，也必须自动继承当前账号权限。旧 `/workbench/connect` 返回 410，不能再用外部客户端凭据登录第一方工作台。
 
 ### 当前改造验证
 
-Windows / Node 22.23.2：全仓 typecheck、lint、build 通过。客户端与插件专项 14 项测试通过；全仓测试为 292 通过、1 项已有本地崩溃恢复断言失败（`packages/server/src/app.test.ts`，`recoveryPrompt` 为空），未修改该无关逻辑。
+Windows / Node 22.23.2：全仓 typecheck、lint、293 项测试、build 全部通过。原恢复测试的虚构范围与旧提示断言已修正，资源隔离未放宽，见 [验证记录](VALIDATION-20260906.md)。
 
 本地 Edge 使用正式打包方式的预览与模拟平台接口，通过 9 组检查：1280/1920/390/320px 的会话、插件页和选择器，账号切换、退出状态、同账号草稿保留、官网访客入口，以及主平台已有登录直接跳回 Harness。截图与报告见 `output/playwright/account-access/`，可用 `node scripts/verify-account-access.mjs` 重跑；该脚本需要配套主平台官网先构建。没有真实模型或生产 Cookie 验收。
 

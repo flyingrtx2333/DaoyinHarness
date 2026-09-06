@@ -11,7 +11,7 @@
 | 插件 | 已有业务能力 | 此云端工作台状态 | 源码依据 |
 | --- | --- | --- | --- |
 | 官网知识 | 公开知识检索、产品问答、来源引用 | 可用，访客只读 | `packages/server-cloud/src/company-profile.ts` |
-| 赛事只读 | 赛事、设备、素材、地图、人物时间线、任务状态 | 首期已部署；当前源码改为同账号登录后直接读取，配套代码尚未部署 | `packages/server-cloud/src/saishi-profile.ts` |
+| 赛事只读 | 赛事、设备、素材、地图、人物时间线、任务状态 | 同账号登录后直接读取已部署；真实账号业务问答待用户试用 | `packages/server-cloud/src/saishi-profile.ts` |
 | 短剧制作 | 剧本生成、角色场景、分镜、视频、字幕、导出 | 待接入业务执行；接入后自动继承账号完整权限 | 主平台 `backend-story/story_mcp.py`、`backend-story/mcp_operations.py` |
 | 网站与应用 | 创建/修改网站和轻应用、预览 | 待接入 | 主平台 `backend-builder/README.md` |
 | 文旅影像 | 场景人像、AI 图片编辑 | 待接入 | 主平台 `backend/services/ai_image_edit.py`、`backend/tests/test_ai_image_edit_youji.py` |

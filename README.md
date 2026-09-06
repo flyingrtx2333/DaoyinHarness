@@ -2,7 +2,7 @@
 
 DaoyinHarness 现定位为**道引统一 Agent 平台的共享执行内核**：本地 CLI / 工作台和云端业务入口共用 `AgentEngine`；主平台 backend 负责身份、空间、应用安装、授权和费用归属，短剧、文旅、Builder 保留业务服务与任务状态。
 
-所有业务插件的接入规则：登录后自动继承当前账号已有的完整业务权限，包括读写、生成和管理，无需逐插件授权、勾选范围或粘贴凭证。当前赛事读取免二次授权代码已完成、尚未部署；其他能力的接入进度独立记录，详见 [完整权限规则](docs/adr/0012-first-party-account-access.md) 和 [插件盘点](docs/PLUGINS.md)。
+所有业务插件的接入规则：登录后自动继承当前账号已有的完整业务权限，包括读写、生成和管理，无需逐插件授权、勾选范围或粘贴凭证。赛事读取免二次授权已部署，可从 [登录入口](https://www.daoyintech.com/api/agent-apps/saishi/workbench/login) 试用；其他能力的接入进度独立记录，详见 [完整权限规则](docs/adr/0012-first-party-account-access.md)、[插件盘点](docs/PLUGINS.md) 和 [上线记录](deployment/RELEASE-20260906-ACCOUNT-ACCESS.md)。
 
 官网已上线共享 AgentEngine 的单实例只读服务，接入主平台访客授权、MySQL 操作去重与调用额度、公开知识检索、单步模型及 Cookie/CSRF 会话代理。真实模型、检索、回放与取消接口已验证；多 Worker 调度与跨业务写操作仍待完成。当前架构见 [统一 Agent 平台说明](docs/UNIFIED-AGENT.md)，生产版本和证据见 [上线记录](deployment/RELEASE-20260905.md)。
 
