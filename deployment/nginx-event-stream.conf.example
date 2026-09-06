@@ -1,0 +1,56 @@
+# WebSocket upgrade for the existing HTTPS site. This is NOT auto-installed.
+# Put this map ONCE inside nginx's http {} block, not inside a server {} include:
+# map $http_upgrade $daoyin_event_connection {
+#     default upgrade;
+#     ''      close;
+# }
+# Merge/replace matching locations; do not leave duplicate prefix locations.
+# This example assumes Nginx is on the host (6087 and 4700 bind host loopback).
+# Containers must use a reachable, explicitly configured internal service endpoint.
+
+# Inside the www.daoyintech.com HTTPS server {}:
+location ^~ /api/company-assistant/agent/ {
+    proxy_pass http://127.0.0.1:6087;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $daoyin_event_connection;
+    proxy_set_header Host $host;
+    proxy_set_header Origin $http_origin;
+    proxy_read_timeout 75s;
+    proxy_send_timeout 10s;
+    proxy_buffering off;
+    proxy_cache off;
+    # Do not log Cookie, Authorization or WebSocket frame contents.
+}
+location ^~ /api/agent-apps/saishi/workbench/ {
+    proxy_pass http://127.0.0.1:6087;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $daoyin_event_connection;
+    proxy_set_header Host $host;
+    proxy_set_header Origin $http_origin;
+    proxy_read_timeout 75s;
+    proxy_send_timeout 10s;
+    proxy_buffering off;
+    proxy_cache off;
+}
+
+# If the platform's configured cloud_url traverses Nginx, update its EXISTING
+# /api/v1/cloud/ location too. A direct internal connection to :4700 skips this hop.
+# location ^~ /api/v1/cloud/ {
+#     proxy_pass http://127.0.0.1:4700;
+#     proxy_http_version 1.1;
+#     proxy_set_header Upgrade $http_upgrade;
+#     proxy_set_header Connection $daoyin_event_connection;
+#     proxy_set_header Host $host;
+#     proxy_read_timeout 75s;
+#     proxy_send_timeout 10s;
+#     proxy_buffering off;
+# }
+
+# Browser documents must permit the exact same-origin secure websocket endpoint:
+# Content-Security-Policy: ... connect-src 'self' wss://www.daoyintech.com; ...
+# Keep all other existing CSP clauses. Do not use connect-src * or credential query URLs.
+# Preserve Uvicorn websocket support (uvicorn[standard]); for browser ingress set
+# --ws-max-size 4096 --ws-max-queue 4 --ws-ping-interval 10 --ws-ping-timeout 10
+# when starting the main backend. This does not limit outbound upstream event frames.

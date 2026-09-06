@@ -1,14 +1,19 @@
-import { isAbsolute } from "node:path";
 import { createPlatformCloudServer } from "./platform-adapter.js";
-import { SqliteCloudRepository } from "./sqlite-repository.js";
+import { PostgresCloudRepository } from "./postgres-repository.js";
 
-const databasePath = process.env.DAOYIN_CLOUD_DATABASE ?? "";
+const databaseUrl = process.env.DAOYIN_CLOUD_POSTGRES_URL ?? "";
 const port = Number(process.env.DAOYIN_CLOUD_PORT ?? "4700");
 const appServiceToken = process.env.DAOYIN_CLOUD_APP_SERVICE_TOKEN;
-if (!isAbsolute(databasePath) || !Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error("Set an absolute DAOYIN_CLOUD_DATABASE path and a valid DAOYIN_CLOUD_PORT.");
+try {
+  const url = new URL(databaseUrl);
+  if (!["postgres:", "postgresql:"].includes(url.protocol)) throw new Error("unsupported protocol");
+} catch {
+  throw new Error("Set DAOYIN_CLOUD_POSTGRES_URL to a PostgreSQL connection URL and DAOYIN_CLOUD_PORT to a valid port.");
 }
-const repository = new SqliteCloudRepository(databasePath);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+  throw new Error("Set DAOYIN_CLOUD_POSTGRES_URL to a PostgreSQL connection URL and DAOYIN_CLOUD_PORT to a valid port.");
+}
+const repository = await PostgresCloudRepository.open(databaseUrl);
 let app: ReturnType<typeof createPlatformCloudServer> | undefined;
 let heartbeat: ReturnType<typeof setInterval> | undefined;
 let closing: Promise<void> | undefined;
@@ -19,8 +24,8 @@ function close(): Promise<void> {
   closing = (async () => {
     try { await app?.close(); }
     finally {
-      try { repository.releaseRuntimeLease(); }
-      finally { repository.close(); }
+      try { await repository.releaseRuntimeLease(); }
+      finally { await repository.close(); }
     }
   })();
   return closing;
@@ -41,14 +46,16 @@ try {
     serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
     ...(appServiceToken ? { appServiceToken } : {}),
   });
-  const lease = repository.acquireRuntimeLease({ durationMs: 30_000, recoverInterrupted: true });
+  // Startup never creates or changes production schema. Run postgres-migrate first.
+  await repository.verifySchema();
+  const lease = await repository.acquireRuntimeLease({ durationMs: 30_000, recoverInterrupted: true });
   heartbeat = setInterval(() => {
-    try {
-      if (!repository.renewRuntimeLease()) {
+    void repository.renewRuntimeLease().then((owned) => {
+      if (!owned) {
         process.stderr.write("Cloud runtime lost its execution lease; stopping without replay.\n");
         shutdown(true);
       }
-    } catch { shutdown(true); }
+    }).catch(() => shutdown(true));
   }, 10_000);
   heartbeat.unref();
   process.once("SIGINT", () => shutdown());
@@ -57,5 +64,5 @@ try {
   process.stdout.write(`Shared Agent pilot listening on 127.0.0.1:${String(port)}; interrupted prior runs: ${String(lease.recoveredRuns)}\n`);
 } catch {
   await close();
-  throw new Error("Cloud pilot could not start; check the explicit port, execution lease and platform configuration.");
+  throw new Error("Cloud runtime could not start; check the explicit port, PostgreSQL schema, execution lease and platform configuration.");
 }

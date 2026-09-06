@@ -1,5 +1,6 @@
 export { createCloudServer, type CloudProfile, type CloudServerOptions, type CloudToolBinding } from "./app.js";
 export { CloudError, type BoundRunStores, type CloudRepository, type CloudRun, type CloudSession } from "./repository.js";
+export { PostgresCloudRepository, migratePostgres } from "./postgres-repository.js";
 export {
   createCompanyPublicProfile, parseCompanyKnowledgeQuery, parseCompanyKnowledgeResult, isCompanyPublicIdentity,
   COMPANY_PUBLIC_INSTALLATION, COMPANY_KNOWLEDGE_TOOL,

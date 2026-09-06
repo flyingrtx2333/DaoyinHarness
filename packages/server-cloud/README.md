@@ -46,6 +46,14 @@
 
 会话保存 Profile ID 与版本；配置版本改变后原记录仍可读取，但新执行必须新建会话。本版会话、任务列表各返回最近 100 条，不是完整分页管理后台。
 
+## PostgreSQL 云端持久化
+
+标准云端入口改用 PostgreSQL：部署环境提供 `DAOYIN_CLOUD_POSTGRES_URL`，先执行发布包中的 `postgres-migrate.mjs`，再启动 `main.mjs`。服务启动只校验表是否存在，绝不自动建表或改写生产结构。连接串只应由密钥管理器或受保护的服务环境注入。
+
+从已停止的旧单实例迁移时，先停止新请求、等待运行中任务结束并保留 SQLite 备份，再将绝对源路径赋给 `DAOYIN_CLOUD_LEGACY_SQLITE` 并执行 `sqlite-to-postgres.mjs`。源库完整性检查必须通过；目标业务表必须为空，已有数据或冲突将使整个导入回滚。逐表核对数量，绝不静默跳过记录；导入不复制运行租约。新 PostgreSQL 实例自身的崩溃恢复仍会把遗留 running Run 追加为 interrupted，不重放模型或外部操作。
+
+PostgreSQL 的会话、Run、事件、压缩摘要和版本化记忆均使用事务持久化。事件与 Run 状态同次提交，运行租约会在每个写入事务中复核。生产数据库应仅允许 Harness 服务所在网络访问，并使用私网连接或 TLS。
+
 ## SQLite 试运行适配
 
 `SqliteCloudRepository` 通过 `@daoyin/harness-server-cloud/sqlite` 单独导出，使用 Node 内置 `node:sqlite`。它是独立临时数据库测试和单实例试运行适配，不是主平台数据库迁移，不是生产多 Worker MySQL 方案。

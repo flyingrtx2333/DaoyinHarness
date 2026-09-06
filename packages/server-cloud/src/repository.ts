@@ -38,11 +38,16 @@ export interface BoundRunStores {
   scopeId: string;
 }
 
+/** SQLite stays synchronous for the local pilot; network-backed stores are asynchronous. */
+export type MaybePromise<T> = T | Promise<T>;
+
 /** Every user-facing lookup is scoped. Implementations must atomically claim requests. */
 export interface CloudRepository {
   readonly memory?: CloudMemoryRepository;
   /** Optional for isolated stores; production adapters fence stale executors before external work. */
-  assertExecutionOwner?(): void;
+  assertExecutionOwner?(): MaybePromise<void>;
+  /** Invalidation only, emitted after commit. Optional stores retain HTTP replay. */
+  subscribeSession?(scope: ExecutionScope, sessionId: string, listener: () => void): () => void;
   createSession(scope: ExecutionScope, input: Omit<CloudSession, "id" | "createdAt">): Promise<CloudSession>;
   listSessions(scope: ExecutionScope): Promise<CloudSession[]>;
   getSession(scope: ExecutionScope, sessionId: string): Promise<CloudSession>;
@@ -51,7 +56,7 @@ export interface CloudRepository {
   findRequest(scope: ExecutionScope, sessionId: string, requestId: string): Promise<CloudRun | undefined>;
   listRuns(scope: ExecutionScope, sessionId: string): Promise<CloudRun[]>;
   readEvents(scope: ExecutionScope, sessionId: string, afterEventSeq: number, limit: number): Promise<AgentEvent[]>;
-  bindRun(scope: ExecutionScope, sessionId: string, runId: string): BoundRunStores;
+  bindRun(scope: ExecutionScope, sessionId: string, runId: string): MaybePromise<BoundRunStores>;
   requestCancellation(scope: ExecutionScope, runId: string): Promise<CloudRun>;
   interruptRun(scope: ExecutionScope, runId: string, reason: "runtime_restart" | "runtime_recovery"): Promise<void>;
 }

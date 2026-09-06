@@ -149,6 +149,28 @@ export class WorkbenchClient {
     }
     throw new WorkbenchError("会话记录较多，请新建会话后继续。");
   }
+  public openEventStream(sessionId: string, after: number, factory: (url: string) => WebSocket = (url) => new WebSocket(url)): WebSocket {
+    if (!identifier(sessionId) || !Number.isSafeInteger(after) || after < 0 || !this.#csrf) throw new WorkbenchError("请重新连接工作台。", 401);
+    const csrf = this.#csrf;
+    const scope = this.#accountScope;
+    const url = new URL(`${this.#base}/sessions/${encodeURIComponent(sessionId)}/events/ws`, window.location.origin);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    const socket = factory(url.href);
+    socket.addEventListener("open", () => {
+      if (this.#csrf !== csrf || this.#accountScope !== scope) { socket.close(4001, "account changed"); return; }
+      socket.send(JSON.stringify({ type: "subscribe", after, csrfToken: csrf, accountScope: scope }));
+    }, { once: true });
+    return socket;
+  }
+  public streamDenied(status: 401 | 403): WorkbenchError {
+    this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#receipts.clear();
+    return new WorkbenchError(status === 401 ? "登录或访客身份已失效，请重新连接。" : "当前账号已无法访问此会话。", status,
+      this.application === "saishi" && status === 401 ? "/api/agent-apps/saishi/workbench/login" : undefined);
+  }
+  public observeRun(run: CloudRun): void {
+    const pending = this.pending(run.sessionId);
+    if (pending?.requestId === run.requestId && pending.message === run.userMessage) this.#forget(run.sessionId);
+  }
   public pending(sessionId: string): PendingRequest | undefined { return this.#receipts.get(sessionId); }
   #persist(): void {
     try { this.storage.setItem(this.#receiptKey, JSON.stringify([...this.#receipts.values()])); }

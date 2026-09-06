@@ -44,6 +44,10 @@ try {
   await page.route("https://images.example/avatar.png", route => route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=", "base64") }));
   await page.route("https://images.example/missing.png", route => route.fulfill({ status: 404, body: "" }));
   const requests = [];
+  await page.routeWebSocket("**/events/ws", ws => ws.onMessage(() => {
+    const sessionId = new URL(ws.url()).pathname.split("/").at(-3);
+    ws.send(JSON.stringify({ type: "ready", sessionId, lastEventSeq: 1 }));
+  }));
   await page.route("**/api/**", async route => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
@@ -70,7 +74,7 @@ try {
     if (path.endsWith("/sessions")) return sessionsUnavailable ? route.fulfill({ status: 503, json: {} }) : route.fulfill({ json: { sessions: company ? [] : [session] } });
     if (path.endsWith("/runs")) return route.fulfill({ json: { runs: [{ id: `run_${account}`, sessionId: session.id,
       requestId: `request_${account}`, userMessage: `账号 ${account} 的问题`, finalText: `账号 ${account} 的回答`,
-      status: "completed", lastEventSeq: 0, createdAt: "2026-09-06T00:00:00Z" }] } });
+      status: "completed", lastEventSeq: 1, cancelRequested: false, authorizationId: "fixture-grant", billingAccountId: "fixture-payer", createdAt: "2026-09-06T00:00:00Z" }] } });
     if (path.endsWith("/events")) return route.fulfill({ json: { events: [{ id: `event_${account}`, eventSeq: 1, type: "assistant.delta", sessionId: session.id, turnId: `run_${account}`, accountId: account, scopeId: `scope_${account}`, occurredAt: "2026-09-06T00:01:00Z", payload: { contentBlockId: "answer", delta: `账号 ${account} 的回答` } }], hasMore: false, nextEventSeq: 1 } });
     throw new Error(`Unexpected fixture route ${path}`);
   });

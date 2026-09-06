@@ -61,7 +61,7 @@ export function registerMemoryRoutes(app: FastifyInstance, options: MemoryRouteO
     type: "object", additionalProperties: false, properties: { offset: { type: "string", pattern: "^[0-9]{1,4}$" } },
   } } }, async (request) => {
     const { identity, memory } = await scope(request);
-    return memory.list(identity, Number(request.query.offset ?? "0"));
+    return await memory.list(identity, Number(request.query.offset ?? "0"));
   });
 
   app.post<{ Body: { query: string; limit?: number } }>(`${prefix}/search`, { schema: { body: {
@@ -70,7 +70,7 @@ export function registerMemoryRoutes(app: FastifyInstance, options: MemoryRouteO
     },
   } } }, async (request) => {
     const { identity, memory } = await scope(request);
-    return { hits: memory.search(identity, request.body.query, request.body.limit) };
+    return { hits: await memory.search(identity, request.body.query, request.body.limit) };
   });
 
   app.post<{ Body: MemoryProposal & { source?: Omit<MemorySource, "kind" | "requestId"> } }>(prefix, { schema: { body: {
@@ -88,7 +88,7 @@ export function registerMemoryRoutes(app: FastifyInstance, options: MemoryRouteO
   } } }, async (request, reply) => {
     const { identity, memory } = await scope(request);
     const { source, ...proposal } = request.body;
-    const result = memory.propose(identity, proposal, source === undefined ? undefined : {
+    const result = await memory.propose(identity, proposal, source === undefined ? undefined : {
       kind: "conversation", requestId: proposal.requestId, ...source,
     });
     return reply.code(201).send({ memory: result, requiresConfirmation: result.state === "pending" });
@@ -98,33 +98,33 @@ export function registerMemoryRoutes(app: FastifyInstance, options: MemoryRouteO
     schema: { params: idParams, body: revisionBody },
   }, async (request) => {
     const { identity, memory } = await scope(request);
-    return { memory: memory.confirm(identity, request.params.id, request.body.revision) };
+    return { memory: await memory.confirm(identity, request.params.id, request.body.revision) };
   });
   app.get<{ Params: { id: string } }>(`${prefix}/:id`, { schema: { params: idParams } }, async (request) => {
     const { identity, memory } = await scope(request);
-    return { memory: memory.get(identity, request.params.id) };
+    return { memory: await memory.get(identity, request.params.id) };
   });
   app.post<{ Params: { id: string }; Body: { revision: number } }>(`${prefix}/:id/reject`, {
     schema: { params: idParams, body: revisionBody },
   }, async (request) => {
     const { identity, memory } = await scope(request);
-    return { memory: memory.reject(identity, request.params.id, request.body.revision) };
+    return { memory: await memory.reject(identity, request.params.id, request.body.revision) };
   });
   app.post<{ Params: { id: string }; Body: { revision: number } }>(`${prefix}/:id/forget`, {
     schema: { params: idParams, body: revisionBody },
   }, async (request) => {
     const { identity, memory } = await scope(request);
-    return { memory: memory.forget(identity, request.params.id, request.body.revision) };
+    return { memory: await memory.forget(identity, request.params.id, request.body.revision) };
   });
   app.get<{ Params: { id: string } }>(`${prefix}/:id/shares`, { schema: { params: idParams } }, async (request) => {
     const { identity, memory } = await scope(request);
-    return { shares: memory.shares(identity, request.params.id) };
+    return { shares: await memory.shares(identity, request.params.id) };
   });
   app.get<{ Params: { id: string }; Querystring: { offset?: string } }>(`${prefix}/:id/audit`, { schema: { params: idParams, querystring: {
     type: "object", additionalProperties: false, properties: { offset: { type: "string", pattern: "^[0-9]{1,4}$" } },
   } } }, async (request) => {
     const { identity, memory } = await scope(request);
-    return memory.audit(identity, request.params.id, Number(request.query.offset ?? "0"));
+    return await memory.audit(identity, request.params.id, Number(request.query.offset ?? "0"));
   });
   app.post<{ Params: { id: string }; Body: { revision: number; targetAppId: string; expiresAt: number } }>(`${prefix}/:id/shares`, {
     schema: { params: idParams, body: { type: "object", required: ["revision", "targetAppId", "expiresAt"], additionalProperties: false,
@@ -139,13 +139,13 @@ export function registerMemoryRoutes(app: FastifyInstance, options: MemoryRouteO
     signal.throwIfAborted();
     await options.ensureActive(identity);
     if (!allowed) throw new CloudError(403, "MEMORY_TARGET_DENIED", "目标应用未开通或不属于当前空间。");
-    return { share: memory.share(identity, request.params.id, request.body.revision, request.body.targetAppId, request.body.expiresAt) };
+    return { share: await memory.share(identity, request.params.id, request.body.revision, request.body.targetAppId, request.body.expiresAt) };
   });
   app.post<{ Params: { id: string }; Body: Record<string, never> }>(`${prefix}/shares/:id/revoke`, {
     schema: { params: idParams, body: { type: "object", additionalProperties: false } },
   }, async (request) => {
     const { identity, memory } = await scope(request);
-    memory.revokeShare(identity, request.params.id);
+    await memory.revokeShare(identity, request.params.id);
     return { revoked: true };
   });
   app.get<{ Params: { runId: string } }>("/api/v1/cloud/runs/:runId/memories", { schema: { params: {
@@ -153,6 +153,6 @@ export function registerMemoryRoutes(app: FastifyInstance, options: MemoryRouteO
   } } }, async (request) => {
     const { identity, memory } = await scope(request);
     const run = await options.repository.getRun(identity, request.params.runId);
-    return { references: memory.references(identity, run.sessionId, run.id), meaning: "prepared_context_not_proof_of_model_use" };
+    return { references: await memory.references(identity, run.sessionId, run.id), meaning: "prepared_context_not_proof_of_model_use" };
   });
 }

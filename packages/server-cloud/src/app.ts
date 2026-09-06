@@ -4,6 +4,8 @@ import { ToolRegistry, type ToolDefinition, type ToolRequest } from "@daoyin/har
 import { assertExecutionIdentity, ExecutionAccessError, sameExecutionScope, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import { CloudError, type CloudRepository, type CloudRun } from "./repository.js";
 import { registerMemoryRoutes } from "./memory-routes.js";
+import { registerCloudEventStream, type EventStreamLimits } from "./event-stream.js";
+import { withCommittedSessionEvents } from "./event-repository.js";
 
 export interface CloudToolBinding {
   definition: ToolDefinition;
@@ -33,6 +35,7 @@ export interface CloudServerOptions {
   allowedOrigins?: readonly string[];
   maxConcurrentRuns?: number;
   runTimeoutMs?: number;
+  eventStream?: EventStreamLimits;
   /** Trusted platform check; absence disables cross-application memory sharing. */
   authorizeMemoryShare?(identity: ExecutionIdentity, targetAppId: string, signal: AbortSignal): Promise<boolean>;
 }
@@ -84,6 +87,7 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
 
 /** Creates the isolated API; does not bind a port, mount local tools, or choose a default identity. */
 export function createCloudServer(options: CloudServerOptions): FastifyInstance {
+  options = { ...options, repository: withCommittedSessionEvents(options.repository) };
   for (const callback of [options.authenticate, options.isAuthorizationActive, options.resolveProfile, options.createModel]) {
     if (typeof callback !== "function") throw new Error("Cloud authentication, authorization, profile and metered model adapters are required.");
   }
@@ -100,8 +104,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   let closing = false;
   let storageFault = false;
 
-  function assertOwner(): void {
-    try { options.repository.assertExecutionOwner?.(); }
+  async function assertOwner(): Promise<void> {
+    try { await options.repository.assertExecutionOwner?.(); }
     catch (error) {
       storageFault = true;
       for (const item of active.values()) item.controller.abort("runtime");
@@ -110,12 +114,12 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   }
 
   async function ensureActive(identity: ExecutionIdentity, parent?: AbortSignal): Promise<void> {
-    assertOwner();
+    await assertOwner();
     assertExecutionIdentity(identity);
     const timeout = AbortSignal.timeout(5_000);
     const signal = parent === undefined ? timeout : AbortSignal.any([parent, timeout]);
     const allowed = await abortable(() => options.isAuthorizationActive(identity, signal), signal);
-    assertOwner();
+    await assertOwner();
     assertExecutionIdentity(identity);
     if (!allowed) throw new CloudError(403, "AUTHORIZATION_REVOKED", "当前空间或应用授权已失效。");
   }
@@ -134,7 +138,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
     if (request.method === "GET" && request.url === "/health") return;
-    assertOwner();
+    await assertOwner();
     if (closing || storageFault) throw new CloudError(503, "CLOUD_NOT_READY", "云端执行服务暂不可用。");
     const origin = request.headers.origin;
     if (origin !== undefined && !origins.has(origin)) throw new CloudError(403, "ORIGIN_DENIED", "此入口未获允许。");
@@ -159,8 +163,11 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     return reply.code(503).send({ error: { code: "CLOUD_REQUEST_FAILED", message: "请求未完成，请保留原请求标识并查询任务状态。" } });
   });
 
+  registerCloudEventStream(app, { repository: options.repository, identityFor, ensureActive,
+    ...(options.eventStream === undefined ? {} : { limits: options.eventStream }) });
+
   app.get("/health", async () => {
-    try { assertOwner(); } catch { /* Report an unavailable executor without exposing internal errors. */ }
+    try { await assertOwner(); } catch { /* Report an unavailable executor without exposing internal errors. */ }
     return { status: storageFault || closing ? "unavailable" : "available", mode: "cloud-foundation", productionReady: false };
   });
   app.get("/api/v1/cloud/sessions", async (request) => ({ sessions: await options.repository.listSessions(identityFor(request)) }));
@@ -198,7 +205,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     deadline.unref();
     const done = (async () => {
       try {
-        const stores = options.repository.bindRun(identity, run.sessionId, run.id);
+        const stores = await options.repository.bindRun(identity, run.sessionId, run.id);
         const bindings = new Map(profile.tools.map((binding) => [binding.definition.name, binding]));
         const tools = new ToolRegistry(profile.tools.map<ToolDefinition>((binding) => ({
           ...binding.definition,
@@ -251,7 +258,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const scopedMemory: AgentMemoryProvider | undefined = memory === undefined || identity.space.kind === "public" ? undefined : {
           load: async (request) => {
             await ensureActive(identity, request.signal);
-            const snapshot = memory.prepare(identity, { sessionId: run.sessionId, turnId: run.id, step: request.step,
+            const snapshot = await memory.prepare(identity, { sessionId: run.sessionId, turnId: run.id, step: request.step,
               query: request.turn.userMessage, events: [...request.inheritedEvents, ...request.priorEvents] });
             return { ...snapshot, assertCurrent: async (signal) => {
               await ensureActive(identity, signal);
@@ -274,7 +281,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         try {
           const current = await options.repository.getRun(identity, run.id);
           if (current.status === "running" && controller.signal.aborted) {
-            const stores = options.repository.bindRun(identity, run.sessionId, run.id);
+            const stores = await options.repository.bindRun(identity, run.sessionId, run.id);
             await stores.events.append({
               type: "turn.cancelled", accountId: stores.accountId, scopeId: stores.scopeId,
               sessionId: run.sessionId, turnId: run.id,

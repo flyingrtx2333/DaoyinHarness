@@ -39,7 +39,7 @@ async function capture(page, name, requireComposer = true) {
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}" });
   const layout = await page.evaluate(() => ({
     width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight,
-    typography: { body: getComputedStyle(document.documentElement).fontSize, title: getComputedStyle(document.querySelector(".session-heading h1")).fontSize },
+    typography: { body: getComputedStyle(document.documentElement).fontSize, title: document.querySelector(".session-heading h1") ? getComputedStyle(document.querySelector(".session-heading h1")).fontSize : null },
     cards: [...document.querySelectorAll(".plugin-card")].map(node => {
       const box = node.getBoundingClientRect();
       return { bottom: box.bottom, height: box.height, padding: getComputedStyle(node).padding, titleSize: getComputedStyle(node.querySelector("h2")).fontSize };
@@ -53,18 +53,21 @@ async function capture(page, name, requireComposer = true) {
   assert.equal(layout.scrollWidth, layout.width, `${name}: horizontal overflow`);
   assert.equal(layout.scrollHeight, layout.height, `${name}: outer scroll`);
   assert.equal(layout.typography.body, "14px", `${name}: body text must not grow with viewport`);
-  assert.equal(layout.typography.title, "13px", `${name}: shared navigation typography`);
+  if (layout.typography.title !== null) assert.equal(layout.typography.title, "13px", `${name}: shared navigation typography`);
   const sidebar = layout.regions[".sidebar"];
   if (sidebar.width > 0) {
     if (layout.width > 900) assert.equal(sidebar.width, 240, `${name}: shared sidebar width`);
-    const order = [".brand", ".new-session", ".workspace-tabs", ".sidebar-label", ".search", ".session-list", ".sidebar-footer"];
+    const order = [".brand", ".workspace-tabs", ".sidebar-label", ".search", ".session-list", ".sidebar-footer"];
     for (let i = 1; i < order.length; i++) {
       const before = layout.regions[order[i - 1]], after = layout.regions[order[i]];
       assert.ok(before.y + before.height <= after.y + 1, `${name}: ${order[i]} overlaps previous sidebar section`);
     }
+    const heading = layout.regions[".sidebar-label"], newSession = layout.regions[".new-session"];
+    assert.ok(newSession.x >= heading.x && newSession.y >= heading.y && newSession.y + newSession.height <= heading.y + heading.height,
+      `${name}: new session action must occupy the recent-sessions heading`);
     const footer = layout.regions[".sidebar-footer"], scope = layout.regions[".scope"], link = layout.regions[".site-link"];
     assert.ok(footer.y + footer.height <= sidebar.y + sidebar.height, `${name}: footer clipped`);
-    assert.ok(scope.x + scope.width <= link.x && link.x + link.width <= sidebar.x + sidebar.width, `${name}: footer must share one row without overlap`);
+    if (scope && link) assert.ok(scope.x + scope.width <= link.x && link.x + link.width <= sidebar.x + sidebar.width, `${name}: footer must share one row without overlap`);
   }
   for (const card of layout.cards) {
     assert.equal(card.padding, "16px", `${name}: shared card spacing`);
@@ -97,6 +100,8 @@ try {
   let submitted = 0;
   let cancelled = 0;
   let bootstrap = 0;
+  // This suite exercises HTTP fallback; live WS behavior has a dedicated acceptance script.
+  await page.routeWebSocket("**/events/ws", ws => ws.close({ code: 1013, reason: "HTTP fallback fixture" }));
   await page.route("**/api/company-assistant/agent/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/company-assistant/agent", "");
@@ -111,7 +116,7 @@ try {
       submitted++;
       const run = { id: "run_design", sessionId: "session_design", requestId: body.requestId, userMessage: body.message, status: "running", cancelRequested: false };
       runs = [run];
-      events = [{ eventSeq: 1, turnId: run.id, type: "tool.started", payload: { toolCallId: "tool_design" } }];
+      events = [{ eventSeq: 1, turnId: run.id, type: "tool.started", payload: { toolCallId: "tool_design", toolName: "search_company_knowledge", displayText: "正在检索公开资料" } }];
       result = { run };
     } else if (path.endsWith("/runs")) result = { runs };
     else if (path.endsWith("/events")) {
@@ -120,6 +125,10 @@ try {
     } else if (path.endsWith("/cancel")) {
       cancelled++; runs[0] = { ...runs[0], status: "cancelled", cancelRequested: true, finalText: "任务已停止，已完成的记录已保留。" }; result = {};
     } else throw new Error(`Unexpected fixture route: ${path}`);
+    const completeRun = run => ({ finalText: "", lastEventSeq: events.length, authorizationId: "fixture", billingAccountId: "fixture", createdAt: "2026-09-06T00:00:00Z", ...run, ...(path.startsWith("/sessions/") ? { sessionId: path.split("/")[2] } : {}) });
+    if (result.run) result.run = completeRun(result.run);
+    if (result.runs) result.runs = result.runs.map(completeRun);
+    if (result.events) result.events = result.events.map(event => ({ id: `event_${event.eventSeq}`, sessionId: path.split("/")[2], accountId: "fixture", scopeId: "fixture", occurredAt: "2026-09-06T00:00:00Z", ...event }));
     await route.fulfill({ json: result });
   });
   await page.goto(`${origin}/harness/`);
@@ -137,6 +146,10 @@ try {
   assert.deepEqual(await faviconResponse.body(), await readFile("packages/ui/public/assets/harness-logo.png"));
   checks.push("Aurora Fold bytes, image loading/aspect ratio, favicon and release manifest");
   await capture(page, "desktop-empty");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "展开会话导航" }).click();
+  await capture(page, "mobile-sidebar");
+  await page.setViewportSize({ width: 1672, height: 941 });
   await page.getByRole("button", { name: "选择插件", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "选择会话插件" });
   await dialog.waitFor();
@@ -150,7 +163,7 @@ try {
   await page.getByRole("heading", { name: "短剧制作" }).waitFor();
   await capture(page, "desktop-plugins", false);
   assert.equal(await page.locator(".plugin-catalog").getByRole("button", { name: /^使用/u }).count(), 1);
-  assert.equal(await page.getByRole("button", { name: "连接授权赛事只读" }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: "打开赛事只读" }).count(), 1);
   assert.equal(await page.locator(".plugin-catalog").getByText("待接入", { exact: true }).count(), 3);
   assert.equal(await page.locator(".plugin-capabilities,.plugin-card-bottom").count(), 0);
   await page.getByRole("searchbox", { name: "搜索插件" }).fill("字幕");
@@ -170,7 +183,7 @@ try {
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await page.getByRole("button", { name: "停止生成" }).waitFor();
   assert.equal(await page.locator(".mini-mark img").getAttribute("src"), `/harness/${logoFile}`);
-  await page.getByText("正在检索公开资料", { exact: true }).waitFor();
+  await page.getByText("正在检索公开资料…", { exact: true }).waitFor();
   await capture(page, "desktop-running");
   await page.getByRole("button", { name: "插件", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "使用官网知识" }).isDisabled(), true);
@@ -181,7 +194,7 @@ try {
   checks.push("Suggestion fill, send, tool progress and cancellation");
   runs[0] = { ...runs[0], status: "completed", cancelRequested: false };
   events.push({ eventSeq: 2, turnId: "run_design", type: "tool.completed", payload: { toolCallId: "tool_design", evidence: { result: { sources: [{ id: "source_design", title: "产品资料示例", location: "官网", content: "这是本地界面验收资料。" }] } } } }, { eventSeq: 3, turnId: "run_design", type: "assistant.delta", payload: { delta: "这是一段**本地验收回答**。\n\n- 公开资料检索\n- 产品与方案介绍" } });
-  await page.getByRole("button", { name: "重新连接", exact: true }).click();
+  await page.reload();
   await page.getByText("本地验收回答", { exact: true }).waitFor();
   await page.getByText("参考资料", { exact: false }).click();
   await page.locator(".source summary").click();
@@ -217,7 +230,7 @@ try {
   checks.push("1280 desktop and 390/320 mobile geometry, picker and navigation");
   await page.setViewportSize({ width: 1672, height: 941 });
   sessions = ["道引科技有哪些产品？", "文旅互动方案", "整理合作资料", "景区数字人介绍"].map((title, index) => ({ id: `session_sidebar_${index}`, title, profileId: "company-public", createdAt: "2026-09-06T00:00:00Z" }));
-  await page.getByRole("button", { name: "重新连接", exact: true }).click();
+  await page.reload();
   await page.getByRole("navigation", { name: "最近会话" }).getByRole("button").last().waitFor();
   await page.getByRole("button", { name: "插件", exact: true }).click();
   await capture(page, "sidebar-a-reference", false);
@@ -257,11 +270,11 @@ try {
   const newSession = page.getByRole("button", { name: "新建会话", exact: true });
   await newSession.focus();
   await page.keyboard.press("Tab");
-  assert.equal(await page.getByRole("button", { name: "会话", exact: true }).evaluate(node => node === document.activeElement), true);
-  assert.equal(await page.locator(".site-link").getAttribute("href"), "/");
-  assert.match(await page.locator(".site-link").getAttribute("rel"), /noopener/u);
+  assert.equal(await page.getByRole("searchbox", { name: "搜索会话" }).evaluate(node => node === document.activeElement), true);
+  assert.equal(await page.locator(".brand").getAttribute("href"), "/harness/");
+  assert.ok((await page.locator(".sidebar-footer .account-login").getAttribute("href")).includes("login"));
   for (let i = 4; i < 44; i++) sessions.push({ ...sessions[0], id: `session_sidebar_${i}`, title: `第 ${i} 条：${"需要截断的很长会话标题".repeat(4)}` });
-  await page.getByRole("button", { name: "重新连接", exact: true }).click();
+  await page.reload();
   await page.waitForFunction(() => document.querySelectorAll(".session-list > button").length === 44);
   for (const [width, height] of [[1280, 720], [768, 720], [390, 844], [320, 640]]) {
     await page.setViewportSize({ width, height });
@@ -275,7 +288,7 @@ try {
     await page.getByRole("searchbox", { name: "搜索会话" }).fill("文旅互动");
     assert.equal(await list.getByRole("button").count(), 1);
     await list.getByRole("button", { name: "文旅互动方案", exact: true }).click();
-    await page.getByRole("heading", { name: "文旅互动方案", exact: true }).waitFor();
+    assert.equal(await list.getByRole("button", { name: "文旅互动方案", exact: true, includeHidden: true }).getAttribute("aria-current"), "page");
     if (width < 640) {
       assert.equal(await page.locator(".sidebar").isVisible(), false);
       await page.getByRole("button", { name: "展开会话导航" }).click();
@@ -286,7 +299,7 @@ try {
   checks.push("A sidebar order, shared scale, keyboard order, footer link, long-title clipping, 44-session independent scroll and selection");
   expectFailure = true;
   await page.route("**/api/company-assistant/agent/bootstrap", route => route.fulfill({ status: 401, json: { error: "fixture_expired" } }));
-  await page.getByRole("button", { name: "重新连接", exact: true }).click();
+  await page.reload();
   await page.getByRole("button", { name: "重新进入工作台" }).waitFor();
   assert.equal(await page.getByRole("button", { name: "发送", exact: true }).isDisabled(), true);
   await capture(page, "mobile-expired");

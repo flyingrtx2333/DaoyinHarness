@@ -37,6 +37,19 @@ export class SqliteCloudRepository implements CloudRepository {
   readonly #db: DatabaseSync;
   #leaseOwner: string | null = null;
   #leaseDurationMs = 30_000;
+  readonly #listeners = new Map<string, Set<() => void>>();
+  #changedSessions = new Set<string>();
+
+  public subscribeSession(scope: ExecutionScope, sessionId: string, listener: () => void): () => void {
+    this.#session(executionScopeKey(scope), sessionId);
+    const listeners = this.#listeners.get(sessionId) ?? new Set<() => void>();
+    listeners.add(listener);
+    this.#listeners.set(sessionId, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (!listeners.size) this.#listeners.delete(sessionId);
+    };
+  }
 
   public constructor(filename: string) {
     this.#db = new DatabaseSync(filename);
@@ -187,6 +200,7 @@ export class SqliteCloudRepository implements CloudRepository {
         VALUES (?,?,?,?,?,?,'running',?,?,?)`).run(
         runId, key, sessionId, requestId, hash, userMessage, identity.authorizationId, identity.billingAccountId, now(),
       );
+      this.#changedSessions.add(sessionId);
       return { run: run(this.#run(key, runId)), created: true };
     });
   }
@@ -254,8 +268,9 @@ export class SqliteCloudRepository implements CloudRepository {
   public async requestCancellation(scope: ExecutionScope, runId: string): Promise<CloudRun> {
     const key = executionScopeKey(scope);
     return this.#transaction(() => {
-      this.#run(key, runId);
-      this.#db.prepare("UPDATE cloud_runs SET cancel_requested=1 WHERE id=? AND scope_key=? AND status='running'").run(runId, key);
+      const current = this.#run(key, runId);
+      const updated = this.#db.prepare("UPDATE cloud_runs SET cancel_requested=1 WHERE id=? AND scope_key=? AND status='running' AND cancel_requested=0").run(runId, key);
+      if (updated.changes) this.#changedSessions.add(String(current.session_id));
       return run(this.#run(key, runId));
     });
   }
@@ -288,16 +303,24 @@ export class SqliteCloudRepository implements CloudRepository {
 
   #transaction<T>(operation: () => T, enforceLease = true): T {
     this.#db.exec("BEGIN IMMEDIATE");
+    const changed = new Set<string>();
+    this.#changedSessions = changed;
+    let result: T;
     try {
       if (enforceLease) this.assertExecutionOwner();
-      const result = operation();
+      result = operation();
       if (enforceLease) this.assertExecutionOwner();
       this.#db.exec("COMMIT");
-      return result;
     } catch (error) {
       this.#db.exec("ROLLBACK");
       throw error;
+    } finally { this.#changedSessions = new Set<string>(); }
+    // Notify ONLY after the event and its Run projection commit together. A failed
+    // subscriber cannot turn a successful durable operation into a retryable error.
+    for (const sessionId of changed) for (const listener of [...(this.#listeners.get(sessionId) ?? [])]) {
+      try { listener(); } catch { /* Reconnect/replay remains authoritative. */ }
     }
+    return result;
   }
 
   #readEvents(sessionId: string, after: number, limit = 1_200): AgentEvent[] {
@@ -329,6 +352,7 @@ export class SqliteCloudRepository implements CloudRepository {
     }
     this.#db.prepare("UPDATE cloud_runs SET last_event_seq=?,status=?,final_text=? WHERE id=? AND scope_key=? AND status='running'")
       .run(event.eventSeq, status, finalText, event.turnId, key);
+    this.#changedSessions.add(event.sessionId);
     return event;
   }
 

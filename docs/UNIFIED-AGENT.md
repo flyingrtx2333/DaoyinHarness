@@ -11,7 +11,7 @@
 | Harness `agent-core` | 推理、工具循环、上下文、事件、取消 | 本地与云端共用同一 `AgentEngine` |
 | Harness `contracts` / `tools` | 身份、存储接口、授权发现与执行校验 | 个人/组织/公开空间契约；云端每步复查授权 |
 | Harness `server` / CLI / UI | 本地运行、工作区、操作系统凭据和本地工具 | 保留现有本地端；不自动同步历史 |
-| Harness `server-cloud` | 云端会话、Run、事件回放、Profile 装配 | 单实例 SQLite、平台 HTTP 适配、独立启动入口 |
+| Harness `server-cloud` | 云端会话、Run、事件回放、Profile 装配 | PostgreSQL 持久化、平台 HTTP 适配、独立启动入口 |
 | DaoyinTechnology `backend` | 用户、空间、安装、权益、授权、费用治理 | 本轮实现官网访客授权、付款成员校验、MySQL 操作账本与次数门禁 |
 | Story / Youji / Builder | 业务资源、生成任务、构建与托管 | 保留各自服务；统一 Agent 接入仍按阶段推进 |
 
@@ -51,7 +51,7 @@ backend 使用以下显式环境配置；关闭时新接口返回 503，旧官�
 
 数据库迁移位于主平台 `backend/db/migrations/20260905_agent_public_bridge.sql`，已通过指定 backend 的发布流程应用到生产；应用启动不自动执行迁移。
 
-Harness 配置：`DAOYIN_CLOUD_PLATFORM_URL` 指向 backend；`DAOYIN_CLOUD_SERVICE_TOKEN` 与平台专用凭据一致；`DAOYIN_CLOUD_DATABASE` 为受保护目录中的绝对 SQLite 路径，父目录必须存在；`DAOYIN_CLOUD_PORT` 默认 4700。服务只绑定 `127.0.0.1`，端口冲突直接失败，适合受保护的同机反向代理。两端 URL 接受 HTTPS，开发环境仅允许 loopback HTTP；Docker 跨容器部署需明确的 HTTPS 服务入口，不能直接改成任意明文主机。
+Harness 配置：`DAOYIN_CLOUD_PLATFORM_URL` 指向 backend；`DAOYIN_CLOUD_SERVICE_TOKEN` 与平台专用凭据一致；`DAOYIN_CLOUD_POSTGRES_URL` 由受保护服务环境或密钥管理器注入；`DAOYIN_CLOUD_PORT` 默认 4700。先运行发布包的 `postgres-migrate.mjs`，标准启动不会执行 DDL。服务只绑定 `127.0.0.1`，端口冲突直接失败，适合受保护的同机反向代理。数据库连接应使用私网或 TLS；两端 URL 接受 HTTPS，开发环境仅允许 loopback HTTP；Docker 跨容器部署需明确的 HTTPS 服务入口，不能直接改成任意明文主机。
 
 ```powershell
 npm run build

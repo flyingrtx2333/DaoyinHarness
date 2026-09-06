@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { executionScopeKey, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import type { AgentEvent } from "@daoyin/harness-protocol";
-import { CloudError } from "./repository.js";
+import { CloudError, type MaybePromise } from "./repository.js";
 import {
   memoryDomain, memoryId, memoryOwner, memoryPermission, memoryRelevance, normalizeMemoryProposal,
   type DurableMemory, type MemoryAuditAction, type MemoryAuditEntry, type MemoryProposal, type MemoryReference,
@@ -12,8 +12,22 @@ import {
 import { prepareMemoryContext, readMemoryUses, type MemoryPreparation, type MemoryUse } from "./memory-runtime.js";
 import type { MemoryContextSnapshot } from "@daoyin/harness-agent-core";
 
-export type CloudMemoryRepository = Pick<SqliteMemoryRepository,
-  "propose" | "confirm" | "reject" | "forget" | "get" | "share" | "revokeShare" | "list" | "search" | "prepare" | "references" | "shares" | "audit">;
+/** Implementations may be synchronous (local SQLite) or asynchronous (cloud PostgreSQL). */
+export interface CloudMemoryRepository {
+  propose(identity: ExecutionIdentity, raw: MemoryProposal, source?: MemorySource): MaybePromise<DurableMemory>;
+  confirm(identity: ExecutionIdentity, id: string, revision: number): MaybePromise<DurableMemory>;
+  reject(identity: ExecutionIdentity, id: string, revision: number): MaybePromise<DurableMemory>;
+  forget(identity: ExecutionIdentity, id: string, revision: number): MaybePromise<DurableMemory>;
+  get(identity: ExecutionIdentity, id: string): MaybePromise<DurableMemory>;
+  share(identity: ExecutionIdentity, id: string, revision: number, targetAppId: string, expiresAt: number): MaybePromise<{ id: string; expiresAt: number }>;
+  revokeShare(identity: ExecutionIdentity, grantId: string): MaybePromise<void>;
+  list(identity: ExecutionIdentity, offset?: number): MaybePromise<{ items: DurableMemory[]; hasMore: boolean }>;
+  search(identity: ExecutionIdentity, query: string, limit?: number): MaybePromise<RecalledMemory[]>;
+  prepare(identity: ExecutionIdentity, input: MemoryPreparation): MaybePromise<MemoryContextSnapshot>;
+  references(identity: ExecutionIdentity, sessionId: string, turnId: string): MaybePromise<MemoryUse[]>;
+  shares(identity: ExecutionIdentity, id: string): MaybePromise<Array<{ id: string; revision: number; targetAppId: string; expiresAt: number; revoked: boolean }>>;
+  audit(identity: ExecutionIdentity, id: string, offset?: number): MaybePromise<{ items: MemoryAuditEntry[]; hasMore: boolean }>;
+}
 
 type Row = Record<string, unknown>;
 type Transaction = <T>(operation: () => T) => T;

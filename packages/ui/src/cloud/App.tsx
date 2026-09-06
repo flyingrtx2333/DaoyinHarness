@@ -3,6 +3,7 @@ import type { AgentEvent } from "@daoyin/harness-protocol";
 import { MarkdownMessage } from "../MarkdownMessage.js";
 import { WorkbenchClient, WorkbenchError, type AccountProfile, type CloudRun, type CloudSession } from "./client.js";
 import { projectTurns } from "./projection.js";
+import { watchCloudSession } from "./event-feed.js";
 import { PluginCatalog, PluginPicker } from "./PluginBrowser.js";
 import { selectablePlugin, sessionPlugin } from "./plugins.js";
 import { HarnessLogo } from "./HarnessLogo.js";
@@ -141,34 +142,24 @@ export function App(): React.JSX.Element {
     const changed = feed.current.key !== key;
     if (changed) { feed.current = { key, events: [] }; setRuns([]); setEvents([]); nearBottom.current = true; }
     if (!key) { setLoading(false); return; }
-    const controller = new AbortController();
-    let timer: number | undefined;
-    let accumulated = feed.current.events;
+    const epoch = accountEpoch.current;
     let recoveryError = "";
     if (changed) setLoading(true);
     try { storage.setItem(SELECTED, selected); } catch { /* No model work occurs here. */ }
-    async function refresh(): Promise<void> {
-      try {
-        const [nextRuns, additions] = await Promise.all([
-          client.runs(selected, controller.signal),
-          client.events(selected, accumulated.at(-1)?.eventSeq ?? 0, controller.signal),
-        ]);
-        if (controller.signal.aborted) return;
-        accumulated = [...accumulated, ...additions];
+    return watchCloudSession(client, selected, {
+      events: feed.current.events,
+      onUpdate: (nextRuns, accumulated) => {
+        if (epoch !== accountEpoch.current || loggingOut.current) return;
         feed.current = { key, events: accumulated };
         setRuns(nextRuns); setEvents(accumulated); setLoading(false);
         if (recoveryError) { const recovered = recoveryError; setError(current => current === recovered ? "" : current); recoveryError = ""; }
-        if (nextRuns.some((run) => run.status === "running" || run.status === "queued" || run.lastEventSeq > (accumulated.at(-1)?.eventSeq ?? 0))) timer = window.setTimeout(() => { void refresh(); }, 500);
-      } catch (cause) {
-        if (!controller.signal.aborted) {
-          recoveryError = cause instanceof WorkbenchError ? cause.message : "连接未完成，请重试。";
-          setLoading(false); fail(cause);
-          if (!(cause instanceof WorkbenchError && [401, 403].includes(cause.status ?? 0))) timer = window.setTimeout(() => { void refresh(); }, 2000);
-        }
-      }
-    }
-    void refresh();
-    return () => { controller.abort(); window.clearTimeout(timer); };
+      },
+      onError: (cause) => {
+        if (epoch !== accountEpoch.current || loggingOut.current) return;
+        recoveryError = cause instanceof WorkbenchError ? cause.message : "连接未完成，请重试。";
+        setLoading(false); fail(cause);
+      },
+    });
   }, [selected, phase, revision, client]);
   useEffect(() => {
     if (preferences.autoScroll && nearBottom.current) bottom.current?.scrollIntoView({ block: "end" });
@@ -269,10 +260,9 @@ export function App(): React.JSX.Element {
     <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航" onKeyDown={(event) => { if (event.key === "Escape" && sidebar) { event.preventDefault(); closeSidebar(); } }}>
       <button type="button" className="sidebar-close" aria-label="关闭会话导航" onClick={closeSidebar}>×</button>
       <a className="brand" href="/harness/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
-      <button className="new-session" disabled={phase !== "ready" || submitting} onClick={() => choose("")}><span aria-hidden="true">＋</span>新建会话</button>
       <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button></nav>
       <section className="sidebar-history" aria-labelledby="history-heading">
-        <div className="sidebar-label"><h2 id="history-heading">最近会话</h2><span>{sessions.length}</span></div>
+        <div className="sidebar-label"><h2 id="history-heading">最近会话</h2><button className="new-session" disabled={phase !== "ready" || submitting} onClick={() => choose("")}><WorkbenchIcon name="plus" />新建会话</button></div>
         <label className="search"><span>搜索会话</span><WorkbenchIcon name="search" /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索会话" /></label>
         <nav aria-label="最近会话" className="session-list">
           {visibleSessions.map((item) =>
@@ -314,7 +304,7 @@ export function App(): React.JSX.Element {
         <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
           <label htmlFor="message" className="sr-only">发送给 Harness 的问题</label>
           <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={2} disabled={phase !== "ready" || submitting || !!pending} placeholder="描述你的问题…" onKeyDown={(event) => { if (isSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing }, preferences)) { event.preventDefault(); void send(); } }} />
-          <div className="composer-controls"><div className="composer-plugins"><PluginPicker selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id, false)} onBrowse={browsePlugins} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /><button type="button" className="selected-plugin" onClick={browsePlugins} aria-label={`查看${plugin?.name ?? "会话插件"}详情`}>{plugin?.name ?? "选择插件"}{plugin && <span className="plugin-check" aria-hidden="true">✓</span>}</button>{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}>{cancelling || active?.cancelRequested ? "正在停止…" : "停止生成"}</button> : <button type="submit" className="primary send-button" aria-label="发送" disabled={!draft.trim() || phase !== "ready" || loading || !!pending || !plugin}><WorkbenchIcon name="arrow" /></button>}</div>
+          <div className="composer-controls"><div className="composer-plugins"><PluginPicker selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id, false)} onBrowse={browsePlugins} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /><button type="button" className="selected-plugin" onClick={browsePlugins} aria-label={`查看${plugin?.name ?? "会话插件"}详情`}>{plugin?.name ?? "选择插件"}{plugin && <span className="plugin-check" aria-hidden="true">✓</span>}</button>{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={!draft.trim() || phase !== "ready" || loading || !!pending || !plugin}><WorkbenchIcon name="arrow" /></button>}</div>
         </form>
         <p className="composer-note">{APPLICATION === "saishi" ? "使用当前账号的赛事数据；摄像机观察不等于正式打卡成绩" : "依据公开资料回答，请核对引用"}</p>
         <div className="sr-only" role="status">{submitting ? "正在提交问题" : active ? "任务进行中" : turns.length ? "回答已更新" : ""}</div>
