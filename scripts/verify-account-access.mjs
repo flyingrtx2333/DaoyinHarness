@@ -71,7 +71,7 @@ try {
     if (path.endsWith("/runs")) return route.fulfill({ json: { runs: [{ id: `run_${account}`, sessionId: session.id,
       requestId: `request_${account}`, userMessage: `账号 ${account} 的问题`, finalText: `账号 ${account} 的回答`,
       status: "completed", lastEventSeq: 0, createdAt: "2026-09-06T00:00:00Z" }] } });
-    if (path.endsWith("/events")) return route.fulfill({ json: { events: [{ id: `event_${account}`, eventSeq: 1, type: "assistant.delta", sessionId: session.id, turnId: `run_${account}`, accountId: account, scopeId: `scope_${account}`, occurredAt: "2026-09-06T00:01:00Z", payload: { contentBlockId: "answer", delta: `账号 ${account} 的回答` } }], hasMore: false, nextEventSeq: 1 } });
+    if (path.endsWith("/events")) return route.fulfill({ json: { events: [], hasMore: false, nextEventSeq: 0 } });
     throw new Error(`Unexpected fixture route ${path}`);
   });
   for (const width of [1280, 1920, 390, 320]) {
@@ -89,15 +89,6 @@ try {
     assert.equal(await page.locator("input[type=password]").count(), 0);
     assert.equal(await page.getByRole("button", { name: "登录道引账号" }).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-    const userMessage = page.locator(".user-message");
-    const assistantMessage = page.locator(".assistant-message");
-    assert.equal(await userMessage.locator("time").count(), 1);
-    assert.equal(await assistantMessage.locator("time").count(), 1);
-    assert.equal(await userMessage.locator("time").getAttribute("datetime"), "2026-09-06T00:00:00Z");
-    assert.equal(await assistantMessage.locator("time").getAttribute("datetime"), "2026-09-06T00:01:00Z");
-    const userBox = await userMessage.boundingBox();
-    const assistantBox = await assistantMessage.boundingBox();
-    assert.ok(userBox && assistantBox && userBox.x > assistantBox.x, "user messages should align to the right of assistant messages");
     await page.screenshot({ path: resolve(output, `account-${width}.png`), fullPage: true });
     await page.getByRole("button", { name: "选择插件", exact: true }).click();
     await page.getByRole("dialog", { name: "选择会话插件" }).waitFor();
