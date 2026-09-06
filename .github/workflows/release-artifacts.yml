@@ -1,0 +1,56 @@
+name: Build pinned cloud release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Exact Harness commit to package'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+          cache: npm
+      - name: Install locked build dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Package committed runtime and workbench
+        shell: pwsh
+        env:
+          EXPECTED_REVISION: ${{ inputs.revision }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $revision = (git rev-parse HEAD).Trim()
+          if ($revision -ne $env:EXPECTED_REVISION) { throw 'Commit mismatch' }
+          node scripts/build-cloud-release.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime packaging failed' }
+          node scripts/build-workbench-release.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Workbench packaging failed' }
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item -Recurse ".cache/cloud-release/$revision" release/runtime
+          Copy-Item -Recurse ".cache/workbench-release/$revision" release/workbench
+          Push-Location release/runtime
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime lock generation failed' }
+          Pop-Location
+          $files = Get-ChildItem release -File -Recurse | ForEach-Object {
+            [ordered]@{ path = $_.FullName.Substring((Resolve-Path release).Path.Length + 1).Replace('\', '/'); sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() }
+          }
+          [ordered]@{ revision = $revision; files = @($files) } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 release/artifact-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: harness-release-${{ inputs.revision }}
+          path: release/
+          retention-days: 14
+          if-no-files-found: error

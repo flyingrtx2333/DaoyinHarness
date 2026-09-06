@@ -7,6 +7,7 @@
 | 插件 | 已有业务能力 | 此云端工作台状态 | 源码依据 |
 | --- | --- | --- | --- |
 | 官网知识 | 公开知识检索、产品问答、来源引用 | 可用，访客只读 | `packages/server-cloud/src/company-profile.ts` |
+| 赛事只读 | 赛事、设备、素材、地图、人物时间线、任务状态 | 只读接线已实现，需部署并连接专用授权；本轮未运行验收 | `packages/server-cloud/src/saishi-profile.ts` |
 | 短剧制作 | 剧本生成、角色场景、分镜、视频、字幕、导出 | 待接入账号授权 | 主平台 `backend-story/story_mcp.py`、`backend-story/mcp_operations.py` |
 | 网站与应用 | 创建/修改网站和轻应用、预览 | 待接入 | 主平台 `backend-builder/README.md` |
 | 文旅影像 | 场景人像、AI 图片编辑 | 待接入 | 主平台 `backend/services/ai_image_edit.py`、`backend/tests/test_ai_image_edit_youji.py` |
@@ -15,11 +16,11 @@
 
 ## 选择与执行
 
-`packages/ui/src/cloud/plugins.ts` 是随版本维护的界面盘点清单，不签发授权。当前云端平台适配器只解析 `company-public` Profile；公开空间工具只有 `search_company_knowledge`。
+`packages/ui/src/cloud/plugins.ts` 是界面盘点清单，不签发授权。平台适配器区分 `company-public` 和 `saishi-readonly` Profile；公开空间工具仍只有 `search_company_knowledge`，赛事只读工具必须通过独立的账号/租户/赛事授权。入口、权限、配置及待验收边界见 [赛事插件](SAISHI-PLUGIN.md)。
 
 已有会话按服务端返回的 profileId 显示当前插件。新会话提交前校验服务端实际 Profile 与选择一致，不一致时停止模型提交。未识别的 Profile 不回退成官网知识；待接入 ID 不可选择。不通过改提示词、前端勾选、访客 Token 或借用官方付款身份开放短剧写入。
 
-当前只提供单个已接入插件，不支持任意组合或移除会话绑定的工具。已有可用插件与当前会话匹配时，选择保留会话、草稿和事件；运行中或提交结果不确定时不能切换。
+当前每个会话只绑定一个 Profile，不支持任意组合或移除会话工具。同一可用插件内选择保留会话、草稿和事件；官网与赛事授权空间切换时刷新页面并隔离显示。运行中或提交结果不确定时不能切换。
 
 ## 短剧下一步接线
 

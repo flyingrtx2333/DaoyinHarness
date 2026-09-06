@@ -19,10 +19,14 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
     if (event.type === "tool.started" || event.type === "tool.completed" || event.type === "tool.failed") {
       const id = event.payload.toolCallId;
       let tool = turn.tools.find((item) => item.id === id);
-      if (!tool) { tool = { id, status: "running", text: "正在检索公开资料" }; turn.tools.push(tool); }
+      const payload: unknown = event.payload;
+      const name = record(payload) ? payload.toolName ?? payload.name : undefined;
+      const isSaishi = typeof name === "string" && name.startsWith("saishi_");
+      if (!tool) { tool = { id, status: "running", text: isSaishi ? "正在查询授权赛事数据" : "正在检索公开资料" }; turn.tools.push(tool); }
       if (event.type === "tool.completed") {
-        tool.status = "completed"; tool.text = "公开资料检索完成";
         const result: unknown = event.payload.evidence.result;
+        const saishiResult = record(result) && result.readOnly === true && typeof result.tool === "string" && result.tool.startsWith("saishi_");
+        tool.status = "completed"; tool.text = saishiResult ? "赛事只读查询完成" : "公开资料检索完成";
         if (record(result) && Array.isArray(result.sources)) for (const source of result.sources.slice(0, 5)) {
           if (record(source) && typeof source.id === "string" && typeof source.title === "string" && typeof source.content === "string" &&
               !turn.sources.some((existing) => existing.id === source.id)) {
@@ -31,7 +35,7 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
           }
         }
       }
-      if (event.type === "tool.failed") { tool.status = "failed"; tool.text = "公开资料检索未完成"; }
+      if (event.type === "tool.failed") { tool.status = "failed"; tool.text = isSaishi || tool.text.includes("赛事") ? "赛事查询未完成" : "公开资料检索未完成"; }
     }
   }
   for (const turn of turns) {
