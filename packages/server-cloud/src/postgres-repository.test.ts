@@ -73,6 +73,23 @@ integration("cloud PostgreSQL persistence (real isolated database; no model or p
     expect((await db.readEvents(actor, session.id, 2, 100)).map(event => event.eventSeq)).toEqual([3]);
   });
 
+  it("P0: checks readiness without writes and reads a full long streamed turn", async () => {
+    const db = repository!; const actor = identity();
+    await expect(db.checkReadiness()).rejects.toThrow("lease");
+    await db.acquireRuntimeLease({ durationMs: 300_000 });
+    await expect(db.checkReadiness()).resolves.toBeUndefined();
+    const session = await db.createSession(actor, { title: "long", profileId: "story", profileVersion: "1" });
+    const accepted = await db.acceptRun(actor, session.id, "long-1", "hello");
+    const stores = await db.bindRun(actor, session.id, accepted.run.id);
+    const base = { accountId: stores.accountId, scopeId: stores.scopeId, sessionId: session.id, turnId: accepted.run.id };
+    await stores.events.append({ ...base, type: "turn.started", payload: { status: "running", userMessageId: "m1", userMessage: "hello" } });
+    for (let index = 0; index < 1205; index++) await stores.events.append({ ...base, type: "assistant.delta", payload: { contentBlockId: "block", delta: "x" } });
+    await stores.events.append({ ...base, type: "turn.completed", payload: { status: "completed", assistantMessageId: "m2", outcomeSummary: "done" } });
+    const events = await stores.events.read(session.id);
+    expect(events).toHaveLength(1207); expect(events.at(-1)?.type).toBe("turn.completed");
+    expect((await db.acceptRun(actor, session.id, "long-2", "continue")).created).toBe(true);
+  }, 30_000);
+
   it("keeps confirmed memory scoped, versioned and revocable", async () => {
     const db = repository!;
     const actor = identity();

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
+import { assertHistoryAdmission, readCompleteHistory } from "./history-policy.js";
 import { assertExecutionIdentity, executionScopeKey, type AppendCompactionInput, type ExecutionIdentity, type ExecutionScope } from "@daoyin/harness-contracts";
 import type { AgentEvent, AgentEventType, PendingAgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
 import { PostgresMemoryRepository, migratePostgresMemory } from "./postgres-memory-repository.js";
@@ -92,6 +93,21 @@ export class PostgresCloudRepository implements CloudRepository {
   }
 
   public async close(): Promise<void> { await this.pool.end(); }
+
+  public async checkReadiness(): Promise<void> {
+    if (this.#leaseOwner === null) throw new Error("Runtime lease not acquired.");
+    await this.verifySchema();
+    // Read-only probe of required column shape and write privileges; NOT a write test.
+    await this.pool.query("SELECT session_id,event_seq,turn_id,event_id,body FROM cloud_events WHERE FALSE");
+    await this.pool.query("SELECT id,scope_key,session_id,request_id,input_hash,user_message,status,final_text,last_event_seq,cancel_requested,authorization_id,billing_account_id,created_at FROM cloud_runs WHERE FALSE");
+    const result = await this.pool.query<{ ready: boolean }>(`SELECT current_setting('transaction_read_only')='off'
+      AND NOT pg_is_in_recovery() AND has_table_privilege('cloud_events','SELECT')
+      AND has_table_privilege('cloud_events','INSERT') AND has_table_privilege('cloud_runs','SELECT')
+      AND has_table_privilege('cloud_runs','INSERT') AND has_table_privilege('cloud_runs','UPDATE')
+      AND has_table_privilege('cloud_sessions','SELECT') AND has_table_privilege('cloud_sessions','INSERT') AS ready`);
+    if (result.rows[0]?.ready !== true) throw new Error("Database permissions or role are not ready.");
+    await this.assertExecutionOwner();
+  }
 
   public async migrate(): Promise<void> { await migratePostgres(this.pool); }
 
@@ -200,8 +216,10 @@ export class PostgresCloudRepository implements CloudRepository {
       }
       const active = await client.query("SELECT id FROM cloud_runs WHERE session_id=$1 AND status='running' FOR UPDATE", [sessionId]);
       if (active.rows[0] !== undefined) throw new CloudError(409, "SESSION_BUSY", "当前会话已有任务，请等待完成或取消。");
-      const count = await client.query<{ n: string }>("SELECT COUNT(*) AS n FROM cloud_events WHERE session_id=$1", [sessionId]);
-      if (asNumber(count.rows[0]?.n) >= 1_000) throw new CloudError(409, "SESSION_HISTORY_LIMIT", "本会话达到试运行记录上限，请新建会话。");
+      const usage = await client.query<{ events: string; bytes: string; runs: string }>(`SELECT COUNT(*) AS events,
+        COALESCE(SUM(octet_length(body)),0) AS bytes,
+        (SELECT COUNT(*) FROM cloud_runs WHERE session_id=$1) AS runs FROM cloud_events WHERE session_id=$1`, [sessionId]);
+      assertHistoryAdmission({ events: Number(usage.rows[0]?.events), bytes: Number(usage.rows[0]?.bytes), runs: Number(usage.rows[0]?.runs) });
       const runId = id("run");
       await client.query(`INSERT INTO cloud_runs(id,scope_key,session_id,request_id,input_hash,user_message,status,authorization_id,billing_account_id,created_at)
         VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$9)`, [runId, key, sessionId, requestId, inputHash, userMessage,
@@ -256,7 +274,7 @@ export class PostgresCloudRepository implements CloudRepository {
         read: async (requested, after = 0) => {
           await check(requested);
           if (!Number.isSafeInteger(after) || after < 0) throw new CloudError(400, "EVENT_CURSOR_INVALID", "事件游标无效。");
-          return this.#readEvents(this.pool, sessionId, after, 1_200);
+          return readCompleteHistory(sessionId, after, (cursor, limit) => this.#readEvents(this.pool, sessionId, cursor, limit));
         },
       },
       compactions: {

@@ -2,10 +2,13 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { AgentEngine, type ModelClient, type AgentMemoryProvider } from "@daoyin/harness-agent-core";
 import { ToolRegistry, type ToolDefinition, type ToolRequest } from "@daoyin/harness-tools/registry";
 import { assertExecutionIdentity, ExecutionAccessError, sameExecutionScope, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
-import { CloudError, type CloudRepository, type CloudRun } from "./repository.js";
+import { CloudError, type BoundRunStores, type CloudRepository, type CloudRun } from "./repository.js";
 import { registerMemoryRoutes } from "./memory-routes.js";
 import { registerCloudEventStream, type EventStreamLimits } from "./event-stream.js";
 import { withCommittedSessionEvents } from "./event-repository.js";
+import { eventPage } from "./history-policy.js";
+import { ReadinessProbe, runtimeBuild, type RuntimeBuild } from "./runtime-health.js";
+import { describeRun, RunMeasurements } from "./run-diagnostics.js";
 
 export interface CloudToolBinding {
   definition: ToolDefinition;
@@ -32,6 +35,9 @@ export interface CloudServerOptions {
   resolveProfile(identity: ExecutionIdentity, signal: AbortSignal): Promise<CloudProfile>;
   /** Must use a delegated, metered gateway client for this identity and exact run. */
   createModel(identity: ExecutionIdentity, run: CloudRun, signal: AbortSignal): Promise<ModelClient>;
+  /** Read-only service-authenticated bridge probe; never calls a model or creates a grant. */
+  checkPlatform?(signal: AbortSignal): Promise<void>;
+  buildInfo?: RuntimeBuild;
   allowedOrigins?: readonly string[];
   maxConcurrentRuns?: number;
   runTimeoutMs?: number;
@@ -103,6 +109,15 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   let admissions = 0;
   let closing = false;
   let storageFault = false;
+  const measurements = new RunMeasurements();
+  const buildInfo = runtimeBuild(options.buildInfo);
+  const readiness = new ReadinessProbe(async (signal) => {
+    if (!options.repository.checkReadiness || !options.checkPlatform) throw new Error("Readiness adapters are missing.");
+    await options.repository.checkReadiness();
+    signal.throwIfAborted();
+    await options.checkPlatform(signal);
+    signal.throwIfAborted();
+  });
 
   async function assertOwner(): Promise<void> {
     try { await options.repository.assertExecutionOwner?.(); }
@@ -137,7 +152,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
-    if (request.method === "GET" && request.url === "/health") return;
+    if (request.method === "GET" && ["/health", "/health/live", "/health/ready"].includes(request.url)) return;
     await assertOwner();
     if (closing || storageFault) throw new CloudError(503, "CLOUD_NOT_READY", "云端执行服务暂不可用。");
     const origin = request.headers.origin;
@@ -166,6 +181,22 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   registerCloudEventStream(app, { repository: options.repository, identityFor, ensureActive,
     ...(options.eventStream === undefined ? {} : { limits: options.eventStream }) });
 
+  app.get("/health/live", async () => ({ status: "alive" }));
+  app.get("/health/ready", async (_request, reply) => {
+    const checked = !closing && !storageFault && await readiness.ready();
+    const ready = checked && !closing && !storageFault;
+    return reply.code(ready ? 200 : 503).send({ status: ready ? "ready" : "not_ready" });
+  });
+  app.get("/api/v1/cloud/runtime", async () => ({ build: buildInfo, executorMode: "single-instance",
+    readinessScope: "database-schema-lease-and-platform-bridge", providerCallTested: false }));
+  app.get<{ Params: { runId: string } }>("/api/v1/cloud/runs/:runId/diagnostics", { schema: { params: runParams } }, async (request) => {
+    const identity = identityFor(request);
+    const run = await options.repository.getRun(identity, request.params.runId);
+    const stores = await options.repository.bindRun(identity, run.sessionId, run.id);
+    const events = await stores.events.read(run.sessionId);
+    await ensureActive(identity);
+    return describeRun(run, events, measurements);
+  });
   app.get("/health", async () => {
     try { await assertOwner(); } catch { /* Report an unavailable executor without exposing internal errors. */ }
     return { status: storageFault || closing ? "unavailable" : "available", mode: "cloud-foundation", productionReady: false };
@@ -193,7 +224,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   }, async (request) => {
     const after = Number(request.query.after ?? "0");
     const events = await options.repository.readEvents(identityFor(request), request.params.sessionId, after, 200);
-    return { events, nextEventSeq: events.at(-1)?.eventSeq ?? after, hasMore: events.length === 200 };
+    return eventPage(events, after);
   });
   app.get<{ Params: { runId: string } }>("/api/v1/cloud/runs/:runId", { schema: { params: runParams } }, async (request) => ({
     run: await options.repository.getRun(identityFor(request), request.params.runId),
@@ -205,16 +236,20 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     deadline.unref();
     const done = (async () => {
       try {
-        const stores = await options.repository.bindRun(identity, run.sessionId, run.id);
+        const bound = await options.repository.bindRun(identity, run.sessionId, run.id);
+        const stores: BoundRunStores = { ...bound, events: {
+          read: (sessionId, after) => bound.events.read(sessionId, after),
+          append: (pending) => measurements.measure(run.id, "event_persist", () => bound.events.append(pending)),
+        } };
         const bindings = new Map(profile.tools.map((binding) => [binding.definition.name, binding]));
         const tools = new ToolRegistry(profile.tools.map<ToolDefinition>((binding) => ({
           ...binding.definition,
-          execute: async (input, signal, context) => {
+          execute: (input, signal, context) => measurements.measure(run.id, "tool_inclusive", async () => {
             await ensureActive(identity, signal);
             const result = await abortable(() => binding.definition.execute(input, signal, context), signal);
             await ensureActive(identity, signal);
             return result;
-          },
+          }, (result) => result.ok),
         })), {
           authorize: async ({ tool, context, request }) => {
             const current = context.executionIdentity;
@@ -231,7 +266,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         await ensureActive(identity, controller.signal);
         const baseModel = await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
         const model: ModelClient = {
-          complete: async (request) => {
+          complete: (request) => measurements.measure(run.id, "model_inclusive", async () => {
             // Preserve the core's per-model deadline as well as the whole-run cancellation.
             const modelSignal = AbortSignal.any([request.signal, controller.signal]);
             try {
@@ -250,7 +285,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             } catch {
               throw Object.assign(new Error("模型或执行授权不可用，本轮未继续执行。"), { code: "MODEL_CLOUD_REQUEST_FAILED" });
             }
-          },
+          }),
         };
         const memory = options.repository.memory;
         // Keep the dependency guard even after memory.read is revoked: old influenced turns

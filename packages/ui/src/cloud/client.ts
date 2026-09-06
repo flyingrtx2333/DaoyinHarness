@@ -139,7 +139,7 @@ export class WorkbenchClient {
   public async events(sessionId: string, after: number, signal?: AbortSignal): Promise<AgentEvent[]> {
     const events: AgentEvent[] = [];
     let cursor = after;
-    for (let page = 0; page < 100; page++) {
+    for (let page = 0; page < 256; page++) {
       const result = await this.#request<{ events: AgentEvent[]; hasMore: boolean; nextEventSeq: number }>(
         `/sessions/${encodeURIComponent(sessionId)}/events?after=${String(cursor)}`, undefined, signal);
       for (const event of result.events) if (event.eventSeq > cursor) { events.push(event); cursor = event.eventSeq; }

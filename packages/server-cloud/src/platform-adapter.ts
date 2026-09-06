@@ -1,5 +1,5 @@
 import { assertExecutionIdentity, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
-import type { ModelReply } from "@daoyin/harness-agent-core";
+import { wireMessages, type ModelReply } from "@daoyin/harness-agent-core";
 import { createCloudServer, type CloudServerOptions } from "./app.js";
 import { createCompanyPublicProfile, isCompanyPublicIdentity, COMPANY_KNOWLEDGE_TOOL, parseCompanyKnowledgeQuery } from "./company-profile.js";
 import { CloudError } from "./repository.js";
@@ -41,10 +41,10 @@ function reply(value: unknown, appPolicy?: CallPolicy): ModelReply {
   return { kind: "tool_calls", content: output.content, calls };
 }
 
-type BridgePath = "introspect" | "authorize" | "model" | "search" | "profile" | "call" | "authorize-tool";
+type BridgePath = "introspect" | "authorize" | "model" | "search" | "profile" | "call" | "authorize-tool" | "health";
 
 /** No credentials are attached to identities, run records, tool results or errors. */
-export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<CloudServerOptions, "authenticate" | "isAuthorizationActive" | "resolveProfile" | "createModel"> {
+export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<CloudServerOptions, "authenticate" | "isAuthorizationActive" | "resolveProfile" | "createModel" | "checkPlatform"> {
   const base = new URL(options.platformUrl);
   if (base.username || base.password || base.search || base.hash || base.pathname !== "/" ||
       (base.protocol !== "https:" && !(base.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(base.hostname))) ||
@@ -110,6 +110,12 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
     });
   }
   return {
+    checkPlatform: async (signal) => {
+      for (const privateApp of options.appServiceToken ? [false, true] : [false]) {
+        const value = await post("health", {}, signal, privateApp);
+        if (!record(value) || value.schemaVersion !== 1 || value.status !== "ok") throw new Error("Platform bridge is not ready.");
+      }
+    },
     authenticate: async (bearer, signal) => {
       const privateApp = bearer.startsWith("saishi_agent_");
       if (privateApp && !/^saishi_agent_[A-Za-z0-9_-]{64}$/u.test(bearer)) return null;
@@ -141,7 +147,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
         step += 1;
         const value = await post("model", {
           authorizationId: identity.authorizationId, runId: run.id, operationId: `model_${String(step)}`,
-          input: { schemaVersion: 1, messages: request.messages,
+          input: { schemaVersion: 1, messages: wireMessages(request),
             tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
             systemPrompt: request.systemPrompt },
         }, request.signal, privateApp, request.onTextDelta);
@@ -152,8 +158,9 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   };
 }
 
-export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick<CloudServerOptions, "repository" | "maxConcurrentRuns" | "runTimeoutMs">): ReturnType<typeof createCloudServer> {
+export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick<CloudServerOptions, "repository" | "maxConcurrentRuns" | "runTimeoutMs" | "buildInfo">): ReturnType<typeof createCloudServer> {
   return createCloudServer({ ...createPlatformAdapters(options), repository: options.repository,
+    ...(options.buildInfo === undefined ? {} : { buildInfo: options.buildInfo }),
     ...(options.maxConcurrentRuns === undefined ? {} : { maxConcurrentRuns: options.maxConcurrentRuns }),
     ...(options.runTimeoutMs === undefined ? {} : { runTimeoutMs: options.runTimeoutMs }),
   });

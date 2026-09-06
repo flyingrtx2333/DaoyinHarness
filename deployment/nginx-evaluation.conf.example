@@ -1,0 +1,19 @@
+# Optional fixed HTTPS service ingress when the platform runs in Docker and the
+# evaluator binds host loopback. Merge into the existing HTTPS server, do not deploy blindly.
+# HARNESS_EVALUATION_SERVICE_URL may point to this exact prefix on the trusted host.
+location ^~ /api/internal/harness-evaluation-runner/ {
+    proxy_pass http://127.0.0.1:4711/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Connection "";
+    proxy_read_timeout 20s;
+    proxy_send_timeout 20s;
+    proxy_buffering off;
+    proxy_cache off;
+    client_max_body_size 512k;
+    # Keep Origin: the evaluator rejects browser-originated direct requests.
+    # The service also requires its dedicated header plus an active real admin session.
+    # Never put service/model credentials in this file or log their headers.
+}
+# Browser /api/harness-evaluation/* stays on the existing main-backend proxy.
+# Do not proxy it directly to :4711: it must retain Cookie, CSRF and DB role validation.

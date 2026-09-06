@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { assertHistoryAdmission, readCompleteHistory } from "./history-policy.js";
 import { SqliteMemoryRepository } from "./memory-repository.js";
 import { assertExecutionIdentity, executionScopeKey, type AppendCompactionInput, type ExecutionIdentity, type ExecutionScope } from "@daoyin/harness-contracts";
 import type { AgentEvent, AgentEventType, PendingAgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
@@ -92,6 +93,14 @@ export class SqliteCloudRepository implements CloudRepository {
 
   /** Does not release a lease: explicit graceful shutdown and a crashed connection differ. */
   public close(): void { this.#db.close(); }
+
+  public checkReadiness(): void {
+    if (this.#leaseOwner === null) throw new Error("Runtime lease not acquired.");
+    this.assertExecutionOwner();
+    this.#db.prepare("SELECT session_id,event_seq,turn_id,event_id,body FROM cloud_events WHERE 0").all();
+    this.#db.prepare("SELECT id,status,last_event_seq,cancel_requested FROM cloud_runs WHERE 0").all();
+    if (Number(this.#db.prepare("PRAGMA query_only").get()?.query_only) !== 0) throw new Error("Database is read-only.");
+  }
 
   /** First adoption requires the legacy process to be stopped. Never shares one DB across workers. */
   public acquireRuntimeLease(options: { durationMs?: number; recoverInterrupted?: boolean } = {}): { recoveredRuns: number } {
@@ -192,8 +201,9 @@ export class SqliteCloudRepository implements CloudRepository {
       }
       const active = this.#db.prepare("SELECT id FROM cloud_runs WHERE session_id=? AND status='running'").get(sessionId);
       if (active !== undefined) throw new CloudError(409, "SESSION_BUSY", "当前会话已有任务，请等待完成或取消。");
-      const count = this.#db.prepare("SELECT COUNT(*) AS n FROM cloud_events WHERE session_id=?").get(sessionId);
-      if (Number(count?.n) >= 1_000) throw new CloudError(409, "SESSION_HISTORY_LIMIT", "本会话达到试运行记录上限，请新建会话。");
+      const usage = this.#db.prepare(`SELECT COUNT(*) AS events, COALESCE(SUM(length(CAST(body AS BLOB))),0) AS bytes,
+        (SELECT COUNT(*) FROM cloud_runs WHERE session_id=?) AS runs FROM cloud_events WHERE session_id=?`).get(sessionId, sessionId);
+      assertHistoryAdmission({ events: Number(usage?.events), bytes: Number(usage?.bytes), runs: Number(usage?.runs) });
       const runId = id("run");
       this.#db.prepare(`INSERT INTO cloud_runs
         (id,scope_key,session_id,request_id,input_hash,user_message,status,authorization_id,billing_account_id,created_at)
@@ -254,7 +264,7 @@ export class SqliteCloudRepository implements CloudRepository {
           checkSession(requested);
           if (!Number.isSafeInteger(after) || after < 0) throw new CloudError(400, "EVENT_CURSOR_INVALID", "事件游标无效。");
           // Sessions are bounded at admission; never silently cut a tool/result pair for model history.
-          return this.#readEvents(sessionId, after);
+          return readCompleteHistory(sessionId, after, async (cursor, limit) => this.#readEvents(sessionId, cursor, limit));
         },
       },
       compactions: {

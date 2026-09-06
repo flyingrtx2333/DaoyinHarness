@@ -17,6 +17,7 @@ export function withCommittedSessionEvents(base: CloudRepository): CloudReposito
   };
   return {
     ...(base.memory === undefined ? {} : { memory: base.memory }),
+    ...(base.checkReadiness === undefined ? {} : { checkReadiness: () => base.checkReadiness!() }),
     assertExecutionOwner: () => base.assertExecutionOwner?.(),
     // The WS route checks getSession before subscription; keys also include scope.
     subscribeSession(scope, sessionId, listener) {

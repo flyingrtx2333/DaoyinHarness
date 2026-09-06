@@ -19,7 +19,7 @@ const aliases = {
   "@daoyin/harness-tools/registry": "packages/tools/src/registry.ts",
 };
 await build({
-  entryPoints: { main: "packages/server-cloud/src/main.ts", "postgres-migrate": "packages/server-cloud/src/postgres-migrate.ts", "sqlite-to-postgres": "packages/server-cloud/src/sqlite-to-postgres.ts" }, bundle: true, platform: "node",
+  entryPoints: { main: "packages/server-cloud/src/main.ts", "postgres-migrate": "packages/server-cloud/src/postgres-migrate.ts", "sqlite-to-postgres": "packages/server-cloud/src/sqlite-to-postgres.ts", evaluation: "packages/server-cloud/src/evaluation/main.ts" }, bundle: true, platform: "node",
   format: "esm", target: "node22", outdir: output, outExtension: { ".js": ".mjs" },
   plugins: [{ name: "committed-source", setup(builder) {
     builder.onResolve({ filter: /.*/ }, (args) => {
@@ -65,7 +65,7 @@ for (const name of Object.keys(manifest.dependencies)) include(name);
 await writeFile(`${output}/package.json`, JSON.stringify(manifest, null, 2));
 await writeFile(`${output}/package-lock.json`, JSON.stringify({ name: manifest.name, lockfileVersion: 3, requires: true, packages }, null, 2));
 const files = {};
-for (const name of ["main.mjs", "postgres-migrate.mjs", "sqlite-to-postgres.mjs", "package.json", "package-lock.json"]) {
+for (const name of ["main.mjs", "postgres-migrate.mjs", "sqlite-to-postgres.mjs", "evaluation.mjs", "package.json", "package-lock.json"]) {
   files[name] = createHash("sha256").update(await readFile(`${output}/${name}`)).digest("hex");
 }
 await writeFile(`${output}/release.json`, JSON.stringify({ revision, node: "22.23.2", entry: "main.mjs", files, builtAt: new Date().toISOString() }, null, 2));

@@ -1,4 +1,4 @@
-import type { ModelClient, ModelReply, ModelRequest, ModelToolCall } from "@daoyin/harness-agent-core";
+import { wireMessages, type ModelClient, type ModelReply, type ModelRequest, type ModelToolCall } from "@daoyin/harness-agent-core";
 
 const MAX_RESPONSE_BYTES = 2_000_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -206,7 +206,7 @@ function requestBody(request: ModelRequest, model: string | undefined): Record<s
   return {
     schemaVersion: 1,
     ...(model === undefined ? {} : { model }),
-    messages: request.messages,
+    messages: wireMessages(request),
     tools: request.tools.map((tool) => ({
       name: tool.name,
       description: tool.description,

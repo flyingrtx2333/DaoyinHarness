@@ -1,0 +1,34 @@
+# Install only after source tests, build and role/network acceptance.
+# Provision daoyin-eval separately; do not reuse the production Agent environment.
+[Unit]
+Description=Daoyin isolated Harness evaluation service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=daoyin-eval
+Group=daoyin-eval
+WorkingDirectory=/opt/daoyin-harness-evaluation/current
+EnvironmentFile=/etc/daoyin-harness-evaluation/environment
+ExecStart=/usr/bin/node /opt/daoyin-harness-evaluation/current/evaluation.mjs
+UMask=0077
+StateDirectory=daoyin-harness-evaluation
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/daoyin-harness-evaluation
+InaccessiblePaths=-/var/lib/daoyin-harness -/etc/daoyin-harness
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=768M
+TasksMax=64
+TimeoutStopSec=150
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

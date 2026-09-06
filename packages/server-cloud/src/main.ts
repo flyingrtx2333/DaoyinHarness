@@ -1,5 +1,6 @@
 import { createPlatformCloudServer } from "./platform-adapter.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
+import { loadRuntimeBuild } from "./runtime-health.js";
 
 const databaseUrl = process.env.DAOYIN_CLOUD_POSTGRES_URL ?? "";
 const port = Number(process.env.DAOYIN_CLOUD_PORT ?? "4700");
@@ -42,6 +43,7 @@ function shutdown(failed = false): void {
 try {
   // Validate platform config before acquiring ownership or touching prior task states.
   app = createPlatformCloudServer({ repository,
+    buildInfo: await loadRuntimeBuild(new URL("./release.json", import.meta.url)),
     platformUrl: process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "",
     serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
     ...(appServiceToken ? { appServiceToken } : {}),

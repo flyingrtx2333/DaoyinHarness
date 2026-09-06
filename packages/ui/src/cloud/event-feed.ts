@@ -42,7 +42,7 @@ export function watchCloudSession(client: FeedClient, sessionId: string, options
     options.onUpdate([...runs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)), [...events.values()]);
   }
   function addEvents(values: unknown): void {
-    if (!Array.isArray(values) || values.length > 20_000) throw new Error("Invalid event page");
+    if (!Array.isArray(values) || values.length > 24_000) throw new Error("Invalid event page");
     let next = cursor;
     const pending: AgentEvent[] = [];
     for (const value of values) {
@@ -54,7 +54,7 @@ export function watchCloudSession(client: FeedClient, sessionId: string, options
       if (value.eventSeq !== next + 1) throw new Error("Event gap");
       pending.push(value); next = value.eventSeq;
     }
-    if (events.size + pending.length > 20_000) throw new Error("Event history limit");
+    if (events.size + pending.length > 24_000) throw new Error("Event history limit");
     for (const event of pending) events.set(event.eventSeq, event);
     cursor = next;
   }

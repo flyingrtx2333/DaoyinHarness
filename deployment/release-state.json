@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06",
+  "evidenceKind": "repository-deployment-record",
+  "evidencePath": "deployment/RELEASE-20260906-WS-POSTGRES.md",
+  "independentlyProbedInThisChange": false,
+  "lastReportedProduction": {
+    "harnessRuntime": "efe56eb9926d200fa952145b483b61e629c51b25",
+    "harnessWorkbench": "efe56eb9926d200fa952145b483b61e629c51b25",
+    "platformBackend": "11f750738b5415b8d0f10c2307b337fe65e09fd1",
+    "websiteFrontend": "11f750738b5415b8d0f10c2307b337fe65e09fd1",
+    "database": "postgresql",
+    "schemaContract": "cloud-v1",
+    "migrationVersionVerifiedSeparately": false,
+    "httpProtocolVersion": 1,
+    "eventStreamVersion": 1,
+    "publicQuestionAnswering": "reported-verified",
+    "privateSaishiLogin": "not-verified",
+    "backupCreated": "reported-verified",
+    "restoreDrill": "not-verified",
+    "executorMode": "single-instance"
+  },
+  "currentP0Change": {
+    "state": "source-and-regression-cases",
+    "windowsValidation": "pending",
+    "postgresValidation": "pending",
+    "productionDeployment": "not-performed",
+    "dataMigration": "not-performed"
+  },
+  "rolloutRules": [
+    "Read the deployed runtime build API rather than treating a local Git commit as production.",
+    "Refresh all four artifact revisions and evidence only after actual verification.",
+    "Keep PostgreSQL authoritative after new writes; do not roll back to a stale SQLite copy.",
+    "A backup record is not a successful restore drill."
+  ]
+}

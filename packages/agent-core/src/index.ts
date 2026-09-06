@@ -5,6 +5,7 @@ export {
   type AgentTurnInput,
 } from "./agent-engine.js";
 export type { AgentMemoryProvider, MemoryContextRequest, MemoryContextSnapshot } from "./memory-context.js";
+export { wireMessages } from "./model-wire.js";
 export {
   type ModelClient,
   type ModelConversationItem,

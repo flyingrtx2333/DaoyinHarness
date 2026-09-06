@@ -4,7 +4,8 @@ import { MarkdownMessage } from "../MarkdownMessage.js";
 import { WorkbenchClient, WorkbenchError, type AccountProfile, type CloudRun, type CloudSession } from "./client.js";
 import { projectTurns } from "./projection.js";
 import { watchCloudSession } from "./event-feed.js";
-import { PluginCatalog, PluginPicker } from "./PluginBrowser.js";
+import { PluginPicker } from "./PluginBrowser.js";
+import { PluginWorkspace } from "./PluginWorkspace.js";
 import { selectablePlugin, sessionPlugin } from "./plugins.js";
 import { HarnessLogo } from "./HarnessLogo.js";
 import { WorkbenchIcon } from "./WorkbenchIcon.js";
@@ -54,7 +55,7 @@ export function App(): React.JSX.Element {
   const [cancelling, setCancelling] = useState(false);
   const [revision, setRevision] = useState(0);
   const [sidebar, setSidebar] = useState(false);
-  const [view, setView] = useState<"chat" | "plugins">("chat");
+  const [view, setView] = useState<"chat" | "plugins">(() => window.location.hash.startsWith("#plugins") ? "plugins" : "chat");
   const [chosenPlugin, setChosenPlugin] = useState(APPLICATION === "saishi" ? "saishi" : "company-knowledge");
   const submission = useRef<Promise<CloudRun> | null>(null);
   const connecting = useRef(false);
@@ -276,7 +277,7 @@ export function App(): React.JSX.Element {
     </aside>
     <main id="conversation" className="main" tabIndex={-1}>
       <button className="mobile-menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
-      {view === "plugins" && <div className="transcript plugin-transcript"><PluginCatalog selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /></div>}
+      {view === "plugins" && <div className="transcript plugin-transcript"><PluginWorkspace key={`${APPLICATION}:${client.accountScope}`} selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /></div>}
       <div className="transcript" hidden={view !== "chat"} onScroll={(event) => { const element = event.currentTarget; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160; }}>
         <div className="conversation-content">
           {phase === "connecting" && <p className="connection-message" role="status"><span className="spinner" /> 正在连接工作台…</p>}

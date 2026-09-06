@@ -2,13 +2,17 @@
 
 > Current priority: a unified Agent platform with one shared engine and local/cloud adapters. A phase is complete only when its exit criteria have evidence. See [current implementation and verification](UNIFIED-AGENT.md).
 
+## Current P0 — runtime stability (2026-09-06)
+
+See [P0 implementation and remaining acceptance](P0-RUNTIME-STABILITY.md) and [reported release state](../deployment/release-state.json). The WebSocket/PostgreSQL baseline has a completed production release record. This new P0 candidate adds text-event coalescing, complete bounded history, prompt mirror removal, read-only readiness and scoped diagnostics; its fresh Windows/PG/browser validation and production release are pending. The later local P0 heading is a historical capability milestone, not this current work package.
+
 ## Unified platform delivery sequence
 
 | Stage | Current state | Exit criterion |
 | --- | --- | --- |
 | Shared kernel and execution identity | Implemented contracts, tool checks and cloud session/run storage | Windows checks and isolation/recovery tests pass |
 | Public website bridge | Implemented platform grants, MySQL operation ledger, model/search adapters and browser proxy APIs | Real public corpus/model and website UI complete one replayable, cancellable session; explicitly configured sponsor |
-| Personal/organization applications | Identity contracts only | Explicit memberships, installations, entitlements and resource checks; no first-tenant fallback |
+| Personal/organization applications | Saishi first-party account read adapter implemented; generic multi-application composition and private business acceptance remain | Explicit memberships, installations, entitlements and resource checks; no first-tenant fallback |
 | Story queries and paid jobs | Pending | One authorized job, durable job receipt, budget reservation and timeout reconciliation without repeated charges |
 | Youji and shared memory | Pending | Automatic inheritance of full existing account permissions across apps, scoped retrieval, provenance, revocation and forgetting; no per-plugin consent (ADR-0012) |
 | Builder products and channels | Pending | Separate build/runtime identities, immutable app versions, installations, deployments and client isolation |

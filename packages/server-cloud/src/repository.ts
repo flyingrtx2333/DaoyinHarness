@@ -44,6 +44,8 @@ export type MaybePromise<T> = T | Promise<T>;
 /** Every user-facing lookup is scoped. Implementations must atomically claim requests. */
 export interface CloudRepository {
   readonly memory?: CloudMemoryRepository;
+  /** Read-only database/schema/lease probe. Never claims a write transaction was tested. */
+  checkReadiness?(): MaybePromise<void>;
   /** Optional for isolated stores; production adapters fence stale executors before external work. */
   assertExecutionOwner?(): MaybePromise<void>;
   /** Invalidation only, emitted after commit. Optional stores retain HTTP replay. */

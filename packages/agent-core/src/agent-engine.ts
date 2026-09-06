@@ -2,6 +2,7 @@ import type { AgentEvent, AgentEventPayloads, AgentEventType, JsonValue, Session
 import type { ToolRegistry, ToolDescriptor, ToolExecution, ToolExecutionContext } from "@daoyin/harness-tools/registry";
 import { snapshotExecutionIdentity, type ExecutionIdentity, type SessionCompactionStore, type SessionEventStore } from "@daoyin/harness-contracts";
 import { ContextAssembler } from "./context-assembler.js";
+import { TextDeltaBuffer } from "./text-delta-buffer.js";
 import { ContextCompactor } from "./context-compactor.js";
 import { boundModelContext } from "./context-budget.js";
 import { AgentPolicyError, ToolProgressGuard, validateModelReply } from "./loop-policy.js";
@@ -259,34 +260,47 @@ export class AgentEngine {
           sections: [...context.prompt.sections.map((section) => ({ id: section.id, kind: section.kind })),
             ...(memoryText ? [{ id: "confirmed_memory", kind: "dynamic" as const }] : [])] };
         const messages = boundModelContext({ systemMessage: { role: "system", content: context.systemMessage.content + memoryText + closing },
-          history, current, overheadCharacters: JSON.stringify({ tools, systemPrompt }).length,
+          history, current, overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
           maxCharacters: this.#maxContextCharacters, maxMessages: this.#maxContextMessages });
         if (signal.aborted) return cancel();
         const timeout = AbortSignal.timeout(this.#modelTimeoutMs);
-        const modelSignal = AbortSignal.any([signal, timeout]);
-        let raw: ModelReply;
+        const streamFailure = new AbortController();
+        const modelSignal = AbortSignal.any([signal, timeout, streamFailure.signal]);
+        const snapshot = memorySnapshot;
+        const textBuffer = new TextDeltaBuffer({ signal: modelSignal,
+          onFailure: () => streamFailure.abort(new AgentPolicyError("AGENT_TEXT_STREAM_FAILED", "正文保存或上下文校验未完成，已停止继续执行。")),
+          emit: async (delta) => {
+            if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
+            modelSignal.throwIfAborted();
+            await append("assistant.delta", { contentBlockId, delta });
+          },
+        });
         try {
-          const snapshot = memorySnapshot;
           if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
-          raw = await modelResponse(() => this.#model.complete({ messages, tools, systemPrompt, signal: modelSignal,
+          const raw = await modelResponse(() => this.#model.complete({ messages, tools, systemPrompt, signal: modelSignal,
             onTextDelta: async (delta) => {
               modelSignal.throwIfAborted();
               if (typeof delta !== "string" || streamed.length + delta.length > 16_000) throw new Error("Invalid model stream.");
               if (!delta) return;
-              if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
-              await append("assistant.delta", { contentBlockId, delta });
               streamed += delta;
+              await textBuffer.push(delta);
             },
           }), modelSignal);
           if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
-        }
-        catch (error) {
+          modelSignal.throwIfAborted();
+          reply = validateModelReply(raw, seenIds);
+          if (streamed && streamed !== (reply.content ?? "")) throw new Error("Model stream did not match the final response.");
+          // Flush validated text before tools or success; do not flush unvalidated late content.
+          await textBuffer.finish();
+        } catch (error) {
           if (!signal.aborted && timeout.aborted) throw new AgentPolicyError("MODEL_TIMEOUT", "模型响应超时；请求结果不确定，未自动重试。");
+          if (streamFailure.signal.aborted) throw streamFailure.signal.reason;
           throw error;
+        } finally {
+          // Wait for in-flight persistence, even on cancel. No timer can write after terminal state.
+          await textBuffer.discard();
         }
         if (signal.aborted) return cancel();
-        reply = validateModelReply(raw, seenIds);
-        if (streamed && streamed !== (reply.content ?? "")) throw new Error("Model stream did not match the final response.");
       } catch (error) {
         if (signal.aborted) return cancel();
         const failure = modelFailure(error);
