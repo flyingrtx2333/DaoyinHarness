@@ -12,7 +12,7 @@ export interface WorkbenchPlugin {
 
 export const PLUGINS: readonly WorkbenchPlugin[] = [
   { id: "company-knowledge", name: "官网知识", mark: "知", status: "available", profileId: "company-public",
-    description: "查询道引科技的产品、方案与合作资料。",
+    description: "检索道引产品与方案的公开资料。",
     capabilities: ["公开资料检索", "产品问答", "来源引用"], note: "访客空间可用，仅查询公开资料。" },
   { id: "story", name: "短剧制作", mark: "剧", status: "pending",
     description: "从剧本、角色和分镜，推进到视频与成片。",

@@ -44,6 +44,7 @@ export function App(): React.JSX.Element {
   const session = sessions.find((item) => item.id === selected);
   const plugin = selected ? session && sessionPlugin(session.profileId) : selectablePlugin(chosenPlugin);
   const pluginBusy = submitting || loading || !!active || !!pending;
+  const visibleSessions = sessions.filter((item) => item.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
 
   function fail(cause: unknown): void {
     setError(cause instanceof WorkbenchError ? cause.message : "连接未完成，请重试。");
@@ -149,17 +150,21 @@ export function App(): React.JSX.Element {
     <a className="skip-link" href="#conversation">跳到对话</a>
     <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航">
       <a className="brand" href="/harness/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
+      <button className="new-session" disabled={phase !== "ready" || submitting} onClick={() => choose("")}><span aria-hidden="true">＋</span>新建会话</button>
       <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button></nav>
-      <button className="new-session" disabled={phase !== "ready" || submitting} onClick={() => choose("")}><span aria-hidden="true">＋</span> 新建会话</button>
-      <label className="search"><span>搜索会话</span><WorkbenchIcon name="search" /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索会话" /></label>
-      <div className="sidebar-label">最近会话 <span>{sessions.length}</span></div>
-      <nav aria-label="最近会话" className="session-list">
-        {sessions.filter((item) => item.title.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map((item) =>
-          <button key={item.id} aria-current={view === "chat" && selected === item.id ? "page" : undefined} disabled={submitting} onClick={() => choose(item.id)} title={item.title}>{item.title || "未命名会话"}</button>)}
-        {sessions.length === 0 && <p className="muted">暂无会话</p>}
-      </nav>
-      <div className="scope"><WorkbenchIcon name="user" /><div>访客空间 <span className="scope-dot" aria-hidden="true" /><small>{expiresAt && phase === "ready" ? `授权至 ${new Date(expiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "每次授权 30 分钟"}</small></div></div>
-      <a className="site-link" href="/" target="_blank" rel="noopener noreferrer"><WorkbenchIcon name="globe" />官网 <span aria-hidden="true">↗</span></a>
+      <section className="sidebar-history" aria-labelledby="history-heading">
+        <div className="sidebar-label"><h2 id="history-heading">最近会话</h2><span>{sessions.length}</span></div>
+        <label className="search"><span>搜索会话</span><WorkbenchIcon name="search" /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索会话" /></label>
+        <nav aria-label="最近会话" className="session-list">
+          {visibleSessions.map((item) =>
+            <button key={item.id} aria-current={view === "chat" && selected === item.id ? "page" : undefined} disabled={submitting} onClick={() => choose(item.id)} title={item.title}><WorkbenchIcon name="chat" /><span>{item.title || "未命名会话"}</span></button>)}
+          {visibleSessions.length === 0 && <p className="muted" role="status">{sessions.length === 0 ? "暂无会话" : "没有匹配的会话"}</p>}
+        </nav>
+      </section>
+      <footer className="sidebar-footer">
+        <div className="scope"><WorkbenchIcon name="user" /><div>访客空间 <span className="scope-dot" aria-hidden="true" /><small>{expiresAt && phase === "ready" ? `授权至 ${new Date(expiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "每次授权 30 分钟"}</small></div></div>
+        <a className="site-link" href="/" target="_blank" rel="noopener noreferrer">官网 <span aria-hidden="true">↗</span></a>
+      </footer>
     </aside>
     <main id="conversation" className="main" tabIndex={-1}>
       <header className="topbar">

@@ -1,0 +1,41 @@
+/* Shared by local and cloud UI. See docs/UI-STYLE-RULES.md before changing. */
+:root {
+  --ui-font-family: "Inter", "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --ui-font-caption: 12px;
+  --ui-font-control: 13px;
+  --ui-font-body: 14px;
+  --ui-font-section: 16px;
+  --ui-font-title: 20px;
+  --ui-font-hero: 28px;
+  --ui-line-height: 1.6;
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-page-padding: var(--ui-space-5);
+  --ui-card-padding: var(--ui-space-4);
+  --ui-grid-gap: var(--ui-space-4);
+  --ui-radius-control: 8px;
+  --ui-radius-card: 12px;
+  --ui-radius-panel: 16px;
+  --ui-control-height: 36px;
+  --ui-touch-target: 44px;
+  --ui-header-height: 52px;
+  --ui-sidebar-width: 240px;
+  --ui-reading-width: 820px;
+  --ui-catalog-width: 1120px;
+  --ui-ink: #202735;
+  --ui-muted: #667183;
+  --ui-line: #e8ebf0;
+  --ui-accent: #3864e8;
+  --ui-accent-soft: #edf2ff;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --ui-page-padding: var(--ui-space-3);
+    --ui-control-height: var(--ui-touch-target);
+  }
+}

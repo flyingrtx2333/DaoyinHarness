@@ -25,6 +25,15 @@ The sibling directory `claude-code-main/` is local, read-only research material.
 
 The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harness`.
 
+### Site-wide UI consistency (mandatory)
+
+- Read and follow [docs/UI-STYLE-RULES.md](docs/UI-STYLE-RULES.md) before any UI change, including `concept-to-ui` concept generation and implementation.
+- Reuse `packages/ui/src/design-tokens.css` and existing shared components/layouts for typography, padding, gaps, control sizes, radii and colors. A single-page redesign must remain visually consistent with the rest of the site.
+- Keep the workbench compact: 14px body text, 13px controls, 16px section headings, 16px card padding and 20px desktop page padding. Use the documented shared scale; do not enlarge fonts or whitespace with viewport width.
+- Concept prompts must include the existing design-system constraints. Changing the site-wide visual language requires an explicit user request and coordinated updates to affected pages and documentation.
+- Change canonical style definitions instead of piling on overrides or creating page-private copies of shared rules. Preserve readable text, keyboard focus and mobile touch targets.
+- Validate neighboring pages and shared overlays at desktop and narrow viewports, not only the modified page. Report local-browser, mocked-API and production evidence separately.
+
 ## Repository and Git discipline
 
 - Use the root checkout on `main`; do not create worktrees or long-lived branches unless explicitly requested.

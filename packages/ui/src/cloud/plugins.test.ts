@@ -18,9 +18,12 @@ describe("workbench plugin inventory and session binding", () => {
     expect(filterPlugins("不存在的插件")).toEqual([]);
     expect(new Set(PLUGINS.map((plugin) => plugin.id)).size).toBe(PLUGINS.length);
     const html = renderToStaticMarkup(createElement(PluginCatalog, { selectedId: "company-knowledge", onSelect: () => undefined, busy: false }));
-    expect(html).toContain("已有短剧业务能力，尚未接入此工作台");
-    expect(html.match(/暂不可选/gu)).toHaveLength(3);
-    expect(html.match(/返回会话使用/gu)).toHaveLength(1);
+    expect(html).toContain("检索道引产品与方案的公开资料");
+    expect(html.match(/待接入/gu)).toHaveLength(3);
+    expect(html.match(/aria-label="使用/gu)).toHaveLength(1);
+    expect(html).not.toContain("尚未接入此工作台");
+    expect(html).not.toContain("plugin-capabilities");
+    expect(html).not.toContain("plugin-card-bottom");
     expect(html).not.toContain("安装插件");
   });
 });

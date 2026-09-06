@@ -1,3 +1,4 @@
+@import "./design-tokens.css";
 :root {
   font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #20242d;

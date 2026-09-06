@@ -26,7 +26,7 @@ const result = await build({
     }));
     builder.onLoad({ filter: /packages[\\/]ui[\\/]src[\\/]/ }, async (args) => {
       const path = relative(root, args.path).replaceAll("\\", "/");
-      if (!path.startsWith("packages/ui/src/cloud/") && path !== "packages/ui/src/MarkdownMessage.tsx") throw new Error(`Unexpected UI source: ${path}`);
+      if (!path.startsWith("packages/ui/src/cloud/") && path !== "packages/ui/src/MarkdownMessage.tsx" && path !== "packages/ui/src/design-tokens.css") throw new Error(`Unexpected UI source: ${path}`);
       return { contents: await read(path), loader: extname(path).slice(1), resolveDir: resolve(args.path, "..") };
     });
   } }],
