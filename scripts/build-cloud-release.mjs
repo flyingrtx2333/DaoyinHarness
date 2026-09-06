@@ -34,5 +34,6 @@ await build({
 const lock = JSON.parse(read("package-lock.json"));
 await writeFile(`${output}/package.json`, JSON.stringify({ name: "daoyin-cloud-runtime", private: true,
   type: "module", engines: { node: "22.x" }, dependencies: { fastify: lock.packages["node_modules/fastify"].version } }, null, 2));
+await writeFile(`${output}/package-lock.json`, read("package-lock.json"));
 await writeFile(`${output}/release.json`, JSON.stringify({ revision, node: "22.23.2", entry: "main.mjs", builtAt: new Date().toISOString() }, null, 2));
 console.log(output);
