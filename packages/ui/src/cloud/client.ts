@@ -102,14 +102,14 @@ export class WorkbenchClient {
     this.#accountScope = "";
     this.#account = undefined;
     this.#receipts.clear();
-    this.storage.removeItem(this.#receiptKey);
+    try { this.storage.removeItem(this.#receiptKey); } catch { /* Account is already revoked; stale receipts cannot cross accounts. */ }
   }
-  public async bootstrap(): Promise<number> {
-    this.#account = undefined;
+  public async bootstrap(preserveAccount = false): Promise<number> {
+    if (!preserveAccount) this.#account = undefined;
     const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string; account?: unknown }>("/bootstrap", {});
     if (!result.csrfToken || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() ||
         (this.application === "saishi" && (result.profileId !== "saishi-readonly" || result.authentication !== "account" || !identifier(result.accountScope)))) {
-      this.#csrf = ""; this.#accountScope = ""; this.#receipts.clear();
+      this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#receipts.clear();
       throw new WorkbenchError("账号工作台尚未接通，请稍后重新连接。");
     }
     if (this.application === "saishi") {

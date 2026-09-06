@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import { MarkdownMessage } from "../MarkdownMessage.js";
-import { WorkbenchClient, WorkbenchError, type CloudRun, type CloudSession } from "./client.js";
+import { WorkbenchClient, WorkbenchError, type AccountProfile, type CloudRun, type CloudSession } from "./client.js";
 import { projectTurns } from "./projection.js";
 import { PluginCatalog, PluginPicker } from "./PluginBrowser.js";
 import { selectablePlugin, sessionPlugin } from "./plugins.js";
@@ -9,6 +9,8 @@ import { HarnessLogo } from "./HarnessLogo.js";
 import { WorkbenchIcon } from "./WorkbenchIcon.js";
 import { AccountIdentity } from "./AccountIdentity.js";
 import { scheduleExpiry } from "./expiry.js";
+import { SettingsDialog } from "./SettingsDialog.js";
+import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
 
 const APPLICATION = new URLSearchParams(window.location.search).get("app") === "saishi" ? "saishi" : "company";
 const SELECTED = "daoyin-harness-cloud-selected-v1" + (APPLICATION === "saishi" ? ":saishi" : "");
@@ -25,6 +27,10 @@ export function App(): React.JSX.Element {
   const [client] = useState(() => new WorkbenchClient(storage, undefined, APPLICATION));
   const [phase, setPhase] = useState<"connecting" | "ready" | "error" | "expired">("connecting");
   const [expiresAt, setExpiresAt] = useState(0);
+  const [account, setAccount] = useState<AccountProfile>();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [preferences, setPreferences] = useState(() => { try { return readPreferences(window.localStorage); } catch { return DEFAULT_PREFERENCES; } });
+  const [preferenceError, setPreferenceError] = useState("");
   const [sessions, setSessions] = useState<CloudSession[]>([]);
   const [selected, setSelected] = useState("");
   const [runs, setRuns] = useState<CloudRun[]>([]);
@@ -42,6 +48,9 @@ export function App(): React.JSX.Element {
   const [chosenPlugin, setChosenPlugin] = useState(APPLICATION === "saishi" ? "saishi" : "company-knowledge");
   const submission = useRef<Promise<CloudRun> | null>(null);
   const connecting = useRef(false);
+  const loggingOut = useRef(false);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
   const accountEpoch = useRef(0);
   const currentDraft = useRef(draft);
   currentDraft.current = draft;
@@ -60,34 +69,54 @@ export function App(): React.JSX.Element {
     setLoginUrl(cause instanceof WorkbenchError ? cause.loginUrl : undefined);
     if (cause instanceof WorkbenchError && (cause.status === 401 || (APPLICATION === "saishi" && cause.status === 403))) {
       accountEpoch.current++;
+      setAccount(undefined); setSettingsOpen(false);
       setPhase("expired"); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft("");
     }
   }
-  async function connect(): Promise<void> {
-    if (connecting.current) return;
+  async function connect(background = false): Promise<void> {
+    if (connecting.current || loggingOut.current) return;
+    const quiet = background && phaseRef.current === "ready";
     const previousScope = client.accountScope;
     const savedDraft = currentDraft.current;
-    connecting.current = true; setPhase("connecting"); setError(""); setLoginUrl(undefined);
-    if (APPLICATION === "saishi") { accountEpoch.current++; setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft(""); }
+    connecting.current = true;
+    if (!quiet) { setPhase("connecting"); setError(""); setLoginUrl(undefined); }
+    function resetAccount(): void { accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft(""); }
+    if (APPLICATION === "saishi" && !quiet) resetAccount();
     try {
-      const expiry = await client.bootstrap();
+      const expiry = await client.bootstrap(quiet);
+      if (loggingOut.current) return;
+      if (quiet && previousScope && previousScope === client.accountScope) {
+        setExpiresAt(expiry); setAccount(client.account);
+        return; // A routine identity check must not reset history, draft, focus or a running turn.
+      }
+      if (quiet) { resetAccount(); setPhase("connecting"); setError(""); setLoginUrl(undefined); }
       const list = await client.sessions();
+      if (loggingOut.current) return;
       let saved = "";
       try { saved = storage.getItem(SELECTED) ?? ""; } catch { /* Submission provides a storage error if necessary. */ }
-      setExpiresAt(expiry); setSessions(list);
+      setExpiresAt(expiry); setAccount(client.account); setSessions(list);
       if (APPLICATION === "saishi" && previousScope && previousScope === client.accountScope) setDraft(savedDraft);
       setSelected(list.some((item) => item.id === saved) ? saved : list[0]?.id ?? "");
       setPhase("ready"); setRevision((value) => value + 1);
-    } catch (cause) { setPhase("error"); fail(cause); }
+    } catch (cause) {
+      if (!loggingOut.current) {
+        if (!quiet || previousScope !== client.accountScope) { if (quiet) resetAccount(); setPhase("error"); }
+        fail(cause);
+      }
+    }
     finally { connecting.current = false; }
   }
   useEffect(() => { void connect(); }, []); // One bootstrap; the entry intentionally does not double-mount effects.
   useEffect(() => {
     if (APPLICATION !== "saishi") return;
-    const checkAccount = (): void => { if (document.visibilityState === "visible") void connect(); };
+    let timer: number | undefined;
+    const checkAccount = (): void => {
+      window.clearTimeout(timer);
+      if (document.visibilityState === "visible") timer = window.setTimeout(() => { void connect(true); }, 100);
+    };
     window.addEventListener("focus", checkAccount);
     document.addEventListener("visibilitychange", checkAccount);
-    return () => { window.removeEventListener("focus", checkAccount); document.removeEventListener("visibilitychange", checkAccount); };
+    return () => { window.clearTimeout(timer); window.removeEventListener("focus", checkAccount); document.removeEventListener("visibilitychange", checkAccount); };
   }, []);
   useEffect(() => {
     if (phase !== "ready") return;
@@ -122,8 +151,33 @@ export function App(): React.JSX.Element {
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [selected, phase, revision, client]);
   useEffect(() => {
-    if (nearBottom.current) bottom.current?.scrollIntoView({ block: "end" });
-  }, [events.length, runs.length]);
+    if (preferences.autoScroll && nearBottom.current) bottom.current?.scrollIntoView({ block: "end" });
+  }, [events.length, runs.length, preferences.autoScroll]);
+
+  function savePreferences(value: WorkbenchPreferences): void {
+    setPreferences(value);
+    try { window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(value)); setPreferenceError(""); }
+    catch { setPreferenceError("设置已在当前页面生效，浏览器未能保存。"); }
+  }
+  function closeSettings(): void {
+    setSettingsOpen(false);
+    window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".account-identity")?.focus());
+  }
+  function closeSidebar(): void {
+    setSidebar(false);
+    window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".mobile-menu-button")?.focus());
+  }
+  async function logout(): Promise<void> {
+    if (loggingOut.current) return;
+    loggingOut.current = true;
+    try {
+      try { await client.disconnectApplication(); } catch (cause) { if (!(cause instanceof WorkbenchError && cause.status === 401)) throw cause; }
+      // Match the platform's legacy user-store sign-out contract; never read the token.
+      window.localStorage.removeItem("athletereel_token");
+      accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSessions([]); setRuns([]); setEvents([]); setSelected(""); setDraft(""); setPhase("expired");
+      window.location.replace("/harness/");
+    } catch (cause) { loggingOut.current = false; throw cause; }
+  }
 
   function choose(id: string): void {
     setSelected(id); setDraft(""); setError(""); setSidebar(false); setView("chat");
@@ -188,7 +242,8 @@ export function App(): React.JSX.Element {
 
   return <div className="workbench">
     <a className="skip-link" href="#conversation">跳到对话</a>
-    <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航">
+    <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航" onKeyDown={(event) => { if (event.key === "Escape" && sidebar) { event.preventDefault(); closeSidebar(); } }}>
+      <button type="button" className="sidebar-close" aria-label="关闭会话导航" onClick={closeSidebar}>×</button>
       <a className="brand" href="/harness/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
       <button className="new-session" disabled={phase !== "ready" || submitting} onClick={() => choose("")}><span aria-hidden="true">＋</span>新建会话</button>
       <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button></nav>
@@ -202,7 +257,7 @@ export function App(): React.JSX.Element {
         </nav>
       </section>
       {APPLICATION === "company" && <footer className="sidebar-footer"><div className="account-actions" aria-label="道引账号入口"><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div></footer>}
-      {APPLICATION === "saishi" && phase === "ready" && client.account && <footer className="sidebar-footer"><AccountIdentity key={client.accountScope} account={client.account} /></footer>}
+      {APPLICATION === "saishi" && phase === "ready" && account && <footer className="sidebar-footer"><AccountIdentity key={client.accountScope} account={account} onSettings={() => setSettingsOpen(true)} onLogout={logout} /></footer>}
     </aside>
     <main id="conversation" className="main" tabIndex={-1}>
       <button className="mobile-menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
@@ -228,16 +283,17 @@ export function App(): React.JSX.Element {
         {error && <div className="error-message" role="alert">{error}</div>}
         {APPLICATION === "saishi" && loginUrl && phase !== "ready" && phase !== "connecting" && <button type="button" className="primary reconnect" onClick={() => window.location.assign(loginUrl)}>登录道引账号</button>}
         {APPLICATION === "company" && phase !== "ready" && phase !== "connecting" && <button className="primary reconnect" onClick={() => { void connect(); }}>重新进入工作台</button>}
-        {APPLICATION === "saishi" && !loginUrl && phase !== "ready" && phase !== "connecting" && <button className="primary reconnect" onClick={() => { void connect(); }}>重新连接工作台</button>}
+        {APPLICATION === "saishi" && !loginUrl && phase !== "connecting" && (phase !== "ready" || error) && <button className="primary reconnect" onClick={() => { void connect(); }}>重新连接工作台</button>}
         {pending && phase === "ready" && !submitting && <div className="recovery"><span>上次提交结果尚未确认。</span><button disabled={loading || !!active} onClick={() => { void send(pending.message); }}>恢复原提交</button></div>}
         <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
           <label htmlFor="message" className="sr-only">发送给 Harness 的问题</label>
-          <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={2} disabled={phase !== "ready" || submitting || !!pending} placeholder="描述你的问题…" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
+          <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={2} disabled={phase !== "ready" || submitting || !!pending} placeholder="描述你的问题…" onKeyDown={(event) => { if (isSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing }, preferences)) { event.preventDefault(); void send(); } }} />
           <div className="composer-controls"><div className="composer-plugins"><PluginPicker selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id, false)} onBrowse={browsePlugins} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /><button type="button" className="selected-plugin" onClick={browsePlugins} aria-label={`查看${plugin?.name ?? "会话插件"}详情`}>{plugin?.name ?? "选择插件"}{plugin && <span className="plugin-check" aria-hidden="true">✓</span>}</button>{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}>{cancelling || active?.cancelRequested ? "正在停止…" : "停止生成"}</button> : <button type="submit" className="primary send-button" aria-label="发送" disabled={!draft.trim() || phase !== "ready" || loading || !!pending || !plugin}><WorkbenchIcon name="arrow" /></button>}</div>
         </form>
         <p className="composer-note">{APPLICATION === "saishi" ? "使用当前账号的赛事数据；摄像机观察不等于正式打卡成绩" : "依据公开资料回答，请核对引用"}</p>
         <div className="sr-only" role="status">{submitting ? "正在提交问题" : active ? "任务进行中" : turns.length ? "回答已更新" : ""}</div>
       </div>
     </main>
+    {settingsOpen && <SettingsDialog preferences={preferences} onChange={savePreferences} onClose={closeSettings} saveError={preferenceError} />}
   </div>;
 }

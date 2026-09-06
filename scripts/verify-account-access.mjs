@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 
 if (process.platform !== "win32") throw new Error("Windows acceptance required.");
 const release = JSON.parse(execFileSync(process.execPath, ["scripts/build-workbench-release.mjs", ...(process.argv.includes("--committed") ? [] : ["--preview"])], { encoding: "utf8", windowsHide: true }));
-const output = resolve("output/playwright/account-access");
+const output = resolve(process.argv.find(argument => argument.startsWith("--output="))?.slice(9) ?? "output/playwright/account-access");
 const platformOutput = resolve("../DaoyinTechnology/frontend/dist");
 const csp = (await readFile("deployment/harness-workbench.conf", "utf8")).match(/Content-Security-Policy "([^"]+)"/u)[1];
 await mkdir(output, { recursive: true });
@@ -38,6 +38,9 @@ try {
   let account = "a";
   let brokenAvatar = false;
   let unavailable = false;
+  let bootstrapDelay = 0;
+  let logoutFails = false;
+  let sessionsUnavailable = false;
   await page.route("https://images.example/avatar.png", route => route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=", "base64") }));
   await page.route("https://images.example/missing.png", route => route.fulfill({ status: 404, body: "" }));
   const requests = [];
@@ -51,6 +54,7 @@ try {
     }
     const company = path.includes("company-assistant");
     if (path.endsWith("/bootstrap")) {
+      if (bootstrapDelay) await new Promise(resolve => setTimeout(resolve, bootstrapDelay));
       if (unavailable) return route.fulfill({ status: 503, json: {} });
       if (!company && !account) return route.fulfill({ status: 401, json: { loginUrl: "/api/agent-apps/saishi/workbench/login" } });
       return route.fulfill({ json: { csrfToken: "fixture-csrf", expiresAt: Date.now() + (company ? 3600000 : 30 * 86400000),
@@ -58,12 +62,16 @@ try {
           account: { username: account === "a" ? "张小明" : "李小红", avatarUrl: account === "a" ? `https://images.example/${brokenAvatar ? "missing" : "avatar"}.png` : null } }) } });
     }
     if (!company && req.headers()["x-agent-account"] !== account) return route.fulfill({ status: 401, json: {} });
+    if (path.endsWith("/logout")) {
+      if (logoutFails) return route.fulfill({ status: 503, json: {} });
+      account = ""; return route.fulfill({ json: { disconnected: true } });
+    }
     const session = { id: `session_${account}`, title: `账号 ${account} 的会话`, profileId: "saishi-readonly", profileVersion: "1", createdAt: "2026-09-06T00:00:00Z" };
-    if (path.endsWith("/sessions")) return route.fulfill({ json: { sessions: company ? [] : [session] } });
+    if (path.endsWith("/sessions")) return sessionsUnavailable ? route.fulfill({ status: 503, json: {} }) : route.fulfill({ json: { sessions: company ? [] : [session] } });
     if (path.endsWith("/runs")) return route.fulfill({ json: { runs: [{ id: `run_${account}`, sessionId: session.id,
       requestId: `request_${account}`, userMessage: `账号 ${account} 的问题`, finalText: `账号 ${account} 的回答`,
       status: "completed", lastEventSeq: 0, createdAt: "2026-09-06T00:00:00Z" }] } });
-    if (path.endsWith("/events")) return route.fulfill({ json: { events: [], hasMore: false, nextEventSeq: 0 } });
+    if (path.endsWith("/events")) return route.fulfill({ json: { events: [{ id: `event_${account}`, eventSeq: 1, type: "assistant.delta", sessionId: session.id, turnId: `run_${account}`, accountId: account, scopeId: `scope_${account}`, occurredAt: "2026-09-06T00:01:00Z", payload: { contentBlockId: "answer", delta: `账号 ${account} 的回答` } }], hasMore: false, nextEventSeq: 1 } });
     throw new Error(`Unexpected fixture route ${path}`);
   });
   for (const width of [1280, 1920, 390, 320]) {
@@ -81,6 +89,15 @@ try {
     assert.equal(await page.locator("input[type=password]").count(), 0);
     assert.equal(await page.getByRole("button", { name: "登录道引账号" }).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    const userMessage = page.locator(".user-message");
+    const assistantMessage = page.locator(".assistant-message");
+    assert.equal(await userMessage.locator("time").count(), 1);
+    assert.equal(await assistantMessage.locator("time").count(), 1);
+    assert.equal(await userMessage.locator("time").getAttribute("datetime"), "2026-09-06T00:00:00Z");
+    assert.equal(await assistantMessage.locator("time").getAttribute("datetime"), "2026-09-06T00:01:00Z");
+    const userBox = await userMessage.boundingBox();
+    const assistantBox = await assistantMessage.boundingBox();
+    assert.ok(userBox && assistantBox && userBox.x > assistantBox.x, "user messages should align to the right of assistant messages");
     await page.screenshot({ path: resolve(output, `account-${width}.png`), fullPage: true });
     await page.getByRole("button", { name: "选择插件", exact: true }).click();
     await page.getByRole("dialog", { name: "选择会话插件" }).waitFor();
@@ -101,6 +118,20 @@ try {
   await page.getByText("账号 a 的回答", { exact: true }).waitFor();
   assert.equal(await page.getByRole("textbox", { name: "发送给 Harness 的问题" }).inputValue(), "同账号的未发送草稿");
   checks.push("same-account reconnection preserves the draft");
+  await page.waitForTimeout(200);
+  const beforeCheck = requests.length;
+  bootstrapDelay = 700;
+  await page.evaluate(() => { window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("focus")); document.dispatchEvent(new Event("visibilitychange")); });
+  await page.waitForTimeout(200);
+  assert.equal(await page.getByText("正在连接工作台…", { exact: true }).count(), 0);
+  assert.equal(await page.getByRole("textbox", { name: "发送给 Harness 的问题" }).isEnabled(), true);
+  await page.getByRole("textbox", { name: "发送给 Harness 的问题" }).pressSequentially("继续输入");
+  await page.waitForTimeout(800);
+  bootstrapDelay = 0;
+  assert.equal(await page.getByRole("textbox", { name: "发送给 Harness 的问题" }).inputValue(), "同账号的未发送草稿继续输入");
+  assert.equal(requests.slice(beforeCheck).filter(request => request.path.endsWith("/bootstrap")).length, 1);
+  assert.equal(requests.slice(beforeCheck).filter(request => request.path.endsWith("/sessions") || request.path.endsWith("/runs")).length, 0);
+  checks.push("coalesced background identity check preserves composer, draft and conversation without a spinner");
   brokenAvatar = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.waitForFunction(() => document.querySelector(".account-avatar")?.textContent === "张");
@@ -117,7 +148,13 @@ try {
   await page.getByText("账号 a 的回答", { exact: true }).waitFor();
   checks.push("temporary connection failure exits the spinner and can be retried");
   account = "b";
+  sessionsUnavailable = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.getByRole("button", { name: "重新连接工作台", exact: true }).waitFor();
+  assert.equal(await page.getByText("账号 a 的回答", { exact: true }).count(), 0);
+  assert.equal(await page.getByText("正在连接工作台…", { exact: true }).count(), 0);
+  sessionsUnavailable = false;
+  await page.getByRole("button", { name: "重新连接工作台", exact: true }).click();
   await page.getByText("账号 b 的回答", { exact: true }).waitFor();
   assert.equal(await page.getByText("账号 a 的回答", { exact: true }).count(), 0);
   assert.equal(await page.locator(".account-username").textContent(), "李小红");
@@ -157,6 +194,61 @@ try {
   await page.getByText("账号 a 的回答", { exact: true }).waitFor();
   assert.equal(requests.some(req => req.path === "/api/auth/account-session"), true);
   checks.push("existing platform login enters Harness without password or grant prompts");
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    if (width < 600) await page.getByRole("button", { name: "展开会话导航" }).click();
+    const trigger = page.getByRole("button", { name: "当前账号：张小明", exact: true });
+    await trigger.click();
+    await page.getByRole("menu", { name: "账号菜单" }).waitFor();
+    const profile = page.getByRole("menuitem", { name: "个人中心" });
+    assert.equal(await profile.getAttribute("href"), "/my/profile");
+    assert.equal(await profile.getAttribute("target"), "_blank");
+    await page.screenshot({ path: resolve(output, `account-menu-${width}.png`), fullPage: true });
+    await page.keyboard.press("End");
+    assert.equal(await page.getByRole("menuitem", { name: "退出登录", exact: true }).evaluate(node => node === document.activeElement), true);
+    await page.keyboard.press("Home");
+    await page.keyboard.press("ArrowDown");
+    assert.equal(await page.getByRole("menuitem", { name: "设置", exact: true }).evaluate(node => node === document.activeElement), true);
+    await page.keyboard.press("Enter");
+    await page.getByRole("dialog", { name: "设置", exact: true }).waitFor();
+    await page.keyboard.press("Shift+Tab");
+    assert.equal(await page.getByRole("button", { name: "完成", exact: true }).evaluate(node => node === document.activeElement), true);
+    await page.getByLabel("发送消息", { exact: true }).selectOption("modifier-enter");
+    await page.getByLabel("回复时自动滚动", { exact: true }).uncheck();
+    await page.screenshot({ path: resolve(output, `settings-${width}.png`), fullPage: true });
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.activeElement?.classList.contains("account-identity"));
+    assert.equal(await trigger.evaluate(node => node === document.activeElement), true);
+    await trigger.click(); await page.keyboard.press("Escape");
+    assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+    if (width === 1280) {
+      await trigger.click(); await page.locator("#message").click();
+      assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+    }
+    if (width < 600) await page.getByRole("button", { name: "关闭会话导航", exact: true }).click();
+  }
+  const composer = page.getByRole("textbox", { name: "发送给 Harness 的问题" });
+  await composer.fill("设置换行"); await composer.press("Enter");
+  assert.equal(await composer.inputValue(), "设置换行\n");
+  await page.reload();
+  await page.getByText("账号 a 的回答", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "展开会话导航" }).click();
+  await page.getByRole("button", { name: "当前账号：张小明", exact: true }).click();
+  await page.getByRole("menuitem", { name: "设置", exact: true }).click();
+  assert.equal(await page.getByLabel("发送消息", { exact: true }).inputValue(), "modifier-enter");
+  assert.equal(await page.getByLabel("回复时自动滚动", { exact: true }).isChecked(), false);
+  await page.getByRole("button", { name: "完成", exact: true }).click();
+  await page.getByRole("button", { name: "当前账号：张小明", exact: true }).click();
+  logoutFails = true;
+  await page.getByRole("menuitem", { name: "退出登录", exact: true }).click();
+  await page.getByText("退出登录未完成，请重试。", { exact: true }).waitFor();
+  assert.equal(new URL(page.url()).searchParams.get("app"), "saishi");
+  logoutFails = false;
+  await page.getByRole("menuitem", { name: "退出登录", exact: true }).click();
+  await page.waitForURL(base + "/harness/");
+  assert.equal(await page.locator(".account-identity").count(), 0);
+  assert.equal(await page.evaluate(() => window.localStorage.getItem("athletereel_token")), null);
+  checks.push("account menu, keyboard focus, persistent settings and confirmed logout pass at desktop and narrow widths");
   assert.equal(requests.some(req => req.path.endsWith("/connect")), false);
   assert.deepEqual(errors, []);
   await writeFile(resolve(output, "report.json"), JSON.stringify({ evidence: "Windows Edge; local release preview; mocked platform APIs; no real model or production deployment", checks, errors }, null, 2));

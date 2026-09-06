@@ -9,6 +9,29 @@ const json = (value: unknown, status = 200): Response => new Response(JSON.strin
 const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request_1", userMessage: "介绍产品", status: "completed", finalText: "回答", lastEventSeq: 2, cancelRequested: false, authorizationId: "grant_1", billingAccountId: "payer_1", createdAt: "2026-09-05T12:00:00Z" };
 
 describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
+  it("preserves display identity during a background check but clears it on revocation", async () => {
+    let complete: (response: Response) => void = () => { throw new Error("No pending check"); };
+    let pending = false;
+    const response = { csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "saishi-readonly", authentication: "account", accountScope: "account_a", account: { username: "Alice", avatarUrl: null } };
+    const client = new WorkbenchClient(memory(), async () => pending ? new Promise<Response>(resolve => { complete = resolve; }) : json(response), "saishi");
+    await client.bootstrap(); pending = true;
+    const check = client.bootstrap(true);
+    expect(client.account?.username).toBe("Alice");
+    complete(json({}, 401));
+    await expect(check).rejects.toMatchObject({ status: 401 });
+    expect(client.account).toBeUndefined(); expect(client.accountScope).toBe("");
+  });
+  it("retains the account on failed logout and clears it only after confirmed logout", async () => {
+    let failLogout = true;
+    const client = new WorkbenchClient(memory(), async (url) => String(url).endsWith("/logout")
+      ? json({}, failLogout ? 503 : 200)
+      : json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "saishi-readonly", authentication: "account", accountScope: "account_a", account: { username: "Alice", avatarUrl: null } }), "saishi");
+    await client.bootstrap();
+    await expect(client.disconnectApplication()).rejects.toMatchObject({ status: 503 });
+    expect(client.account?.username).toBe("Alice");
+    failLogout = false; await client.disconnectApplication();
+    expect(client.account).toBeUndefined(); expect(client.accountScope).toBe("");
+  });
   it("refreshes only server-provided account display fields and clears them after failed authentication", async () => {
     let account: unknown = { username: "张小明", avatarUrl: "https://images.example/a.png", email: "private@example.test" };
     let status = 200;

@@ -1,4 +1,4 @@
-type IconName = "chat" | "plugin" | "edit" | "search" | "user" | "globe" | "book" | "story" | "image" | "pin" | "arrow" | "chevron" | "connection" | "menu";
+type IconName = "chat" | "plugin" | "edit" | "search" | "user" | "globe" | "book" | "story" | "image" | "pin" | "arrow" | "chevron" | "connection" | "menu" | "settings" | "logout";
 
 const paths: Record<IconName, string> = {
   chat: "M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Zm2 5h10M7 13h6",
@@ -15,6 +15,8 @@ const paths: Record<IconName, string> = {
   chevron: "m9 5 7 7-7 7",
   connection: "M2 8a16 16 0 0 1 20 0M5 12a11 11 0 0 1 14 0M9 16a5 5 0 0 1 6 0M12 20h.01",
   menu: "M3 6h18M3 12h18M3 18h18",
+  settings: "M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6",
+  logout: "M9 3H4v18h5M10 12h11m-5-5 5 5-5 5",
 };
 
 export function WorkbenchIcon({ name }: { name: IconName }): React.JSX.Element {
