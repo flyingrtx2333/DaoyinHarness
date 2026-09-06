@@ -200,13 +200,7 @@ export function App(): React.JSX.Element {
           {visibleSessions.length === 0 && <p className="muted" role="status">{sessions.length === 0 ? "暂无会话" : "没有匹配的会话"}</p>}
         </nav>
       </section>
-      <footer className="sidebar-footer">
-        <div className="account-entry">
-          <div className="scope"><WorkbenchIcon name="user" /><div>{APPLICATION === "saishi" ? "账号空间" : "访客空间"} <span className="scope-dot" aria-hidden="true" /><small>{APPLICATION === "saishi" ? phase === "ready" ? "道引账号已连接" : "使用道引账号" : "登录后可查看你的赛事和专属数据"}</small></div></div>
-          {APPLICATION === "company" && <div className="account-actions" aria-label="道引账号入口"><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div>}
-        </div>
-        <a className="site-link" href="/" target="_blank" rel="noopener noreferrer">官网 <span aria-hidden="true">↗</span></a>
-      </footer>
+      {APPLICATION === "company" && <footer className="sidebar-footer"><div className="account-actions" aria-label="道引账号入口"><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div></footer>}
     </aside>
     <main id="conversation" className="main" tabIndex={-1}>
       <button className="mobile-menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
