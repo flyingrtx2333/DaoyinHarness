@@ -2,6 +2,7 @@ import type { ModelClient, ModelReply, ModelRequest, ModelToolCall } from "@daoy
 
 const MAX_RESPONSE_BYTES = 2_000_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
+const MAX_MESSAGE_CHARACTERS = 100_000;
 
 export interface CloudCredentialProvider {
   getCredential(signal: AbortSignal): Promise<string>;
@@ -107,6 +108,18 @@ function publicError(value: unknown): { code?: string; message?: string } {
 
 function statusError(status: number, payload: unknown, requestId: string | null): ModelGatewayError {
   const gateway = publicError(payload);
+  if (status === 422) {
+    // Validation responses may echo credentials or document contents in `input`.
+    // Inspect only the known error type/location; never surface raw details.
+    const oversized = isRecord(payload) && Array.isArray(payload.detail) && payload.detail.some((detail: unknown) =>
+      isRecord(detail) && detail.type === "string_too_long" && Array.isArray(detail.loc)
+      && detail.loc.length === 4 && detail.loc[0] === "body" && detail.loc[1] === "messages"
+      && typeof detail.loc[2] === "number" && detail.loc[3] === "content",
+    );
+    return new ModelGatewayError(oversized ? "MODEL_CONTEXT_TOO_LARGE" : "MODEL_GATEWAY_VALIDATION", oversized
+      ? "模型请求中的内容超过网关长度限制，请缩小读取范围后重试（HTTP 422）。"
+      : "模型请求格式校验失败（HTTP 422），请检查模型网关协议兼容性。", { status, requestId });
+  }
   if (status === 401) {
     return new ModelGatewayError("MODEL_AUTH_REQUIRED", gateway.message ?? "道引模型网关登录已失效。", { status, requestId });
   }
@@ -225,6 +238,10 @@ export class DaoyinGatewayModelClient implements ModelClient {
   }
 
   public async complete(request: ModelRequest): Promise<ModelReply> {
+    const oversizedIndex = request.messages.findIndex((message) => message.content.length > MAX_MESSAGE_CHARACTERS);
+    if (oversizedIndex !== -1) {
+      throw new ModelGatewayError("MODEL_CONTEXT_TOO_LARGE", `第 ${String(oversizedIndex + 1)} 条模型消息超过 ${String(MAX_MESSAGE_CHARACTERS)} 字符限制，请缩小读取范围或精简上下文后重试。`);
+    }
     const credential = await this.#credentialProvider.getCredential(request.signal);
     const timeout = AbortSignal.timeout(this.#timeoutMs);
     const signal = AbortSignal.any([request.signal, timeout]);

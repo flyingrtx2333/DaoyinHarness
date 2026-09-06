@@ -1,0 +1,65 @@
+{
+  "completedAt": "2026-09-05T03:27:00.017Z",
+  "selected": "A",
+  "environment": "Windows PowerShell; Node.js v22.23.2; Edge headless",
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "test": "30 files, 105 tests passed",
+    "build": "passed",
+    "browser": {
+      "records": 26,
+      "unexpectedErrors": 0,
+      "failedRequests": 0,
+      "expectedErrorScenario": "HTTP 503 bootstrap fixture"
+    },
+    "visual": {
+      "mae": 0.02812323942444949,
+      "pixelSimilarity": 0.9718767605755505,
+      "withinTolerance": 0.9417890412073384,
+      "passed": true
+    }
+  },
+  "commandHistory": [
+    "First existing suite: 101 passed; four added Markdown tests passed separately",
+    "Parallel final run: one pre-existing server fixture cleanup raised Windows ENOTEMPTY; reran full npm test unchanged: all 105 passed",
+    "Lint caught redundant navigator global in new browser script; corrected and reran successfully"
+  ],
+  "preserved": [
+    "Existing uncommitted backend, authentication and documentation changes",
+    "Original user session transcript and local runtime data",
+    "Old C concept evidence and raster assets"
+  ],
+  "scope": [
+    "packages/ui/src/App.tsx",
+    "packages/ui/src/workbench.css",
+    "packages/ui/src/styles.css",
+    "packages/ui/src/MarkdownMessage.tsx",
+    "packages/ui/src/MarkdownMessage.test.ts",
+    "packages/ui/index.html",
+    "packages/ui/package.json",
+    "package-lock.json",
+    "scripts/verify-workbench-ui.mjs",
+    "docs/UI-WORKBENCH.md"
+  ],
+  "hashes": {
+    "packages/ui/src/App.tsx": "053515b1c7248aad4c9c71cbfc169913a8884e27de621a88ff8774dc876248a5",
+    "packages/ui/src/workbench.css": "4fec9c9193ab483b02ca8ab6287fb10b819a847cd99f9655ecb406d79ce110f5",
+    "packages/ui/src/styles.css": "ca4465fd508359f834fc939ecaf0a16c748051015a2a6cb553cafd648c5f8e97",
+    "packages/ui/src/MarkdownMessage.tsx": "0fdf442a7d0f54073274d499b704642f437d7521b1e22e1ea7bfff0d24764619",
+    "packages/ui/src/MarkdownMessage.test.ts": "8e5863d1bddc05cd0da7a5d2f15e9d8b15344cd460ee2727462ff3cca0043a44",
+    "packages/ui/index.html": "590551d71817ecef7af98d8c5aaa94bacb8c171bfd458616cd9e4edd386003cb",
+    "packages/ui/package.json": "e7c86e4d64a31da849983596ead046cd88ac4264cfeae3764b9d838107f0e745",
+    "package-lock.json": "34e710c35727e85a23e5bbeab060f396e0b039c47a6f4bc5f7e1c64cd4747cc1",
+    "scripts/verify-workbench-ui.mjs": "f7f00c1b5dda60dfc8b27d4330435a5990baa0a168e5fc696154151a7044341f",
+    "docs/UI-WORKBENCH.md": "1b1f1df72be16d6afa5837193abb952f5a9ccc394f49e5153fb1a1b8f827a1bb"
+  },
+  "limitations": [
+    "Real runtime capture is read-only; interaction fixture uses simulated APIs and WebSocket",
+    "No paid real-model quality or production verification",
+    "Generated concept placeholders differ from API-driven text, account and tool status",
+    "Existing startup static-asset registration requires local service restart after rebuild"
+  ],
+  "runtime": "http://127.0.0.1:4677",
+  "commitCreated": false
+}

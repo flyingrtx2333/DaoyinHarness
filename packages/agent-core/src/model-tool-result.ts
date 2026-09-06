@@ -53,24 +53,38 @@ function boundedJson(value: JsonValue, budget: number, depth = 0): JsonValue {
   return null;
 }
 
-export function modelToolResult(result: ToolExecution): string {
+/** Valid JSON even when clipped, with explicit omissions rather than a cut JSON string. */
+export function contextPreview(value: JsonValue, maxCharacters: number): string {
+  if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 256) throw new Error("Invalid context preview budget.");
+  const serialized = JSON.stringify(value);
+  if (serialized.length <= maxCharacters) return serialized;
+  const envelope = { truncated: true, originalCharacters: serialized.length };
+  const preview = boundedJson(value, maxCharacters - JSON.stringify(envelope).length - 16);
+  return JSON.stringify({ ...envelope, preview });
+}
+
+export function modelToolResult(result: ToolExecution, maxCharacters = MAX_MODEL_TOOL_RESULT_CHARACTERS): string {
+  if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1024 || maxCharacters > MAX_MODEL_TOOL_RESULT_CHARACTERS) {
+    throw new Error("Invalid tool result context budget.");
+  }
   const complete = result.ok
     ? { ok: true, summary: result.summary, result: result.evidence.result }
     : { ok: false, code: result.code, message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) };
   const serialized = JSON.stringify(complete);
-  if (serialized.length <= MAX_MODEL_TOOL_RESULT_CHARACTERS) return serialized;
+  if (serialized.length <= maxCharacters) return serialized;
 
   const modelContext = {
     truncated: true,
     originalCharacters: serialized.length,
-    notice: "Partial tool result for model context only. Full evidence remains in the local transcript. Do not treat omitted entries as absent or this preview as exhaustive. Narrow the directory or search query to retrieve relevant details; do not repeat the same broad request.",
+    notice: "Partial tool result for model context only. Full evidence remains in the append-only transcript. Do not treat omitted entries as absent or this preview as exhaustive. Narrow the directory or search query to retrieve relevant details; do not repeat the same broad request.",
   };
+  const textBudget = Math.min(1024, Math.floor(maxCharacters / 8));
   if (result.ok) {
-    const envelope = { ok: true, summary: boundedString(result.summary, 1024), modelContext };
-    const budget = MAX_MODEL_TOOL_RESULT_CHARACTERS - JSON.stringify(envelope).length - 16;
+    const envelope = { ok: true, summary: boundedString(result.summary, textBudget), modelContext };
+    const budget = maxCharacters - JSON.stringify(envelope).length - 16;
     return JSON.stringify({ ...envelope, result: boundedJson(result.evidence.result, budget) });
   }
-  const envelope = { ok: false, code: boundedString(result.code, 256), message: boundedString(result.message, 1024), retryable: result.retryable, modelContext };
-  const budget = MAX_MODEL_TOOL_RESULT_CHARACTERS - JSON.stringify(envelope).length - 16;
+  const envelope = { ok: false, code: boundedString(result.code, 128), message: boundedString(result.message, textBudget), retryable: result.retryable, modelContext };
+  const budget = maxCharacters - JSON.stringify(envelope).length - 16;
   return JSON.stringify({ ...envelope, ...(result.details === undefined ? {} : { details: boundedJson(result.details, budget) }) });
 }

@@ -1,8 +1,16 @@
 # DaoyinHarness Testing and Reliability
 
-> Current Windows verification for the unified platform is recorded in [UNIFIED-AGENT.md](UNIFIED-AGENT.md#验证记录). Results describe the tested working checkout; visual workbench and real-account acceptance remain separate.
+> Current Windows verification for the unified platform is recorded in [UNIFIED-AGENT.md](UNIFIED-AGENT.md#验证记录). Earlier WSL notes in [UPDATES-20260905.md](UPDATES-20260905.md) describe the original editing session; they are not the current automated test status. Visual workbench acceptance remains separate.
 
 > Passing one layer never implies a higher layer passed. Platform-adapter tests use the real AgentEngine and SQLite with simulated HTTP/provider responses. Backend bridge tests run from Windows Docker Compose against isolated MySQL and FastAPI, with fixture memberships, provider and corpus; no production data or billable model calls.
+
+## Validation environment ownership
+
+This shared checkout is validated exclusively from Windows PowerShell. Windows owns `node_modules`, dependency installation, typecheck, lint, unit/integration tests, builds, package verification, runtime smoke tests and acceptance evidence.
+
+WSL contributors may edit source and documentation, but do not install dependencies or run validation commands in this checkout. In particular, do not run `npm install`, `npm ci`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, package verification or runtime acceptance from WSL. npm optional native packages are platform-specific; sharing one `node_modules` between Linux and Windows makes results host-dependent. WSL output is therefore not accepted as project test evidence.
+
+Windows validation uses the Node.js version pinned by `.nvmrc` / `.node-version`. Every reported result names the command and evidence level; another platform's successful run cannot substitute for Windows acceptance in this checkout.
 
 ## 1. Evidence levels
 
@@ -163,3 +171,8 @@ Before an internal npm beta:
 
 Production OAuth or AI Gateway claims additionally require production evidence and are never inferred from local mocks.
 
+## 8. Canvas UI browser verification
+
+From Windows PowerShell, with the built Harness running at `127.0.0.1:4677`, the Daoyin development backend at `127.0.0.1:6087`, and Microsoft Edge installed, run `node scripts/verify-canvas-ui.mjs`.
+
+The script checks responsive layouts and visible interactions, then exercises conversation, permissions, cancellation and replay through explicitly mocked API/WebSocket fixtures. It does not submit real credentials or call a model. Results and screenshots are written under `evidence/ui-concepts/`; see [C implementation acceptance](../evidence/ui-concepts/IMPLEMENTATION.md) for evidence boundaries and visual comparison results.

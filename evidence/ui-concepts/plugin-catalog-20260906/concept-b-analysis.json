@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\plugin-catalog-20260906\\concept-b.png",
+  "size": {
+    "width": 1576,
+    "height": 998
+  },
+  "aspect_ratio": 1.5791583166332666,
+  "top_colors": [
+    {
+      "rgb": [
+        254,
+        254,
+        254
+      ],
+      "hex": "#fefefe",
+      "count": 675327
+    },
+    {
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "hex": "#ffffff",
+      "count": 258818
+    },
+    {
+      "rgb": [
+        255,
+        254,
+        255
+      ],
+      "hex": "#fffeff",
+      "count": 115580
+    },
+    {
+      "rgb": [
+        253,
+        253,
+        253
+      ],
+      "hex": "#fdfdfd",
+      "count": 74121
+    },
+    {
+      "rgb": [
+        247,
+        249,
+        254
+      ],
+      "hex": "#f7f9fe",
+      "count": 72138
+    },
+    {
+      "rgb": [
+        254,
+        253,
+        254
+      ],
+      "hex": "#fefdfe",
+      "count": 57453
+    },
+    {
+      "rgb": [
+        254,
+        255,
+        254
+      ],
+      "hex": "#fefffe",
+      "count": 30833
+    },
+    {
+      "rgb": [
+        255,
+        254,
+        254
+      ],
+      "hex": "#fffefe",
+      "count": 23445
+    }
+  ]
+}

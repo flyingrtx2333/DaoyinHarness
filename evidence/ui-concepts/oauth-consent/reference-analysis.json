@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\oauth-consent\\reference.png",
+  "size": {
+    "width": 1536,
+    "height": 960
+  },
+  "aspect_ratio": 1.6,
+  "top_colors": [
+    {
+      "rgb": [
+        243,
+        246,
+        251
+      ],
+      "hex": "#f3f6fb",
+      "count": 1148516
+    },
+    {
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "hex": "#ffffff",
+      "count": 176949
+    },
+    {
+      "rgb": [
+        242,
+        245,
+        250
+      ],
+      "hex": "#f2f5fa",
+      "count": 22796
+    },
+    {
+      "rgb": [
+        49,
+        88,
+        213
+      ],
+      "hex": "#3158d5",
+      "count": 15998
+    },
+    {
+      "rgb": [
+        240,
+        243,
+        249
+      ],
+      "hex": "#f0f3f9",
+      "count": 9400
+    },
+    {
+      "rgb": [
+        241,
+        245,
+        250
+      ],
+      "hex": "#f1f5fa",
+      "count": 8592
+    },
+    {
+      "rgb": [
+        241,
+        244,
+        250
+      ],
+      "hex": "#f1f4fa",
+      "count": 5636
+    },
+    {
+      "rgb": [
+        240,
+        244,
+        249
+      ],
+      "hex": "#f0f4f9",
+      "count": 5618
+    }
+  ]
+}

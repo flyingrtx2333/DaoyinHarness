@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\cloud-modern-20260906-side\\concept-a.png",
+  "size": {
+    "width": 1672,
+    "height": 941
+  },
+  "aspect_ratio": 1.7768331562167907,
+  "top_colors": [
+    {
+      "rgb": [
+        254,
+        254,
+        254
+      ],
+      "hex": "#fefefe",
+      "count": 216071
+    },
+    {
+      "rgb": [
+        253,
+        253,
+        254
+      ],
+      "hex": "#fdfdfe",
+      "count": 148641
+    },
+    {
+      "rgb": [
+        254,
+        253,
+        254
+      ],
+      "hex": "#fefdfe",
+      "count": 99240
+    },
+    {
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "hex": "#ffffff",
+      "count": 70862
+    },
+    {
+      "rgb": [
+        246,
+        247,
+        249
+      ],
+      "hex": "#f6f7f9",
+      "count": 59248
+    },
+    {
+      "rgb": [
+        253,
+        253,
+        253
+      ],
+      "hex": "#fdfdfd",
+      "count": 50249
+    },
+    {
+      "rgb": [
+        254,
+        254,
+        255
+      ],
+      "hex": "#fefeff",
+      "count": 44482
+    },
+    {
+      "rgb": [
+        246,
+        247,
+        250
+      ],
+      "hex": "#f6f7fa",
+      "count": 31987
+    }
+  ]
+}

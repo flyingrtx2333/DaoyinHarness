@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import { AgentEngine, type AgentMemoryProvider, type ModelClient } from "@daoyin/harness-agent-core";
+import { AgentEngine, type ModelClient, type AgentMemoryProvider } from "@daoyin/harness-agent-core";
 import { ToolRegistry, type ToolDefinition, type ToolRequest } from "@daoyin/harness-tools/registry";
 import { assertExecutionIdentity, ExecutionAccessError, sameExecutionScope, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import { CloudError, type CloudRepository, type CloudRun } from "./repository.js";
@@ -100,11 +100,22 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   let closing = false;
   let storageFault = false;
 
+  function assertOwner(): void {
+    try { options.repository.assertExecutionOwner?.(); }
+    catch (error) {
+      storageFault = true;
+      for (const item of active.values()) item.controller.abort("runtime");
+      throw error;
+    }
+  }
+
   async function ensureActive(identity: ExecutionIdentity, parent?: AbortSignal): Promise<void> {
+    assertOwner();
     assertExecutionIdentity(identity);
     const timeout = AbortSignal.timeout(5_000);
     const signal = parent === undefined ? timeout : AbortSignal.any([parent, timeout]);
     const allowed = await abortable(() => options.isAuthorizationActive(identity, signal), signal);
+    assertOwner();
     assertExecutionIdentity(identity);
     if (!allowed) throw new CloudError(403, "AUTHORIZATION_REVOKED", "当前空间或应用授权已失效。");
   }
@@ -123,6 +134,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
     if (request.method === "GET" && request.url === "/health") return;
+    assertOwner();
     if (closing || storageFault) throw new CloudError(503, "CLOUD_NOT_READY", "云端执行服务暂不可用。");
     const origin = request.headers.origin;
     if (origin !== undefined && !origins.has(origin)) throw new CloudError(403, "ORIGIN_DENIED", "此入口未获允许。");
@@ -147,7 +159,10 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     return reply.code(503).send({ error: { code: "CLOUD_REQUEST_FAILED", message: "请求未完成，请保留原请求标识并查询任务状态。" } });
   });
 
-  app.get("/health", async () => ({ status: storageFault || closing ? "unavailable" : "available", mode: "cloud-foundation", productionReady: false }));
+  app.get("/health", async () => {
+    try { assertOwner(); } catch { /* Report an unavailable executor without exposing internal errors. */ }
+    return { status: storageFault || closing ? "unavailable" : "available", mode: "cloud-foundation", productionReady: false };
+  });
   app.get("/api/v1/cloud/sessions", async (request) => ({ sessions: await options.repository.listSessions(identityFor(request)) }));
   app.post<{ Body: { title?: string } }>("/api/v1/cloud/sessions", {
     schema: { body: { type: "object", additionalProperties: false, properties: { title: { type: "string", minLength: 1, maxLength: 120 } } } },
@@ -210,10 +225,12 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const baseModel = await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
         const model: ModelClient = {
           complete: async (request) => {
+            // Preserve the core's per-model deadline as well as the whole-run cancellation.
+            const modelSignal = AbortSignal.any([request.signal, controller.signal]);
             try {
-              await ensureActive(identity, controller.signal);
-              const reply = await abortable(() => baseModel.complete({ ...request, signal: controller.signal }), controller.signal);
-              await ensureActive(identity, controller.signal);
+              await ensureActive(identity, modelSignal);
+              const reply = await abortable(() => baseModel.complete({ ...request, signal: modelSignal }), modelSignal);
+              await ensureActive(identity, modelSignal);
               if (Buffer.byteLength(JSON.stringify(reply), "utf8") > 96_000) throw new Error("Model output exceeds limit.");
               return reply;
             } catch {
@@ -221,26 +238,23 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             }
           },
         };
-        const memoryStore = options.repository.memory;
-        const memory: AgentMemoryProvider | undefined = memoryStore === undefined || identity.space.kind === "public" ? undefined : {
+        const memory = options.repository.memory;
+        // Keep the dependency guard even after memory.read is revoked: old influenced turns
+        // must not bypass revocation through ordinary dialogue history.
+        const scopedMemory: AgentMemoryProvider | undefined = memory === undefined || identity.space.kind === "public" ? undefined : {
           load: async (request) => {
             await ensureActive(identity, request.signal);
-            const snapshot = memoryStore.prepare(identity, {
-              sessionId: run.sessionId, turnId: run.id, step: request.step,
-              query: request.turn.userMessage, events: [...request.inheritedEvents, ...request.priorEvents],
-            });
-            return {
-              ...snapshot,
-              assertCurrent: async (signal: AbortSignal) => {
-                await ensureActive(identity, signal);
-                await snapshot.assertCurrent(signal);
-              },
-            };
+            const snapshot = memory.prepare(identity, { sessionId: run.sessionId, turnId: run.id, step: request.step,
+              query: request.turn.userMessage, events: [...request.inheritedEvents, ...request.priorEvents] });
+            return { ...snapshot, assertCurrent: async (signal) => {
+              await ensureActive(identity, signal);
+              await snapshot.assertCurrent(signal);
+            } };
           },
         };
         const engine = new AgentEngine({
           model, tools, events: stores.events, compactionStore: stores.compactions,
-          ...(memory === undefined ? {} : { memory }),
+          ...(scopedMemory === undefined ? {} : { memory: scopedMemory }),
           systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}`,
           maxSteps: 12, maxToolCalls: 24,
         });
@@ -311,15 +325,9 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   });
 
   const authorizeMemoryShare = options.authorizeMemoryShare;
-  registerMemoryRoutes(app, {
-    repository: options.repository,
-    identityFor,
-    ensureActive,
-    ...(authorizeMemoryShare === undefined ? {} : {
-      authorizeShareTarget: (identity: ExecutionIdentity, targetAppId: string, signal: AbortSignal) =>
-        abortable(() => authorizeMemoryShare(identity, targetAppId, signal), signal),
-    }),
-  });
+  registerMemoryRoutes(app, { repository: options.repository, identityFor, ensureActive,
+    ...(authorizeMemoryShare === undefined ? {} : { authorizeShareTarget: (identity: ExecutionIdentity, targetAppId: string, signal: AbortSignal) =>
+      abortable(() => authorizeMemoryShare(identity, targetAppId, signal), signal) }) });
 
   app.addHook("preClose", async () => {
     closing = true;

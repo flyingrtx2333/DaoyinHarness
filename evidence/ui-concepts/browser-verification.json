@@ -1,0 +1,168 @@
+{
+  "results": [
+    {
+      "name": "agent-workbench/render-desktop",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992
+      }
+    },
+    {
+      "name": "agent-workbench/render-files",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992
+      }
+    },
+    {
+      "name": "agent-workbench/render-tasks",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992
+      }
+    },
+    {
+      "name": "oauth-consent/render-desktop",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992
+      }
+    },
+    {
+      "name": "agent-workbench/render-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024
+      }
+    },
+    {
+      "name": "agent-workbench/files-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024
+      }
+    },
+    {
+      "name": "oauth-consent/render-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024
+      }
+    },
+    {
+      "name": "agent-workbench/render-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844
+      }
+    },
+    {
+      "name": "agent-workbench/files-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844
+      }
+    },
+    {
+      "name": "oauth-consent/render-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844
+      }
+    },
+    {
+      "name": "agent-workbench/render-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740
+      }
+    },
+    {
+      "name": "agent-workbench/files-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740
+      }
+    },
+    {
+      "name": "oauth-consent/render-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740
+      }
+    },
+    {
+      "name": "oauth-consent/render-720h",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720
+      }
+    },
+    {
+      "name": "oauth-consent/render-error",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720
+      }
+    },
+    {
+      "name": "agent-workbench/render-permission",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992
+      }
+    },
+    {
+      "name": "agent-workbench/render-conversation",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992
+      }
+    },
+    {
+      "name": "fixture-interactions",
+      "permission": "approved",
+      "duplicateSubmitBlocked": true,
+      "cancel": true,
+      "reconnectFrom": "4",
+      "refreshReplay": true,
+      "evidence": "mocked API and WebSocket, real browser UI"
+    }
+  ],
+  "errors": [],
+  "failedRequests": []
+}

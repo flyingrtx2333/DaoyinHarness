@@ -204,11 +204,7 @@ export function App(): React.JSX.Element {
       </footer>
     </aside>
     <main id="conversation" className="main" tabIndex={-1}>
-      <header className="topbar">
-        <button className="menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
-        <div className="session-heading"><WorkbenchIcon name={view === "plugins" ? "plugin" : "edit"} /><h1>{view === "plugins" ? "插件" : session?.title || "新会话"}</h1></div>
-        <button className="refresh-button" disabled={phase === "connecting" || submitting || loading} onClick={() => { setError(""); void connect(); }}><WorkbenchIcon name="connection" />重新连接</button>
-      </header>
+      <button className="mobile-menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
       {view === "plugins" && <div className="transcript plugin-transcript"><PluginCatalog selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /></div>}
       <div className="transcript" hidden={view !== "chat"} onScroll={(event) => { const element = event.currentTarget; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160; }}>
         <div className="conversation-content">

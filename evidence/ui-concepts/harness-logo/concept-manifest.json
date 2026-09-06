@@ -1,0 +1,32 @@
+{
+  "screen": "harness-cloud-workbench-brand-mark",
+  "reference": "evidence/ui-concepts/harness-logo/reference.png",
+  "viewport": [1280, 720],
+  "concepts": [
+    {
+      "id": "A",
+      "title": "Guided Thread",
+      "path": "concept-a-guided-thread.png",
+      "prompt_direction": "Two bounded execution lanes converge at one proof point, suggesting guided work and replayable evidence.",
+      "strength": "The most distinct motion metaphor; clear in a sidebar badge.",
+      "tradeoff": "The open, horizontal silhouette needs a compact SVG redraw before 24px use."
+    },
+    {
+      "id": "B",
+      "title": "Shared Kernel",
+      "path": "concept-b-shared-kernel.png",
+      "prompt_direction": "Three bounded modules lock around a single core, expressing one kernel across capabilities.",
+      "strength": "Best expression of the unified Agent architecture and balanced square footprint.",
+      "tradeoff": "More abstract; it needs the wordmark to establish the product name initially."
+    },
+    {
+      "id": "C",
+      "title": "Evidence Beacon",
+      "path": "concept-c-evidence-beacon.png",
+      "prompt_direction": "A durable document-like frame, one evidence point, and a traceable internal path.",
+      "strength": "Most directly connected to public sources, task transcripts, and verifiable output.",
+      "tradeoff": "Closest to a document motif, so it is less neutral if Harness grows beyond knowledge work."
+    }
+  ],
+  "selected": null
+}

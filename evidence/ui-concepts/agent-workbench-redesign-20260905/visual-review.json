@@ -1,0 +1,134 @@
+{
+  "firstPass": [
+    {
+      "type": "geometry",
+      "region": [
+        419,
+        780,
+        1077,
+        158
+      ],
+      "mismatch": "Composer top 10px high; set fixed 148px desktop height",
+      "resolution": "fixed in final CSS"
+    },
+    {
+      "type": "geometry",
+      "region": [
+        459,
+        292,
+        1029,
+        159
+      ],
+      "mismatch": "Tool group broader than concept; cap to 740px",
+      "resolution": "fixed in final CSS"
+    },
+    {
+      "type": "geometry",
+      "region": [
+        459,
+        159,
+        340,
+        53
+      ],
+      "mismatch": "User bubble about 8px too low",
+      "resolution": "reduced author bottom margin"
+    },
+    {
+      "type": "state",
+      "region": [
+        459,
+        244,
+        1029,
+        480
+      ],
+      "mismatch": "Real event aggregation groups tools before assistant text; generated example puts introduction first",
+      "resolution": "Preserve existing replay semantics and real event contents"
+    },
+    {
+      "type": "typography",
+      "region": [
+        22,
+        435,
+        259,
+        310
+      ],
+      "mismatch": "History titles, times, account and document copy differ from generated placeholders",
+      "resolution": "Keep API-driven text and timestamps; fixture data is explicitly labelled"
+    }
+  ],
+  "finalPass": [
+    {
+      "type": "state",
+      "region": [
+        459,
+        287,
+        740,
+        159
+      ],
+      "mismatch": "Tool block precedes assistant narrative; generated concept places an introductory line first",
+      "disposition": "Preserve replay and actual event semantics"
+    },
+    {
+      "type": "state",
+      "region": [
+        459,
+        478,
+        1000,
+        202
+      ],
+      "mismatch": "Draft content and line lengths differ from conceptual placeholder copy",
+      "disposition": "API-driven content retained; no fake production text"
+    },
+    {
+      "type": "typography",
+      "region": [
+        22,
+        435,
+        259,
+        310
+      ],
+      "mismatch": "Session names and timestamps differ from generated list",
+      "disposition": "Use actual session data and explicit browser fixtures"
+    },
+    {
+      "type": "asset",
+      "region": [
+        30,
+        30,
+        36,
+        40
+      ],
+      "mismatch": "Independently authored native geometric mark differs slightly from generated pixels",
+      "disposition": "Editable SVG, no raster screenshot substitution"
+    },
+    {
+      "type": "state",
+      "region": [
+        439,
+        811,
+        1036,
+        106
+      ],
+      "mismatch": "Fixture composer contains a draft and the toolbar omits nonfunctional concept-only controls",
+      "disposition": "Existing real functionality preserved"
+    }
+  ],
+  "majorBoundaries": {
+    "sidebarWidth": 304,
+    "headerHeight": 76,
+    "composer": {
+      "x": 419,
+      "y": 790,
+      "width": 1077,
+      "height": 148
+    },
+    "maxBoundaryDeltaPx": 1
+  },
+  "reviewed": [
+    "desktop",
+    "390px conversation",
+    "welcome",
+    "responsive overflow and keyboard navigation assertions"
+  ],
+  "criticalRegionAssessment": "Remaining differences are text, state and independently authored icon strokes; no clipping or geometry hotspot observed."
+}

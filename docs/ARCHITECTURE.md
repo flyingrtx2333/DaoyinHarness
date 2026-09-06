@@ -145,6 +145,8 @@ Tools can be registered individually or as a named tool pack. Built-in Skills an
 
 The selected local root is safety-scoped. File paths are workspace-relative, lexical and real-path escapes are rejected, symlinks are not followed for unsafe writes, and writes use temporary files plus atomic replacement where supported.
 
+Workspace selection is available through `GET /api/v1/workspaces`, CSRF-protected `POST /api/v1/workspaces/pick` (candidate only), and `POST /api/v1/workspaces/switch` (`{ root }`). The switch prepares a fresh capability runtime while excluding concurrent API operations and active turns. It rotates the workspace revision and CSRF token, closes old browser/event connections, and reloads the UI. `RuntimeBootstrap.workspaceRevision` travels in `X-Daoyin-Workspace` on browser API requests to reject stale tabs. Recent canonical roots and the immutable legacy catalog binding live in `workspaces.json`; new roots have separate hash-named session catalogs. Existing transcript and permission files are preserved. See [ADR 0004](adr/0004-workspace-switching.md).
+
 The workspace pack is useful for code, notes, documents and arbitrary text-based local work. It no longer owns process execution; process capabilities are mounted through the independent Process Service described below.
 
 ### Web capability

@@ -7,6 +7,8 @@ export interface ToolDescriptor {
   inputSchema: JsonValue;
   category: ToolCapabilityCategory;
   mutating: boolean;
+  /** Trusted registration only: allow intentional repeated writes within one turn. */
+  repeatable?: boolean;
 }
 
 export interface ToolPack {
@@ -70,7 +72,7 @@ function failure(code: string, message: string, retryable = false, details?: Jso
 
 function descriptor(tool: ToolDescriptor): ToolDescriptor {
   const { name, description, inputSchema, category, mutating } = tool;
-  return { name, description, inputSchema, category, mutating };
+  return { name, description, inputSchema, category, mutating, ...(tool.repeatable === undefined ? {} : { repeatable: tool.repeatable }) };
 }
 
 export class ToolRegistry {

@@ -6,6 +6,8 @@ DaoyinHarness 现定位为**道引统一 Agent 平台的共享执行内核**：�
 
 官网已上线共享 AgentEngine 的单实例只读服务，接入主平台访客授权、MySQL 操作去重与调用额度、公开知识检索、单步模型及 Cookie/CSRF 会话代理。真实模型、检索、回放与取消接口已验证；多 Worker 调度与跨业务写操作仍待完成。当前架构见 [统一 Agent 平台说明](docs/UNIFIED-AGENT.md)，生产版本和证据见 [上线记录](deployment/RELEASE-20260905.md)。
 
+> 本地工作台改动及其最初交付记录见 [工作台变更](docs/UPDATES-20260905.md)。本轮 Windows 验证见 [统一平台说明](docs/UNIFIED-AGENT.md#验证记录)；自动化检查不替代界面与真实账号验收。旧 local 历史保留原位，不自动迁入新账号。
+
 > **项目状态：通用本地 Agent 纵向闭环已打通，模型网关客户端、受控 Browser、远程 Streamable HTTP MCP、Goals / Workflow / Child Agent orchestration，以及 session fork/resume/search + crash interruption recovery 已落地，主平台 OAuth / Gateway 服务端仍待联调。** CLI、本地 API、React Web UI、安全工作区、append-only trajectory、每步 Prompt/Context 装配、Capability Registry、Skills、公共 Web、Browser、MCP、provenance-bound Memory、Context Compaction、持久 Goal/Workflow/Child Run、受控 Process Service + 一次性 Permission Gate，以及标准化 Daoyin AI Gateway `ModelClient` 已经串联。Linux Bubblewrap OS Sandbox 已实现并带启动探测；Windows/macOS Sandbox、插件/能力管理、SQLite materialization/语义检索与正式 npm 发布仍待完成。
 
 本地运行形态继续保留：用户通过道引账号登录后，同一个 Agent 可以在持续会话中聊天、检索公开网页、操作受控本地浏览器、调用显式配置的 MCP 扩展、处理本地文件、维护任务目标和运行 Workflow。云端通过受限的业务 Profile 装配能力，不加载本机工具或自动同步本地历史。
@@ -78,6 +80,38 @@ v1 明确不包含：
 ```
 
 本地端是 Agent 与真实环境交互的执行主体，不限定任务必须是“构建项目”。云端只承担账户授权、模型能力、用量与策略控制；文件、网页访问、进程、浏览器、Skills 和工作流均通过本地 capability 边界接入。模型供应商密钥永远不下发到本地前端。
+
+### 一次任务如何执行
+
+模型不直接操作本机。它决定下一步，本地 Agent 执行器负责调用受控工具、持久化事实记录，并把进度实时推送到界面。
+
+```mermaid
+sequenceDiagram
+  participant UI as React 界面
+  participant API as Fastify 本地服务
+  participant Agent as AgentEngine
+  participant Store as JSONL 事件记录
+  participant Model as Daoyin AI Gateway
+  participant Tool as 工具注册表
+
+  UI->>API: 创建会话 / 发送任务
+  API->>Agent: 启动 turn
+  Agent->>Store: 记录 turn.started
+  Agent->>Model: 上下文 + 可用工具定义
+  Model-->>Agent: 文本回复或 tool_calls
+  Agent->>Store: 记录 tool.started
+  Agent->>Tool: 执行文件、网页、浏览器等工具
+  Tool-->>Agent: 结构化结果
+  Agent->>Store: 记录 tool.completed / tool.failed
+  Agent->>Model: 返回受限大小的工具结果
+  Model-->>Agent: 最终回答
+  Agent->>Store: 记录 assistant.delta / turn.completed
+  Store-->>UI: WebSocket 实时回放事件
+```
+
+以“查看工作区文件”为例，UI 调用本地会话 API；`AgentEngine` 写入 `turn.started` 后请求模型。模型选择 `list_files` 时，引擎依次持久化 `tool.started`、执行工作区工具、持久化完成或失败结果，再将受限大小的结果发送回模型。页面通过 session-scoped WebSocket 接收这些事件；重连或刷新时则按 `eventSeq` 从 JSONL 事实记录补回。
+
+工具执行形成明确的边界：工作区工具校验路径和链接逃逸，进程工具受 allowlist 与一次性权限控制，浏览器与公共 Web 访问过滤 loopback/私网目标。完整工具证据保留在 trajectory 中，而传给模型的副本会限长，避免超大目录或文档导致模型网关拒绝请求。
 
 ## 数据原则
 

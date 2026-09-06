@@ -25,15 +25,6 @@ The sibling directory `claude-code-main/` is local, read-only research material.
 
 The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harness`.
 
-### Site-wide UI consistency (mandatory)
-
-- Read and follow [docs/UI-STYLE-RULES.md](docs/UI-STYLE-RULES.md) before any UI change, including `concept-to-ui` concept generation and implementation.
-- Reuse `packages/ui/src/design-tokens.css` and existing shared components/layouts for typography, padding, gaps, control sizes, radii and colors. A single-page redesign must remain visually consistent with the rest of the site.
-- Keep the workbench compact: 14px body text, 13px controls, 16px section headings, 16px card padding and 20px desktop page padding. Use the documented shared scale; do not enlarge fonts or whitespace with viewport width.
-- Concept prompts must include the existing design-system constraints. Changing the site-wide visual language requires an explicit user request and coordinated updates to affected pages and documentation.
-- Change canonical style definitions instead of piling on overrides or creating page-private copies of shared rules. Preserve readable text, keyboard focus and mobile touch targets.
-- Validate neighboring pages and shared overlays at desktop and narrow viewports, not only the modified page. Report local-browser, mocked-API and production evidence separately.
-
 ## Repository and Git discipline
 
 - Use the root checkout on `main`; do not create worktrees or long-lived branches unless explicitly requested.
@@ -81,6 +72,15 @@ The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harn
 
 ## Validation
 
+### Site-wide UI consistency (mandatory)
+
+- Read and follow [docs/UI-STYLE-RULES.md](docs/UI-STYLE-RULES.md) before any UI change, including `concept-to-ui` concept generation and implementation.
+- Reuse `packages/ui/src/design-tokens.css` and existing shared components/layouts for typography, padding, gaps, control sizes, radii and colors. A single-page redesign must remain visually consistent with the rest of the site.
+- Keep the workbench compact: 14px body text, 13px controls, 16px section headings, 16px card padding and 20px desktop page padding. Use the documented shared scale; do not enlarge fonts or whitespace with viewport width.
+- Concept prompts must include the existing design-system constraints. Changing the site-wide visual language requires an explicit user request and coordinated updates to affected pages and documentation.
+- Change canonical style definitions instead of piling on overrides or creating page-private copies of shared rules. Preserve readable text, keyboard focus and mobile touch targets.
+- Validate neighboring pages and shared overlays at desktop and narrow viewports, not only the modified page. Report local-browser, mocked-API and production evidence separately.
+
 Every implementation change must include validation proportional to its risk:
 
 - Unit tests for pure state and policy logic.
@@ -89,6 +89,13 @@ Every implementation change must include validation proportional to its risk:
 - Security tests for authentication, CSRF, origin, path, secret, and process boundaries.
 - Browser E2E tests for visible UI behavior and reconnect replay.
 - Gated real-model tests for claims about actual Agent quality.
+
+### Shared-checkout platform ownership
+
+- Windows PowerShell is the only dependency-installation, test, build, runtime-smoke and acceptance environment for this shared checkout.
+- WSL contributors may edit source and documentation only. They must not run `npm install`, `npm ci`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, package verification or runtime acceptance commands in this checkout.
+- `node_modules` contains platform-specific optional native packages and must be installed from Windows using the Node.js version pinned by `.nvmrc` / `.node-version`.
+- WSL observations are development notes only and never count as validation evidence for this repository. All completion claims must cite fresh Windows results.
 
 Before completing an implementation task, run the repository's eventual commands:
 

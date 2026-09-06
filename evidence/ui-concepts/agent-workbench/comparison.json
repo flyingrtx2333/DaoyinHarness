@@ -1,0 +1,19 @@
+{
+  "reference": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\agent-workbench\\selected.png",
+  "actual": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\agent-workbench\\render-desktop.png",
+  "size": {
+    "width": 1586,
+    "height": 992
+  },
+  "tolerance": 24,
+  "normalized_mae": 0.03197429695955997,
+  "pixel_similarity": 0.96802570304044,
+  "within_tolerance_ratio": 0.9216398273196925,
+  "regions": {},
+  "thresholds": {
+    "max_mae": 0.035,
+    "min_within_tolerance": 0.9
+  },
+  "passed": true,
+  "violations": []
+}

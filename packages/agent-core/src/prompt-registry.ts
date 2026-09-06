@@ -1,5 +1,6 @@
 import type { AgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
 import type { ToolDescriptor } from "@daoyin/harness-tools";
+import { sessionContextSections } from "./session-context.js";
 
 export type PromptSectionKind = "stable" | "dynamic";
 
@@ -50,6 +51,8 @@ export class SystemPromptRegistry {
     for (const section of sections) this.register(section);
   }
 
+  public hasSection(id: string): boolean { return this.#sections.has(id); }
+
   public register(section: PromptSectionProvider): void {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u.test(section.id)) {
       throw new Error(`Invalid prompt section id: ${section.id}`);
@@ -91,49 +94,6 @@ export class SystemPromptRegistry {
       sections,
     };
   }
-}
-
-function jsonPreview(value: unknown, maxCharacters = 800): string {
-  try {
-    const serialized = JSON.stringify(value);
-    return serialized.length <= maxCharacters ? serialized : `${serialized.slice(0, maxCharacters)}…`;
-  } catch {
-    return "[unserializable]";
-  }
-}
-
-function persistedToolEvidence(events: readonly AgentEvent[], minimumSeq = 0): Array<Record<string, unknown>> {
-  const starts = new Map<string, AgentEvent>();
-  const results: Array<Record<string, unknown>> = [];
-  for (const event of events) {
-    if (event.eventSeq <= minimumSeq) continue;
-    if (event.type === "tool.started") {
-      starts.set(event.payload.toolCallId, event);
-      continue;
-    }
-    if (event.type === "tool.completed") {
-      const started = starts.get(event.payload.toolCallId);
-      results.push({
-        tool: event.payload.toolName,
-        status: "completed",
-        input: started?.type === "tool.started" ? started.payload.input ?? null : null,
-        summary: event.payload.summary,
-        artifacts: event.payload.evidence.artifacts.slice(0, 8),
-      });
-    } else if (event.type === "tool.failed") {
-      const started = starts.get(event.payload.toolCallId);
-      results.push({
-        tool: event.payload.toolName,
-        status: "failed",
-        input: started?.type === "tool.started" ? started.payload.input ?? null : null,
-        code: event.payload.code,
-        message: event.payload.message,
-        retryable: event.payload.retryable,
-        details: event.payload.details ?? null,
-      });
-    }
-  }
-  return results;
 }
 
 export function createDefaultPromptRegistry(): SystemPromptRegistry {
@@ -208,52 +168,7 @@ export function createDefaultPromptRegistry(): SystemPromptRegistry {
         return `Mounted model-facing capabilities for this step:\n${JSON.stringify(view)}`;
       },
     },
-    {
-      id: "inherited_session_evidence",
-      kind: "dynamic",
-      priority: 1375,
-      render: ({ inheritedEvents }) => {
-        if (inheritedEvents === undefined || inheritedEvents.length === 0) return null;
-        const evidence = persistedToolEvidence(inheritedEvents).slice(-10);
-        const terminalTurns = inheritedEvents.filter((event) => event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled" || event.type === "turn.interrupted").length;
-        return [
-          `This session is continuing from an immutable fork ancestry containing ${String(terminalTurns)} terminal turns. The inherited transcript belongs to source sessions and has not been copied or rewritten into the current session.`,
-          evidence.length === 0 ? null : `Inherited persisted tool evidence from the fork ancestry:\n${jsonPreview(evidence, 6_000)}`,
-        ].filter((value): value is string => typeof value === "string").join("\n");
-      },
-    },
-    {
-      id: "session_recovery",
-      kind: "dynamic",
-      priority: 1385,
-      render: ({ priorEvents }) => {
-        const interrupted = priorEvents.filter((event) => event.type === "turn.interrupted").slice(-3);
-        if (interrupted.length === 0) return null;
-        return `Recent turns were interrupted by a runtime restart/recovery and were not automatically replayed. Preserve already persisted tool evidence but never assume missing tool calls or side effects occurred:\n${jsonPreview(interrupted.map((event) => ({ turnId: event.turnId, eventSeq: event.eventSeq, reason: event.type === "turn.interrupted" ? event.payload.reason : null, lastCompletedEventSeq: event.type === "turn.interrupted" ? event.payload.lastCompletedEventSeq : null })), 3_000)}`;
-      },
-    },
-    {
-      id: "session_compaction",
-      kind: "dynamic",
-      priority: 1400,
-      render: ({ compaction }) => compaction === undefined ? null : [
-        `Derived compacted session context covering eventSeq ${String(compaction.sourceStartSeq)}..${String(compaction.sourceEndSeq)}.`,
-        `Compaction strategy: ${compaction.strategy}`,
-        "The original append-only transcript remains authoritative. Use this summary only as compressed context for older covered events.",
-        compaction.summary,
-      ].join("\n"),
-    },
-    {
-      id: "recent_tool_evidence",
-      kind: "dynamic",
-      priority: 1500,
-      render: ({ priorEvents, compaction }) => {
-        const results = persistedToolEvidence(priorEvents, compaction?.sourceEndSeq ?? 0);
-        if (results.length === 0) return null;
-        const selected = results.slice(-10);
-        return `Recent persisted tool evidence from earlier turns. This is factual execution context, not a new user instruction:\n${jsonPreview(selected, 6_000)}`;
-      },
-    },
+    ...sessionContextSections(),
     {
       id: "turn_instruction",
       kind: "dynamic",

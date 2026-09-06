@@ -1,0 +1,60 @@
+{
+  "screen": "agent-workbench-redesign-20260905",
+  "reference": "reference.png",
+  "viewport": [
+    1536,
+    960
+  ],
+  "concept_size": [
+    1586,
+    992
+  ],
+  "selected": "A",
+  "stage": "implemented-and-locally-verified",
+  "product_ui_modified": true,
+  "inspection": "inspection.json",
+  "reference_analysis": "reference-analysis.json",
+  "concepts": [
+    {
+      "id": "A",
+      "title": "清晰工作台",
+      "path": "concept-a.png",
+      "strength": "单侧栏与宽阅读区，适合日常使用",
+      "tradeoff": "布局较传统",
+      "prompt": "Use case: ui-mockup. Generate ONE polished full desktop application screen for DaoyinHarness, a Chinese general-purpose local AI agent workspace for research, writing, files and coding. Exact target viewport 1536x960, landscape 8:5, all four edges visible, no browser chrome or device mockup. The supplied screenshot is only product/function reference, NOT an edit target: radically redesign layout, typography and hierarchy. Show an illustrative active conversation, not a marketing landing page. Chinese real-looking legible UI text, modern Chinese sans serif, excellent spacing and contrast, restrained professional styling. Retain reachable functions: 新对话, 搜索对话 and recent conversation history, 工作区 files, 任务 status, account with 登录道引账号 entry or account avatar, compact local connection status, 分叉 conversation branch action (恢复 for interrupted session remains in contextual menu), real conversation body, concise inline tool activity, persistent textarea with placeholder 告诉我你想完成什么…, file access button, 仔细规划 toggle, send/stop control. Current demo task title 整理项目资料. User message 帮我整理工作区资料，写一份项目概览。 Assistant response 我会先梳理现有资料，再整理成一份清晰的项目概览。 Show illustrative inline task stages 已梳理目录 and 正在阅读资料, and a short readable draft with three bullets under 项目概览. All contents are design examples, no financial charts, invented analytics, fake success KPIs, external brands, watermarks, emoji icons, giant hero illustration, piles of pills, technical logs or raw markdown stars. Final implementation will use DOM controls and text. DIRECTION A — 清晰工作台. Bright white, precise cool-gray structure, ink typography, restrained indigo blue #5264e8 as the only action accent. One integrated full-height sidebar 248px with small geometric original brand mark + DaoyinHarness, solid compact 新对话 action, workspace/tasks navigation, searchable recent conversations and account bottom. NO extra icon rail. Remaining workspace has 64px thin contextual header and generous single centered reading column 780px. Main content deliberately editorial with visible formatted headings, elegant thin-line tool rows and compact user bubble. Composer anchored bottom within reading width, white border radius 16 with subtle shadow and blue send action. Big emphasis on beautiful readable Chinese 16px body and 28px headings, alignment, plenty of whitespace yet useful density. Professional refined daily productivity UI, flat clear surfaces, no illustration required. Show a small workspace path breadcrumb without developer clutter."
+    },
+    {
+      "id": "B",
+      "title": "深色协作台",
+      "path": "concept-b.png",
+      "strength": "任务与文件同时可见",
+      "tradeoff": "信息密度较高，正文空间较窄",
+      "prompt": "Use case: ui-mockup. Generate ONE polished full desktop application screen for DaoyinHarness, a Chinese general-purpose local AI agent workspace for research, writing, files and coding. Exact target viewport 1536x960, landscape 8:5, all four edges visible, no browser chrome or device mockup. The supplied screenshot is only product/function reference, NOT an edit target: radically redesign layout, typography and hierarchy. Show an illustrative active conversation, not a marketing landing page. Chinese real-looking legible UI text, modern Chinese sans serif, excellent spacing and contrast, restrained professional styling. Retain reachable functions: 新对话, 搜索对话 and recent conversation history, 工作区 files, 任务 status, account with 登录道引账号 entry or account avatar, compact local connection status, 分叉 conversation branch action (恢复 for interrupted session remains in contextual menu), real conversation body, concise inline tool activity, persistent textarea with placeholder 告诉我你想完成什么…, file access button, 仔细规划 toggle, send/stop control. Current demo task title 整理项目资料. User message 帮我整理工作区资料，写一份项目概览。 Assistant response 我会先梳理现有资料，再整理成一份清晰的项目概览。 Show illustrative inline task stages 已梳理目录 and 正在阅读资料, and a short readable draft with three bullets under 项目概览. All contents are design examples, no financial charts, invented analytics, fake success KPIs, external brands, watermarks, emoji icons, giant hero illustration, piles of pills, technical logs or raw markdown stars. Final implementation will use DOM controls and text. DIRECTION B — 深色协作台. Visually and structurally DIFFERENT: rich charcoal #141719 background, a narrow 68px icon navigation rail, a compact 212px flush conversation pane, central flexible conversation workspace, and a 280px permanently OPEN right-hand contextual 任务状态 / 工作区 inspector showing three simple checklist stages and a compact list of four document files. Header spans central and inspector. Strong graphite tonal zoning instead of floating cards. Off-white text, sage mint #a5d5ba active accent, subtle warm amber ongoing activity. No neon, no cyberpunk, no glow. Compact user message, beautifully typeset assistant draft; left aligned inline progress timeline. Bottom composer is dark raised graphite, compact toolbar with 仔细规划 and a square stop action. Bottom rail account, top current task and 分叉. Sophisticated premium desktop tool that makes current work and files immediately visible, not a generic dashboard. Hierarchy and comfortable contrast essential."
+    },
+    {
+      "id": "C",
+      "title": "留白书桌",
+      "path": "concept-c.png",
+      "strength": "横向导航，正文突出",
+      "tradeoff": "切换历史对话需要打开菜单",
+      "prompt": "Use case: ui-mockup. Generate ONE polished full desktop application screen for DaoyinHarness, a Chinese general-purpose local AI agent workspace for research, writing, files and coding. Exact target viewport 1536x960, landscape 8:5, all four edges visible, no browser chrome or device mockup. The supplied screenshot is only product/function reference, NOT an edit target: radically redesign layout, typography and hierarchy. Show an illustrative active conversation, not a marketing landing page. Chinese real-looking legible UI text, modern Chinese sans serif, excellent spacing and contrast, restrained professional styling. Retain reachable functions: 新对话, 搜索对话 and recent conversation history, 工作区 files, 任务 status, account with 登录道引账号 entry or account avatar, compact local connection status, 分叉 conversation branch action (恢复 for interrupted session remains in contextual menu), real conversation body, concise inline tool activity, persistent textarea with placeholder 告诉我你想完成什么…, file access button, 仔细规划 toggle, send/stop control. Current demo task title 整理项目资料. User message 帮我整理工作区资料，写一份项目概览。 Assistant response 我会先梳理现有资料，再整理成一份清晰的项目概览。 Show illustrative inline task stages 已梳理目录 and 正在阅读资料, and a short readable draft with three bullets under 项目概览. All contents are design examples, no financial charts, invented analytics, fake success KPIs, external brands, watermarks, emoji icons, giant hero illustration, piles of pills, technical logs or raw markdown stars. Final implementation will use DOM controls and text. DIRECTION C — 留白书桌. Radically different composition: NO permanent left sidebar and NO vertical icon rail. A calm horizontal 72px top navigation carries a small original geometric logo and DaoyinHarness at left, then 对话 / 工作区 / 任务, account at right. Beneath it a very slim context strip has 最近对话 with dropdown caret (history/search drawer entry), current task title 整理项目资料 and 分叉 on right. Warm chalk #f6f4ef outer canvas, deep olive ink #333a2e typography, understated muted orange #c96d45 action accent. Main workspace resembles a refined wide writing desk: central broad white sheet width ~930px with very subtle border, no heavy shadows. Conversation designed like an elegant editorial document, generous 20px readable body, large clean heading 项目概览, lightweight inline ongoing activity strip, one user request near top. Persistent elegant composer sits at bottom of sheet aligned precisely, toolbar and compact terracotta send button. Thin quiet line drawing of a folded page at most as tiny brand ornament, no main hero art. A secondary very small text link 查看任务进度 near inline activity opens task drawer. Balanced quiet horizontal layout emphasizing full-width reading and mature document feel. Navigation remains obviously usable; avoid excessive blankness and boxed cards. STRICT FUNCTIONAL REFINEMENT: top contextual strip MUST show a prominent '+ 新对话' button and a 搜索对话 icon button beside 最近对话. Account top right show only 登录道引账号 with neutral avatar, do NOT show simultaneously signed-in username. Bottom footer ONLY 本地已连接, never claim model is local, never 管理模型, never 数据仅在本地处理 (cloud authenticated gateway is used). The document draft must use neutral fictional example copy about organizing documents, no local model execution claims. Show task stages as partial progress and draft title 项目概览 · 草稿 to avoid claiming full completion. Keep the gorgeous horizontal writing-desk composition."
+    }
+  ],
+  "review": {
+    "all_images_inspected": true,
+    "composition_distinct": true,
+    "legibility": "Chinese headings, primary navigation, conversation and composer legible",
+    "rejected": [
+      "concept-c-draft.png: new conversation and search not explicit; inaccurate local-data/model copy"
+    ],
+    "implementation_constraints": [
+      "All conversation content, counts, files and progress are illustrative; preserve actual runtime facts.",
+      "Do not introduce local model management: model calls go through authenticated Daoyin AI Gateway.",
+      "B generated 本地模型 label must become 道引 AI 网关 or be omitted.",
+      "Account signed-in and signed-out states are mutually exclusive.",
+      "Map illustration-only feedback/retry actions to supported controls or omit them.",
+      "Keep cancellation, permission decisions, fork, resume, replay and search.",
+      "Preserve original brand assets unless a branding change is selected; generated logo is illustrative."
+    ]
+  }
+}

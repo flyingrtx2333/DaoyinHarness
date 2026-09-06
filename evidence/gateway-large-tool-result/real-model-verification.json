@@ -1,0 +1,44 @@
+{
+  "verifiedAt": "2026-09-05T03:47:46.312Z",
+  "evidence": "Real Daoyin Gateway model calls and real read-only local list_files; isolated append-only verification transcript",
+  "sessionId": "large_result_1788580055161",
+  "status": "completed",
+  "http": [
+    {
+      "status": 200,
+      "messages": [
+        {
+          "role": "system",
+          "characters": 4681
+        },
+        {
+          "role": "user",
+          "characters": 89
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "messages": [
+        {
+          "role": "system",
+          "characters": 4681
+        },
+        {
+          "role": "user",
+          "characters": 89
+        },
+        {
+          "role": "assistant_tool_calls",
+          "characters": 0
+        },
+        {
+          "role": "tool",
+          "characters": 23953
+        }
+      ]
+    }
+  ],
+  "originalToolResultCharacters": 129744,
+  "finalText": "返回结果显示工作区里存在一个 Git 仓库，可见内容主要是 `.git/` 下的版本控制文件，包括配置、钩子、日志和大量对象文件。工具明确标注结果被截断，共列出 2000 个文件但模型上下文只拿到部分预览，因此这里看到的目录内容并不完整。从当前预览来看，展示的几乎都是 Git 内部元数据，尚未在这段结果中看到工作区根目录下的普通项目文件。"
+}

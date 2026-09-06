@@ -1,0 +1,82 @@
+{
+  "source": "C:\\Users\\17489\\AppData\\Local\\Temp\\codex-clipboard-d74a8248-6bb2-431d-880f-8a69df20bd53.png",
+  "size": {
+    "width": 1375,
+    "height": 870
+  },
+  "aspect_ratio": 1.5804597701149425,
+  "top_colors": [
+    {
+      "rgb": [
+        254,
+        254,
+        255
+      ],
+      "hex": "#fefeff",
+      "count": 629427
+    },
+    {
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "hex": "#ffffff",
+      "count": 411924
+    },
+    {
+      "rgb": [
+        254,
+        254,
+        254
+      ],
+      "hex": "#fefefe",
+      "count": 34722
+    },
+    {
+      "rgb": [
+        253,
+        253,
+        254
+      ],
+      "hex": "#fdfdfe",
+      "count": 18786
+    },
+    {
+      "rgb": [
+        252,
+        252,
+        254
+      ],
+      "hex": "#fcfcfe",
+      "count": 16674
+    },
+    {
+      "rgb": [
+        252,
+        252,
+        253
+      ],
+      "hex": "#fcfcfd",
+      "count": 12068
+    },
+    {
+      "rgb": [
+        251,
+        251,
+        253
+      ],
+      "hex": "#fbfbfd",
+      "count": 4015
+    },
+    {
+      "rgb": [
+        56,
+        100,
+        232
+      ],
+      "hex": "#3864e8",
+      "count": 2445
+    }
+  ]
+}

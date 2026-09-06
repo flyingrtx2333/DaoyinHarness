@@ -1,0 +1,32 @@
+{
+  "reference": "selected.png",
+  "assets": [
+    {
+      "family": "Brand mark",
+      "treatment": "Code-native independently authored geometric SVG",
+      "component": "BrandMark",
+      "selectors": [
+        ".sidebar-brand .brand-mark",
+        ".assistant-avatar .brand-mark",
+        ".welcome > .brand-mark"
+      ]
+    },
+    {
+      "family": "UI icons and switches",
+      "treatment": "Code-native SVG and CSS",
+      "component": "Icon",
+      "selectors": [
+        ".sidebar-primary",
+        ".composer-actions",
+        ".tool-line"
+      ]
+    },
+    {
+      "family": "Illustrative paper artwork",
+      "treatment": "Not present in selected A; prior user asset preserved but not loaded",
+      "selectors": []
+    }
+  ],
+  "raster_assets_required": false,
+  "external_asset_requests": false
+}

@@ -1,0 +1,19 @@
+{
+  "reference": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\cloud-modern-20260906-side\\selected-reference.png",
+  "actual": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\cloud-modern-20260906-side\\desktop-picker.png",
+  "size": {
+    "width": 1672,
+    "height": 941
+  },
+  "tolerance": 24,
+  "normalized_mae": 0.01903554268232843,
+  "pixel_similarity": 0.9809644573176716,
+  "within_tolerance_ratio": 0.9633978918894183,
+  "regions": {},
+  "thresholds": {
+    "max_mae": 0.035,
+    "min_within_tolerance": 0.9
+  },
+  "passed": true,
+  "violations": []
+}

@@ -1,0 +1,35 @@
+{
+  "screen": "cloud-composer",
+  "reference": "C:/Users/17489/AppData/Local/Temp/codex-clipboard-bef473a3-7d70-41e6-a865-c38af08bbbee.png",
+  "viewport": [
+    1440,
+    900
+  ],
+  "concepts": [
+    {
+      "id": "A",
+      "title": "静谧编辑式任务栏",
+      "path": "concept-a.png",
+      "prompt_direction": "暖白与浅蓝的纸张式输入托盘，使用新任务标签、细描边和克制状态色。",
+      "strength": "最贴近已上线的浅色导航与插件目录，容易长期保持一致。",
+      "tradeoff": "视觉变化较克制。"
+    },
+    {
+      "id": "B",
+      "title": "深色专注控制台",
+      "path": "concept-b.png",
+      "prompt_direction": "深海军蓝任务画布，石墨输入面板，明晰插件连接状态和电蓝发送动作。",
+      "strength": "最强聚焦感，输入区成为明确的操作中心。",
+      "tradeoff": "需要引入深色主画布，与现有浅色页面差异最大。"
+    },
+    {
+      "id": "C",
+      "title": "引导式研究桌面",
+      "path": "concept-c.png",
+      "prompt_direction": "暖白与淡紫聚光区，在输入前呈现少量可点击的研究起点。",
+      "strength": "初次使用时最容易理解可提问内容。",
+      "tradeoff": "会比 A 多一层引导内容，需要严格控制文案。"
+    }
+  ],
+  "selected": null
+}\n

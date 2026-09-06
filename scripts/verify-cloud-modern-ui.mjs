@@ -11,7 +11,7 @@ import { chromium } from "playwright-core";
 if (process.platform !== "win32") throw new Error("Run acceptance on Windows.");
 const evidence = resolve(`evidence/ui-concepts/plugin-catalog-20260906/run-${new Date().toISOString().replace(/[:.]/g, "-")}`);
 await mkdir(evidence, { recursive: true });
-const release = JSON.parse(execFileSync(process.execPath, ["scripts/build-workbench-release.mjs"], { encoding: "utf8", windowsHide: true }));
+const release = JSON.parse(execFileSync(process.execPath, ["scripts/build-workbench-release.mjs", "--preview"], { encoding: "utf8", windowsHide: true }));
 const output = release.output;
 const logoFile = Object.keys(release.files).find(file => /^assets\/harness-logo-.+\.png$/u.test(file));
 assert.ok(logoFile, "Brand image missing from release manifest");
@@ -150,6 +150,7 @@ try {
   await page.getByRole("heading", { name: "短剧制作" }).waitFor();
   await capture(page, "desktop-plugins", false);
   assert.equal(await page.locator(".plugin-catalog").getByRole("button", { name: /^使用/u }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: "连接授权赛事只读" }).count(), 1);
   assert.equal(await page.locator(".plugin-catalog").getByText("待接入", { exact: true }).count(), 3);
   assert.equal(await page.locator(".plugin-capabilities,.plugin-card-bottom").count(), 0);
   await page.getByRole("searchbox", { name: "搜索插件" }).fill("字幕");

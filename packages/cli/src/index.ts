@@ -48,7 +48,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const publicDir = fileURLToPath(new URL("./public", import.meta.url));
   const running = await startHarness(options, VERSION, publicDir);
   console.log(`DaoyinHarness ${VERSION} 已启动：${running.url}`);
-  console.log(`工作区：${options.workspaceRoot}`);
+  const bootstrap = await running.app.inject({ url: "/api/v1/bootstrap", headers: { host: `127.0.0.1:${running.port}` } });
+  console.log(`工作区：${bootstrap.json<{ workspace: { root: string } }>().workspace.root}`);
   console.log(`数据目录：${options.dataDir}`);
 
   const shutdown = async (): Promise<void> => {

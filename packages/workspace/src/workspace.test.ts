@@ -17,6 +17,18 @@ afterEach(async () => {
 });
 
 describe("Workspace", () => {
+  it("keeps source files searchable while excluding internal directories from default enumeration", async () => {
+    const root = await temporaryDirectory("daoyin-harness-enumeration-");
+    for (const directory of [".git", "node_modules", "src/node_modules", "dist", ".cache", "claude-code-main", ".github", "src"]) {
+      await mkdir(path.join(root, directory), { recursive: true });
+      await writeFile(path.join(root, directory, "marker.txt"), "find-me", "utf8");
+    }
+    const workspace = await Workspace.open(root, { maxFiles: 3 });
+    expect(await workspace.listFiles()).toEqual([".github/marker.txt", "src/marker.txt"]);
+    expect((await workspace.searchText("find-me")).map((hit) => hit.path)).toEqual([".github/marker.txt", "src/marker.txt"]);
+    expect(await workspace.readText("dist/marker.txt")).toBe("find-me");
+    expect(await workspace.listFiles("dist")).toEqual(["dist/marker.txt"]);
+  });
   it("reads, searches, writes, and patches files inside the root", async () => {
     const root = await temporaryDirectory("daoyin-harness-workspace-");
     await writeFile(path.join(root, "README.md"), "hello world\nsecond line\n", "utf8");

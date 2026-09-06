@@ -1,0 +1,2763 @@
+{
+  "evidence": "Windows local browser; production bundle; mocked business API; no live model",
+  "checks": [
+    "Aurora Fold bytes, image loading/aspect ratio, favicon and release manifest",
+    "Picker availability, Escape and focus restoration",
+    "Plugin navigation, filtering and return to composer",
+    "Suggestion fill, send, tool progress and cancellation",
+    "Source disclosure, reconnect/reload replay, session search and new session",
+    "1280 desktop and 390/320 mobile geometry, picker and navigation",
+    "C catalog copy budget, metadata search, pending non-actionable, keyboard use, busy disabled, 200% text and long-title reflow",
+    "A sidebar order, shared scale, keyboard order, footer link, long-title clipping, 44-session independent scroll and selection",
+    "Expired authorization recovery and disabled submission"
+  ],
+  "errors": [],
+  "failedRequests": [],
+  "expectedErrors": [
+    "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "captures": [
+    {
+      "name": "desktop-empty",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 552.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 869.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 882.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 885.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 560,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 560,
+            "y": 757.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-picker",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 552.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 869.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 882.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 885.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 560,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 560,
+            "y": 757.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": {
+            "x": 573,
+            "y": 537.8125,
+            "width": 264,
+            "height": 291
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop-plugins",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 504,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 552.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 869.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 882.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 885.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-running",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 552.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 869.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 882.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 885.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 560,
+            "y": 757.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-answer",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 552.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 869.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 882.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 885.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 560,
+            "y": 757.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-large",
+      "layout": {
+        "width": 2073,
+        "height": 1296,
+        "scrollWidth": 2073,
+        "scrollHeight": 1296,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 1296
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 907.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 1224.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 1237.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 1240.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 1272
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 760.5,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 760.5,
+            "y": 1112.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-large-picker",
+      "layout": {
+        "width": 2073,
+        "height": 1296,
+        "scrollWidth": 2073,
+        "scrollHeight": 1296,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 1296
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 907.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 1224.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 1237.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 1240.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 1272
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 760.5,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 760.5,
+            "y": 1112.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": {
+            "x": 773.5,
+            "y": 892.8125,
+            "width": 264,
+            "height": 291
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop-large-plugins",
+      "layout": {
+        "width": 2073,
+        "height": 1296,
+        "scrollWidth": 2073,
+        "scrollHeight": 1296,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 504,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 1296
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 907.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 1224.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 1237.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 1240.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 1272
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-1280",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 720
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 331.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 648.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 661.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 664.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 696
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 364,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 364,
+            "y": 536.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-1280-picker",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 720
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 331.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 648.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 661.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 664.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 696
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 364,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 364,
+            "y": 536.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": {
+            "x": 377,
+            "y": 316.8125,
+            "width": 264,
+            "height": 291
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop-1280-plugins",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 504,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 720
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 331.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 648.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 661.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 664.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 696
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".brand": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".new-session": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".workspace-tabs": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-label": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".search": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".session-list": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-footer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".scope": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".site-link": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 350,
+            "height": 271.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 656.4375,
+            "width": 350,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-picker",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".brand": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".new-session": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".workspace-tabs": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-label": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".search": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".session-list": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-footer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".scope": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".site-link": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 350,
+            "height": 271.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 656.4375,
+            "width": 350,
+            "height": 140.375
+          },
+          ".plugin-picker": {
+            "x": 33,
+            "y": 394.8125,
+            "width": 264,
+            "height": 337
+          }
+        }
+      }
+    },
+    {
+      "name": "mobile-sidebar",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 8,
+            "y": 68,
+            "width": 290,
+            "height": 768
+          },
+          ".brand": {
+            "x": 33,
+            "y": 85,
+            "width": 240,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 25,
+            "y": 137,
+            "width": 256,
+            "height": 44
+          },
+          ".workspace-tabs": {
+            "x": 25,
+            "y": 193,
+            "width": 256,
+            "height": 109
+          },
+          ".sidebar-label": {
+            "x": 25,
+            "y": 322,
+            "width": 256,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 25,
+            "y": 349.1875,
+            "width": 256,
+            "height": 44
+          },
+          ".session-list": {
+            "x": 25,
+            "y": 405.1875,
+            "width": 256,
+            "height": 344.8125
+          },
+          ".sidebar-footer": {
+            "x": 25,
+            "y": 762,
+            "width": 256,
+            "height": 57
+          },
+          ".scope": {
+            "x": 33,
+            "y": 775.5,
+            "width": 194.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 235.46875,
+            "y": 775,
+            "width": 37.53125,
+            "height": 44
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 350,
+            "height": 271.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 656.4375,
+            "width": 350,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-plugins",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 270.78125,
+            "height": 138.78125,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 447.953125,
+            "height": 161.171875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 577.921875,
+            "height": 113.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 707.890625,
+            "height": 113.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 837.859375,
+            "height": 113.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".brand": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".new-session": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".workspace-tabs": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-label": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".search": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".session-list": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-footer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".scope": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".site-link": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-small",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".brand": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".new-session": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".workspace-tabs": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-label": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".search": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".session-list": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-footer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".scope": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".site-link": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 280,
+            "height": 259.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 452.4375,
+            "width": 280,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-small-picker",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".brand": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".new-session": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".workspace-tabs": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-label": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".search": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".session-list": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-footer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".scope": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".site-link": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 280,
+            "height": 259.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 452.4375,
+            "width": 280,
+            "height": 140.375
+          },
+          ".plugin-picker": {
+            "x": 33,
+            "y": 190.8125,
+            "width": 256,
+            "height": 337
+          }
+        }
+      }
+    },
+    {
+      "name": "mobile-small-sidebar",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 8,
+            "y": 68,
+            "width": 272,
+            "height": 564
+          },
+          ".brand": {
+            "x": 33,
+            "y": 85,
+            "width": 222,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 25,
+            "y": 137,
+            "width": 238,
+            "height": 44
+          },
+          ".workspace-tabs": {
+            "x": 25,
+            "y": 193,
+            "width": 238,
+            "height": 109
+          },
+          ".sidebar-label": {
+            "x": 25,
+            "y": 322,
+            "width": 238,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 25,
+            "y": 349.1875,
+            "width": 238,
+            "height": 44
+          },
+          ".session-list": {
+            "x": 25,
+            "y": 405.1875,
+            "width": 238,
+            "height": 140.8125
+          },
+          ".sidebar-footer": {
+            "x": 25,
+            "y": 558,
+            "width": 238,
+            "height": 57
+          },
+          ".scope": {
+            "x": 33,
+            "y": 571.5,
+            "width": 176.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 217.46875,
+            "y": 571,
+            "width": 37.53125,
+            "height": 44
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 280,
+            "height": 259.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 452.4375,
+            "width": 280,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-small-plugins",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 270.78125,
+            "height": 138.78125,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 470.34375,
+            "height": 183.5625,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 600.3125,
+            "height": 113.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 730.28125,
+            "height": 113.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 860.25,
+            "height": 113.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".brand": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".new-session": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".workspace-tabs": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-label": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".search": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".session-list": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-footer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".scope": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".site-link": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "sidebar-a-reference",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 504,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 552.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 869.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 882.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 885.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "sidebar-long-1280",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 248,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 376,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 504,
+            "height": 112,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 720
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 200,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 216,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 216,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 216,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 216,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 216,
+            "height": 331.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 648.015625,
+            "width": 216,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 661.015625,
+            "width": 154.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 182.46875,
+            "y": 664.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 696
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 52
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "sidebar-long-768",
+      "layout": {
+        "width": 768,
+        "height": 720,
+        "scrollWidth": 768,
+        "scrollHeight": 720,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 208,
+            "height": 720
+          },
+          ".brand": {
+            "x": 20,
+            "y": 16,
+            "width": 168,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 12,
+            "y": 68,
+            "width": 184,
+            "height": 36
+          },
+          ".workspace-tabs": {
+            "x": 12,
+            "y": 116,
+            "width": 184,
+            "height": 93
+          },
+          ".sidebar-label": {
+            "x": 12,
+            "y": 229,
+            "width": 184,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 12,
+            "y": 256.1875,
+            "width": 184,
+            "height": 36
+          },
+          ".session-list": {
+            "x": 12,
+            "y": 304.1875,
+            "width": 184,
+            "height": 331.828125
+          },
+          ".sidebar-footer": {
+            "x": 12,
+            "y": 648.015625,
+            "width": 184,
+            "height": 55.984375
+          },
+          ".scope": {
+            "x": 20,
+            "y": 661.015625,
+            "width": 122.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 150.46875,
+            "y": 664.5,
+            "width": 37.53125,
+            "height": 36
+          },
+          ".main": {
+            "x": 208,
+            "y": 12,
+            "width": 548,
+            "height": 696
+          },
+          ".topbar": {
+            "x": 208,
+            "y": 12,
+            "width": 548,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 228,
+            "y": 64,
+            "width": 508,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 228,
+            "y": 536.8125,
+            "width": 508,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "sidebar-long-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 8,
+            "y": 68,
+            "width": 290,
+            "height": 768
+          },
+          ".brand": {
+            "x": 33,
+            "y": 85,
+            "width": 240,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 25,
+            "y": 137,
+            "width": 256,
+            "height": 44
+          },
+          ".workspace-tabs": {
+            "x": 25,
+            "y": 193,
+            "width": 256,
+            "height": 109
+          },
+          ".sidebar-label": {
+            "x": 25,
+            "y": 322,
+            "width": 256,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 25,
+            "y": 349.1875,
+            "width": 256,
+            "height": 44
+          },
+          ".session-list": {
+            "x": 25,
+            "y": 405.1875,
+            "width": 256,
+            "height": 344.8125
+          },
+          ".sidebar-footer": {
+            "x": 25,
+            "y": 762,
+            "width": 256,
+            "height": 57
+          },
+          ".scope": {
+            "x": 33,
+            "y": 775.5,
+            "width": 194.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 235.46875,
+            "y": 775,
+            "width": 37.53125,
+            "height": 44
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 350,
+            "height": 271.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 656.4375,
+            "width": 350,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "sidebar-long-320",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 8,
+            "y": 68,
+            "width": 272,
+            "height": 564
+          },
+          ".brand": {
+            "x": 33,
+            "y": 85,
+            "width": 222,
+            "height": 32
+          },
+          ".new-session": {
+            "x": 25,
+            "y": 137,
+            "width": 238,
+            "height": 44
+          },
+          ".workspace-tabs": {
+            "x": 25,
+            "y": 193,
+            "width": 238,
+            "height": 109
+          },
+          ".sidebar-label": {
+            "x": 25,
+            "y": 322,
+            "width": 238,
+            "height": 19.1875
+          },
+          ".search": {
+            "x": 25,
+            "y": 349.1875,
+            "width": 238,
+            "height": 44
+          },
+          ".session-list": {
+            "x": 25,
+            "y": 405.1875,
+            "width": 238,
+            "height": 140.8125
+          },
+          ".sidebar-footer": {
+            "x": 25,
+            "y": 558,
+            "width": 238,
+            "height": 57
+          },
+          ".scope": {
+            "x": 33,
+            "y": 571.5,
+            "width": 176.46875,
+            "height": 42.984375
+          },
+          ".site-link": {
+            "x": 217.46875,
+            "y": 571,
+            "width": 37.53125,
+            "height": 44
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 280,
+            "height": 259.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 452.4375,
+            "width": 280,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-expired",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".brand": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".new-session": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".workspace-tabs": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-label": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".search": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".session-list": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".sidebar-footer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".scope": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".site-link": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 20,
+            "y": 452.4375,
+            "width": 280,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    }
+  ]
+}

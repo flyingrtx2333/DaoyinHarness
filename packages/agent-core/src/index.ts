@@ -4,6 +4,7 @@ export {
   type AgentRunResult,
   type AgentTurnInput,
 } from "./agent-engine.js";
+export type { AgentMemoryProvider, MemoryContextRequest, MemoryContextSnapshot } from "./memory-context.js";
 export {
   type ModelClient,
   type ModelConversationItem,
@@ -32,5 +33,3 @@ export {
   type PromptSectionProvider,
   type ResolvedPromptSection,
 } from "./prompt-registry.js";
-
-export type { AgentMemoryProvider, MemoryContextRequest, MemoryContextSnapshot } from "./memory-context.js";

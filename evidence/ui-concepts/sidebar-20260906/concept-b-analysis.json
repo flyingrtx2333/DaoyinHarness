@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\sidebar-20260906\\concept-b.png",
+  "size": {
+    "width": 1672,
+    "height": 941
+  },
+  "aspect_ratio": 1.7768331562167907,
+  "top_colors": [
+    {
+      "rgb": [
+        254,
+        254,
+        254
+      ],
+      "hex": "#fefefe",
+      "count": 507611
+    },
+    {
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "hex": "#ffffff",
+      "count": 185403
+    },
+    {
+      "rgb": [
+        255,
+        254,
+        255
+      ],
+      "hex": "#fffeff",
+      "count": 84464
+    },
+    {
+      "rgb": [
+        247,
+        248,
+        250
+      ],
+      "hex": "#f7f8fa",
+      "count": 68119
+    },
+    {
+      "rgb": [
+        253,
+        253,
+        253
+      ],
+      "hex": "#fdfdfd",
+      "count": 58619
+    },
+    {
+      "rgb": [
+        248,
+        249,
+        251
+      ],
+      "hex": "#f8f9fb",
+      "count": 55537
+    },
+    {
+      "rgb": [
+        254,
+        253,
+        254
+      ],
+      "hex": "#fefdfe",
+      "count": 49536
+    },
+    {
+      "rgb": [
+        248,
+        248,
+        250
+      ],
+      "hex": "#f8f8fa",
+      "count": 49365
+    }
+  ]
+}

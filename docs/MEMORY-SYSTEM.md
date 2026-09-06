@@ -105,8 +105,8 @@
 
 新增四个测试文件：`memory-policy.test.ts`、`memory-repository.test.ts`、`memory-routes.test.ts`、`agent-core/src/memory-context.test.ts`。覆盖纯策略、临时真实 SQLite、真实 Fastify/共享 AgentEngine 与模拟认证/模型组合；没有真实供应商调用。管理 API 现提供能力声明与不含正文的审计查询；候选仅能由其管理者读取。Run 引用回执也要求当前身份仍持有 `memory.read`，权限撤销后不会泄露引用标识。
 
-官网 BFF 和管理界面仍需主平台把这些同源 API 安全映射给已认证用户；Harness 不会把执行服务的 Bearer 凭据交给浏览器，也不会假装已经拥有主平台的跨应用安装核验。发布前仍需完成仓库级验证和独立上线记录。
+官网 BFF 和管理界面仍需主平台把这些同源 API 安全映射给已认证用户；Harness 不会把执行服务的 Bearer 凭据交给浏览器，也不会假装已经拥有主平台的跨应用安装核验。以下 Windows 全量验证、Git 提交和部署尚未完成。
 
 接通真实用户前需要：主平台记忆权限与目标应用检查、同源管理入口和确认界面、真实隔离联调。之后再做聊天候选提取、语义召回评估、资源/部门 ACL、依赖感知摘要、细粒度历史遗忘策略及多实例持久化。不能仅因 API 和测试文件存在就宣称 C 端线上记忆已经互通。
 
-决策：[ADR-0011](adr/0011-versioned-scoped-memory.md)。
+决策：[ADR-0011](adr/0011-versioned-scoped-memory.md)。内核其他未验收改动：[内核可靠性](ENGINE-RELIABILITY.md)。

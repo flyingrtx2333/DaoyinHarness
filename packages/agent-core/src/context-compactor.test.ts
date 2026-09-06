@@ -64,7 +64,7 @@ describe("ContextCompactor", () => {
     expect(compacted).toMatchObject({
       sourceStartSeq: 1,
       sourceEndSeq: 6,
-      strategy: "deterministic-trajectory-v1",
+      strategy: "deterministic-trajectory-v2",
     });
     expect(compacted?.summary).toContain("User request 1");
     expect(compacted?.summary).toContain("User request 2");

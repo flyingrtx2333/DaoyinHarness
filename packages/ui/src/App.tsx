@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { MarkdownMessage } from "./MarkdownMessage.js";
+import { WorkspaceManager } from "./WorkspaceManager.js";
+import { readSidebarPreference, useMediaQuery } from "./use-media-query.js";
 import type { AgentEvent, LocalSessionSummary, OrchestrationSnapshot, RuntimeBootstrap, SessionEventStreamMessage, SessionSearchHit } from "@daoyin/harness-protocol";
 import {
   bootstrapRuntime,
+  invalidateRuntimeContext,
+  RUNTIME_CONTEXT_CHANGED_EVENT,
+  beginAuthentication,
   cancelTurn,
   createSession,
   decideProcessPermission,
@@ -11,12 +17,13 @@ import {
   getSessionEvents,
   getWorkspaceFiles,
   openSessionEventStream,
+  logoutAuthentication,
   resumeSession,
   searchSessions,
   startTurn,
 } from "./api.js";
 
-type IconName = "chat" | "close" | "file" | "folder" | "fork" | "menu" | "plus" | "resume" | "search" | "send" | "spark" | "stop";
+type IconName = "chat" | "close" | "file" | "folder" | "fork" | "menu" | "plus" | "resume" | "search" | "send" | "spark" | "stop" | "collapse" | "copy" | "check";
 
 type LoadState =
   | { kind: "loading" }
@@ -58,6 +65,9 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
 function Icon({ name }: { name: IconName }): React.JSX.Element {
   const paths: Record<IconName, React.JSX.Element> = {
     chat: <path d="M5 6.5h14v9H10l-5 3.5V6.5Z" />,
+    collapse: <path d="m14 7-5 5 5 5m5-10-5 5 5 5" />,
+    copy: <><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M15 8V3H3v13h5" /></>,
+    check: <path d="m5 12 4 4 10-10" />,
     close: <path d="m7 7 10 10M17 7 7 17" />,
     file: <><path d="M7 3.5h7l4 4v13H7z" /><path d="M14 3.5v4h4" /></>,
     folder: <path d="M3.5 7.5h6l1.8 2H20.5v9.5H3.5z" />,
@@ -66,11 +76,25 @@ function Icon({ name }: { name: IconName }): React.JSX.Element {
     plus: <path d="M12 5v14M5 12h14" />,
     resume: <><path d="M5 12a7 7 0 1 0 2-4.9" /><path d="M5 5v5h5" /></>,
     search: <><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></>,
-    send: <path d="M12 19V5m0 0-5 5m5-5 5 5" />,
+    send: <><path d="m21 3-7 18-4-7-7-4L21 3Z" /><path d="m10 14 6-6" /></>,
     spark: <path d="m12 3 1.4 5.6L19 10l-5.6 1.4L12 17l-1.4-5.6L5 10l5.6-1.4L12 3Z" />,
     stop: <rect x="7" y="7" width="10" height="10" rx="2" />,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24">{paths[name]}</svg>;
+}
+
+function restoreFocus(target: HTMLElement | null): void {
+  window.requestAnimationFrame(() => {
+    if (target !== null && target !== document.body && target.isConnected && target.closest("[inert]") === null && target.getClientRects().length > 0) target.focus();
+    else {
+      const navigation = [...document.querySelectorAll<HTMLElement>(".mobile-menu, .history-toggle")].find((element) => element.getClientRects().length > 0 && element.closest("[inert]") === null);
+      (navigation ?? document.querySelector<HTMLElement>("#agent-main"))?.focus();
+    }
+  });
+}
+
+function BrandMark(): React.JSX.Element {
+  return <img className="brand-mark" src="/assets/harness-logo.png" width={32} height={32} alt="" aria-hidden="true" draggable={false} />;
 }
 
 function publicError(error: unknown): string {
@@ -87,18 +111,6 @@ function timeLabel(value: string): string {
 function upsertSession(list: LocalSessionSummary[], next: LocalSessionSummary): LocalSessionSummary[] {
   return [next, ...list.filter((session) => session.id !== next.id)]
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-}
-
-function capabilityCategoryLabel(category: string): string {
-  const labels: Record<string, string> = {
-    workspace: "本地文件",
-    web: "网页检索",
-    browser: "浏览器",
-    process: "受控执行",
-    system: "系统能力",
-    extension: "扩展能力",
-  };
-  return labels[category] ?? category;
 }
 
 function processPermissionView(details: unknown): ProcessPermissionView | undefined {
@@ -211,6 +223,7 @@ function buildTurns(events: AgentEvent[]): TurnView[] {
       turn.status = "completed";
     } else if (event.type === "turn.failed") {
       turn.status = "failed";
+      if (turn.assistantText.length === 0) turn.assistantText = event.payload.outcomeSummary;
     } else if (event.type === "turn.cancelled") {
       turn.status = "cancelled";
     } else if (event.type === "turn.interrupted") {
@@ -235,15 +248,53 @@ export function App(): React.JSX.Element {
   const [planningEnabled, setPlanningEnabled] = useState(false);
   const [sending, setSending] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [workspaceManagerOpen, setWorkspaceManagerOpen] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [orchestrationOpen, setOrchestrationOpen] = useState(false);
   const [orchestration, setOrchestration] = useState<OrchestrationSnapshot | null>(null);
   const [orchestrationLoading, setOrchestrationLoading] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState<string | null>(null);
+  const [authenticationBusy, setAuthenticationBusy] = useState(false);
+  const [historyHidden, setHistoryHidden] = useState(readSidebarPreference);
+  const mobileLayout = useMediaQuery("(max-width: 800px)");
+  const mobileNavVisible = mobileLayout && mobileNavigationOpen;
+  const sidebarVisible = mobileLayout ? mobileNavigationOpen : !historyHidden;
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
+  const overlayTrigger = useRef<HTMLElement | null>(null);
   const [permissionOverrides, setPermissionOverrides] = useState<Record<string, ProcessPermissionView["status"]>>({});
   const lastEventSeq = useRef(0);
   const transcriptEnd = useRef<HTMLDivElement | null>(null);
+  const followTranscript = useRef(true);
+  const selectedSessionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const invalidate = (): void => {
+      selectedSessionRef.current = null;
+      lastEventSeq.current = 0;
+      setSelectedSessionId(null); setEvents([]); setSessions([]); setFiles([]);
+      setSessionSearchHits([]); setPermissionOverrides({}); setOrchestration(null);
+      setFilesOpen(false); setOrchestrationOpen(false); setAccountOpen(false);
+      setMobileNavigationOpen(false); setWorkspaceManagerOpen(false);
+      setState({ kind: "error", message: "账号或工作区已改变，请刷新后继续。未发送的草稿仍保留在输入框中。" });
+    };
+    window.addEventListener(RUNTIME_CONTEXT_CHANGED_EVENT, invalidate);
+    return () => window.removeEventListener(RUNTIME_CONTEXT_CHANGED_EVENT, invalidate);
+  }, []);
+
+  useEffect(() => {
+    try { window.localStorage.setItem("daoyin.ui.sidebar-collapsed", String(historyHidden)); }
+    catch { /* Layout still works when browser storage is unavailable. */ }
+  }, [historyHidden]);
+
+  function setSidebarCollapsed(collapsed: boolean): void {
+    setAccountOpen(false);
+    setHistoryHidden(collapsed);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(collapsed ? ".history-toggle" : ".sidebar-collapse")?.focus();
+    });
+  }
 
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
   const forkSource = selectedSession?.forkedFrom === undefined
@@ -254,29 +305,64 @@ export function App(): React.JSX.Element {
   const turns = useMemo(() => buildTurns(events), [events]);
   const connected = state.kind === "ready";
   const workspace = state.kind === "ready" ? state.bootstrap.workspace : null;
-  const sandbox = state.kind === "ready" ? state.bootstrap.sandbox : null;
-  const sandboxLabel = sandbox === null
-    ? "沙箱未探测"
-    : sandbox.available
-      ? `沙箱 ${sandbox.provider}`
-      : sandbox.mode === "off" ? "沙箱已关闭" : "权限模式 · 无 OS 沙箱";
   const modelReady = state.kind === "ready" && state.bootstrap.health.capabilities.modelGateway === "ready";
-  const capabilityCategories = state.kind === "ready"
-    ? [...new Set(state.bootstrap.tools.map((tool) => tool.category))]
-    : [];
-  const mcpServers = state.kind === "ready" ? state.bootstrap.mcpServers : [];
-  const mcpConnectedCount = mcpServers.filter((server) => server.status === "connected").length;
-  const mcpStatusTitle = mcpServers.map((server) => `${server.id}: ${server.status === "connected" ? `已连接 · ${String(server.toolCount)} tools` : server.message ?? "连接失败"}`).join("\n");
+  const authentication = state.kind === "ready" ? state.bootstrap.authentication : { status: "signed_out" as const, account: null };
+
+  useEffect(() => {
+    if (copiedTurnId === null) return;
+    const timer = window.setTimeout(() => setCopiedTurnId(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copiedTurnId]);
+
+  async function copyAnswer(turn: TurnView): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(turn.assistantText);
+      setCopiedTurnId(turn.turnId);
+    } catch {
+      setNotice("未能复制，请选中回答后手动复制。");
+    }
+  }
+
+  useEffect(() => {
+    if (!filesOpen && !orchestrationOpen && !mobileNavVisible && !accountOpen) return;
+    overlayTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overlay = document.querySelector<HTMLElement>(accountOpen ? ".account-popover.is-open" : mobileNavVisible ? ".studio-sidebar.mobile-open" : ".file-panel.is-open");
+    overlay?.querySelector<HTMLElement>("button, input")?.focus();
+    const onEscape = (event: KeyboardEvent): void => {
+      if (document.querySelector("dialog[open]") !== null) return;
+      if (event.key === "Tab" && (mobileNavVisible || accountOpen) && overlay !== null) {
+        const controls = [...overlay.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), a[href]")].filter((element) => element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+      if (event.key !== "Escape") return;
+      setFilesOpen(false);
+      setOrchestrationOpen(false);
+      setMobileNavigationOpen(false);
+      setAccountOpen(false);
+      restoreFocus(overlayTrigger.current);
+    };
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [filesOpen, orchestrationOpen, mobileNavVisible, accountOpen]);
 
   const loadSession = useCallback(async (sessionId: string, signal?: AbortSignal): Promise<void> => {
     const [payload, permissions] = await Promise.all([
       getSessionEvents(sessionId, 0, signal),
       getProcessPermissions(sessionId, signal),
     ]);
+    if (signal?.aborted || selectedSessionRef.current !== sessionId) return;
     lastEventSeq.current = Math.max(lastEventSeq.current, payload.lastEventSeq);
     setEvents((current) => {
       const merged = new Map(payload.events.map((event) => [event.id, event]));
-      for (const event of current) merged.set(event.id, event);
+      for (const event of current) { if (event.sessionId === sessionId) merged.set(event.id, event); }
       return [...merged.values()].sort((left, right) => left.eventSeq - right.eventSeq);
     });
     setSessions((current) => upsertSession(current, payload.session));
@@ -291,6 +377,7 @@ export function App(): React.JSX.Element {
         setSessions(bootstrap.sessions);
         const first = bootstrap.sessions[0];
         if (first !== undefined) {
+          selectedSessionRef.current = first.id;
           setSelectedSessionId(first.id);
           return loadSession(first.id, controller.signal);
         }
@@ -345,7 +432,7 @@ export function App(): React.JSX.Element {
     };
 
     const handleMessage = (message: MessageEvent<unknown>): void => {
-      if (typeof message.data !== "string") return;
+      if (disposed || selectedSessionRef.current !== selectedSessionId || typeof message.data !== "string") return;
       let payload: SessionEventStreamMessage;
       try {
         payload = JSON.parse(message.data) as SessionEventStreamMessage;
@@ -378,8 +465,13 @@ export function App(): React.JSX.Element {
       socket.addEventListener("error", () => {
         socket?.close();
       });
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (disposed) return;
+        if (event.code === 1008) {
+          disposed = true;
+          invalidateRuntimeContext();
+          return;
+        }
         const delay = Math.min(5_000, 400 * 2 ** Math.min(reconnectAttempt, 4));
         reconnectAttempt += 1;
         reconnectTimer = window.setTimeout(connect, delay);
@@ -394,8 +486,14 @@ export function App(): React.JSX.Element {
     };
   }, [selectedSessionId]);
 
+  useEffect(() => { followTranscript.current = true; }, [selectedSessionId]);
+
   useEffect(() => {
-    transcriptEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (!followTranscript.current) return;
+    const transcript = transcriptEnd.current?.closest<HTMLElement>(".transcript");
+    // Do not launch overlapping smooth scrolls on every streamed event, or pull
+    // the reader back down after they deliberately scroll up to earlier messages.
+    transcript?.scrollTo({ top: transcript.scrollHeight, behavior: "instant" });
   }, [events.length]);
 
   useEffect(() => {
@@ -409,7 +507,7 @@ export function App(): React.JSX.Element {
 
   async function selectSession(sessionId: string): Promise<void> {
     if (sessionId === selectedSessionId) return;
-    setSelectedSessionId(sessionId);
+    selectedSessionRef.current = sessionId; setSelectedSessionId(sessionId);
     setEvents([]);
     setNotice("");
     setPermissionOverrides({});
@@ -425,6 +523,7 @@ export function App(): React.JSX.Element {
   }
 
   function startFreshConversation(): void {
+    selectedSessionRef.current = null;
     setSelectedSessionId(null);
     setEvents([]);
     setPrompt("");
@@ -436,10 +535,34 @@ export function App(): React.JSX.Element {
     setMobileNavigationOpen(false);
   }
 
+  async function loginDaoyin(): Promise<void> {
+    setAuthenticationBusy(true);
+    setNotice("");
+    try {
+      const response = await beginAuthentication();
+      window.location.assign(response.authorizationUrl);
+    } catch (error) {
+      setNotice(publicError(error));
+      setAuthenticationBusy(false);
+    }
+  }
+
+  async function logoutDaoyin(): Promise<void> {
+    setAuthenticationBusy(true);
+    setNotice("");
+    try {
+      await logoutAuthentication();
+      window.location.reload();
+    } catch (error) {
+      setNotice(publicError(error));
+      setAuthenticationBusy(false);
+    }
+  }
+
   async function submitPrompt(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const message = prompt.trim();
-    if (message.length === 0 || sending) return;
+    if (message.length === 0 || sending || !modelReady || selectedSession?.activeTurnId) return;
     setSending(true);
     setNotice("");
     try {
@@ -448,14 +571,17 @@ export function App(): React.JSX.Element {
         const created = await createSession(message.slice(0, 40));
         sessionId = created.session.id;
         setSessions((current) => upsertSession(current, created.session));
-        setSelectedSessionId(sessionId);
+        selectedSessionRef.current = sessionId; setSelectedSessionId(sessionId);
         setEvents([]);
         setPermissionOverrides({});
         lastEventSeq.current = 0;
       }
       await startTurn(sessionId, message, planningEnabled);
-      setPrompt("");
+      if (selectedSessionRef.current !== sessionId) return;
+      setPrompt((current) => current.trim() === message ? "" : current);
+      followTranscript.current = true;
       const payload = await getSessionEvents(sessionId, lastEventSeq.current);
+      if (selectedSessionRef.current !== sessionId) return;
       lastEventSeq.current = Math.max(lastEventSeq.current, payload.lastEventSeq);
       setEvents((current) => {
         const seen = new Set(current.map((item) => item.id));
@@ -480,7 +606,7 @@ export function App(): React.JSX.Element {
       setSessionQuery("");
       setSessionSearchHits([]);
       await selectSession(result.session.id);
-      setNotice(`已从“${result.sourceSession.title}”的事件边界 #${String(result.sourceEventSeq)} 创建分支；原会话历史不会被复制或修改。`);
+      setNotice(`已从“${result.sourceSession.title}”创建分支。`);
     } catch (error) {
       setNotice(publicError(error));
     } finally {
@@ -497,8 +623,8 @@ export function App(): React.JSX.Element {
       setSessions((current) => upsertSession(current, result.session));
       await loadSession(result.session.id);
       setNotice(result.interruptedTurnId === null
-        ? "会话状态已经一致，无需恢复。"
-        : `已把重启前未完成的回合标记为 interrupted（事件 #${String(result.interruptionEventSeq)}）；已完成的工具证据仍然保留。`);
+        ? "会话已就绪。"
+        : "会话已恢复，可以继续。");
     } catch (error) {
       setNotice(publicError(error));
     } finally {
@@ -517,6 +643,7 @@ export function App(): React.JSX.Element {
   }
 
   async function openFiles(): Promise<void> {
+    setMobileNavigationOpen(false);
     setOrchestrationOpen(false);
     setFilesOpen(true);
     if (files.length > 0 || filesLoading) return;
@@ -567,18 +694,24 @@ export function App(): React.JSX.Element {
   }
 
   return (
-    <div className="studio-shell">
-      <header className="top-bar">
+    <div className={`studio-shell ${historyHidden ? "history-hidden" : ""} ${turns.length > 0 ? "has-transcript" : ""}`}>
+      <a className="skip-link" href="#agent-main">跳到对话</a>
+      <section className={`account-popover ${accountOpen ? "is-open" : ""}`} aria-label="道引科技账号" aria-hidden={!accountOpen} inert={!accountOpen}>
+        <strong>{authentication.account?.userName ?? "道引科技账号"}</strong>
+        <button type="button" disabled={authenticationBusy || !connected} onClick={() => void (authentication.status === "signed_in" ? logoutDaoyin() : loginDaoyin())}>{authentication.status === "signed_in" ? "退出登录" : "登录账号"}</button>
+        <button type="button" onClick={() => { setAccountOpen(false); restoreFocus(overlayTrigger.current); }}>关闭</button>
+      </section>
+      <header className="top-bar" inert={mobileNavVisible}>
         <div className="top-bar-left">
-          <button className="mobile-menu" type="button" aria-label="打开会话导航" onClick={() => setMobileNavigationOpen(true)}>
+          <button className="mobile-menu" type="button" aria-label="打开会话导航" aria-controls="session-sidebar" aria-expanded={mobileNavVisible} onClick={() => setMobileNavigationOpen(true)}>
             <Icon name="menu" />
           </button>
-          <button className="app-logo" type="button" aria-label="新建对话" onClick={startFreshConversation}><span>道</span></button>
-          <button className="top-icon" type="button" aria-label="查看工作区文件" onClick={() => void openFiles()}><Icon name="file" /></button>
+          <button className="history-toggle" type="button" aria-label="展开对话列表" aria-controls="session-sidebar" aria-expanded={!historyHidden} aria-hidden={!historyHidden || mobileLayout} tabIndex={historyHidden && !mobileLayout ? 0 : -1} onClick={() => setSidebarCollapsed(false)}><Icon name="menu" /></button>
         </div>
         <div className="top-bar-title">
-          <img src="/assistant-daoyin.png" alt="" />
-          <div><strong>{selectedSession?.title ?? "DaoyinHarness"}</strong><small>{workspace?.name ?? "本地工作台"}</small></div>
+          <button className="workspace-crumb" type="button" title={workspace?.root} onClick={() => void openFiles()}><Icon name="folder" /><span>{workspace?.name ?? "工作区"}</span></button>
+          <span className="crumb-divider">/</span>
+          <strong>{selectedSession?.title ?? "新对话"}</strong>
         </div>
         <div className="top-bar-right">
           {selectedSession !== null ? (
@@ -592,44 +725,37 @@ export function App(): React.JSX.Element {
               </button>
             )
           ) : null}
-          <span className={`connection-pill ${connected ? "online" : ""}`}><i />{connected ? "本地已连接" : "未连接"}</span>
         </div>
       </header>
 
-      <div className="main-layout">
-        {mobileNavigationOpen ? <button className="nav-backdrop" type="button" aria-label="关闭会话导航" onClick={() => setMobileNavigationOpen(false)} /> : null}
-        <aside className={`studio-sidebar ${mobileNavigationOpen ? "mobile-open" : ""}`} aria-label="会话导航">
-          <div className="mobile-sidebar-heading">
-            <strong>工作台</strong>
-            <button type="button" aria-label="关闭会话导航" onClick={() => setMobileNavigationOpen(false)}><Icon name="close" /></button>
+      <div className={`main-layout ${filesOpen || orchestrationOpen ? "panel-open" : ""}`}>
+        <button className={`nav-backdrop ${mobileNavVisible ? "is-open" : ""}`} type="button" aria-label="关闭会话导航" aria-hidden={!mobileNavVisible} tabIndex={-1} inert={!mobileNavVisible} onClick={() => { setMobileNavigationOpen(false); setAccountOpen(false); restoreFocus(document.querySelector<HTMLButtonElement>(".mobile-menu")); }} />
+        <aside id="session-sidebar" className={`studio-sidebar ${mobileNavVisible ? "mobile-open" : ""}`} aria-label="会话导航" aria-hidden={!sidebarVisible} inert={!sidebarVisible}>
+          <div className="sidebar-brand-row">
+            <button className="sidebar-brand" type="button" aria-label="DaoyinHarness 首页" onClick={startFreshConversation}><BrandMark /><span><strong>Daoyin</strong><span className="brand-product">Harness</span></span></button>
+            <button className="sidebar-collapse" type="button" aria-label="收起对话列表" aria-controls="session-sidebar" aria-expanded={!historyHidden} onClick={() => setSidebarCollapsed(true)}><Icon name="collapse" /></button>
+            <button className="sidebar-mobile-close" type="button" aria-label="关闭会话导航" onClick={() => { setMobileNavigationOpen(false); restoreFocus(document.querySelector<HTMLButtonElement>(".mobile-menu")); }}><Icon name="close" /></button>
           </div>
+          <button className="new-conversation" type="button" onClick={startFreshConversation}><Icon name="plus" /><span>新对话</span></button>
+          <label className="session-search">
+            <Icon name="search" />
+            <input value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} placeholder="搜索对话" aria-label="搜索会话" />
+            {sessionSearching ? <i className="search-busy" aria-label="搜索中" /> : null}
+          </label>
           <nav className="sidebar-primary" aria-label="工作台功能">
-            <button className={`sidebar-nav-item ${selectedSessionId === null ? "active" : ""}`} type="button" onClick={startFreshConversation}>
-              <Icon name="plus" /><span>新对话</span>
+            <button className={`sidebar-nav-item ${filesOpen ? "active" : ""}`} type="button" aria-label="工作区" onClick={() => void openFiles()}>
+              <Icon name="folder" /><span>工作区</span>
             </button>
-            <button className="sidebar-nav-item" type="button" onClick={() => void openFiles()}>
-              <Icon name="folder" /><span>工作区</span><small>{workspace?.fileCount ?? 0}</small>
-            </button>
-            <button className={`sidebar-nav-item ${orchestrationOpen ? "active" : ""}`} type="button" onClick={() => void openOrchestration()}>
+            <div className="sidebar-workspace" title={workspace?.root}><span aria-hidden="true">└</span><span>{workspace?.name ?? "工作区未初始化"}</span><button className="workspace-switch-link" type="button" aria-label="切换工作区" disabled={!connected} onClick={() => { setMobileNavigationOpen(false); setWorkspaceManagerOpen(true); }}>切换</button></div>
+            <button className={`sidebar-nav-item ${orchestrationOpen ? "active" : ""}`} type="button" aria-label="任务状态" onClick={() => void openOrchestration()}>
               <Icon name="spark" /><span>任务状态</span><small>{orchestration?.goals.filter((goal) => goal.status === "active" || goal.status === "blocked").length ?? 0}</small>
             </button>
           </nav>
-          <div className="sidebar-divider" />
           <section className="sidebar-section sessions" aria-labelledby="sessions-heading">
             <div className="sidebar-section-heading">
               <h2 id="sessions-heading">最近对话</h2>
               <button type="button" aria-label="新建对话" onClick={startFreshConversation}><Icon name="plus" /></button>
             </div>
-            <label className="session-search">
-              <Icon name="search" />
-              <input
-                value={sessionQuery}
-                onChange={(event) => setSessionQuery(event.target.value)}
-                placeholder="搜索会话与工具证据"
-                aria-label="搜索会话"
-              />
-              {sessionSearching ? <i className="search-busy" aria-label="搜索中" /> : null}
-            </label>
             {sessions.length === 0 ? (
               <div className="empty-sessions"><Icon name="chat" /><span>还没有本地对话</span></div>
             ) : visibleSessions.length === 0 ? (
@@ -641,6 +767,7 @@ export function App(): React.JSX.Element {
                   return (
                     <button
                       className={`session-row ${session.id === selectedSessionId ? "active" : ""}`}
+                      aria-current={session.id === selectedSessionId ? "page" : undefined}
                       key={session.id}
                       type="button"
                       onClick={() => void selectSession(session.id)}
@@ -657,42 +784,45 @@ export function App(): React.JSX.Element {
             )}
           </section>
           <footer className="sidebar-footer">
-            <div className="sidebar-status">
-              <span className="runtime-mark"><i className={connected ? "online" : ""} /></span>
-              <span><b>{workspace?.name ?? "工作区未初始化"}</b><small>{workspace?.root ?? "127.0.0.1 · 仅本机"}</small></span>
-            </div>
+            <div className="sidebar-status"><i className={connected ? "online" : ""} /><span>{connected ? "本地已连接" : "本地未连接"}</span></div>
+            <button className="sidebar-account" type="button" aria-label={authentication.status === "signed_in" ? "道引科技账号" : "登录道引账号"} aria-expanded={accountOpen} disabled={authenticationBusy || !connected} onClick={() => void (authentication.status === "signed_in" ? setAccountOpen((value) => !value) : loginDaoyin())}>
+              <span className="account-avatar">{authentication.account?.userName.slice(0, 1).toUpperCase() ?? "D"}</span>
+              <span><strong>{authenticationBusy ? "正在跳转…" : authentication.account?.userName ?? "登录道引账号"}</strong></span><span className="account-chevron" aria-hidden="true">›</span>
+            </button>
           </footer>
         </aside>
 
-        <main className="chat-area" aria-label="Agent 对话">
+        <main className="chat-area" id="agent-main" tabIndex={-1} aria-label="Agent 对话" inert={mobileNavVisible}>
           {state.kind === "loading" ? (
-            <section className="welcome"><img src="/assistant-daoyin.png" alt="" /><h1>正在连接本地运行时</h1><p>读取工作区与会话记录……</p></section>
+            <section className="welcome"><h1>正在准备工作台</h1><span className="loading-spinner" role="status" aria-label="加载中" /></section>
           ) : state.kind === "error" ? (
-            <section className="welcome error-state"><img src="/assistant-daoyin.png" alt="" /><h1>本地运行时未连接</h1><p>{state.message}</p></section>
+            <section className="welcome error-state"><h1>连接暂时中断</h1><p>{state.message}</p><button className="welcome-login" type="button" onClick={() => window.location.reload()}>重新连接</button></section>
           ) : turns.length === 0 ? (
             <section className="welcome">
-              <img src="/assistant-daoyin.png" alt="" />
-              <h1>一个能持续工作的通用 Agent</h1>
-              <p>{modelReady ? "聊天、研究网页、整理资料、处理本地文件或完成工程任务，都从同一段会话继续。" : "会话、工作区和工具运行时已经接通；真实模型网关登录仍在下一步接入。"}</p>
-              {selectedSession?.forkedFrom !== undefined ? (
-                <div className="fork-context"><Icon name="fork" /><span>继承自“{forkSource?.title ?? selectedSession.forkedFrom.sourceSessionId}”的事件边界 #{String(selectedSession.forkedFrom.sourceEventSeq)}；祖先 transcript 保持不可变。</span></div>
-              ) : null}
-              <div className="capability-strip">
-                {capabilityCategories.map((category) => <span className="capability-chip" key={category}>{capabilityCategoryLabel(category)}</span>)}
-                {mcpServers.length > 0 ? <span className="capability-chip" title={mcpStatusTitle}>MCP {mcpConnectedCount}/{mcpServers.length}</span> : null}
-                <span className={`capability-chip sandbox-chip ${sandbox?.available ? "ready" : "fallback"}`}>{sandboxLabel}</span>
+              <BrandMark />
+              <h1>今天，想完成什么？</h1>
+              {!modelReady ? <button className="welcome-login" type="button" disabled={authenticationBusy || !connected} onClick={() => void loginDaoyin()}>{authenticationBusy ? "正在跳转" : "连接道引账号"}</button> : null}
+              <div className="welcome-suggestions" aria-label="任务灵感">
+                {([
+                  { label: "整理文件", prompt: "帮我梳理工作区资料", icon: "folder" },
+                  { label: "研究问题", prompt: "研究一个我感兴趣的问题", icon: "search" },
+                  { label: "制定计划", prompt: "把我的想法整理成计划", icon: "spark" },
+                ] as const).map((suggestion) => <button key={suggestion.label} type="button" onClick={() => { setPrompt(suggestion.prompt); document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus(); }}><Icon name={suggestion.icon} /><span>{suggestion.label}</span></button>)}
               </div>
-              <div className="workspace-chip"><Icon name="folder" /><span>{workspace?.root ?? "未选择工作区"}</span></div>
+              {selectedSession?.forkedFrom !== undefined ? (
+                <div className="fork-context"><Icon name="fork" /><span>接着“{forkSource?.title ?? "原对话"}”继续</span></div>
+              ) : null}
             </section>
           ) : (
-            <section className="transcript" aria-live="polite">
+            <section className="transcript" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; followTranscript.current = element.scrollHeight - element.scrollTop - element.clientHeight < 72; }}>
               <div className="transcript-inner">
                 {turns.map((turn) => (
                   <article className="turn" key={turn.turnId}>
-                    <div className="user-message"><div>{turn.userMessage}</div></div>
+                    <div className="user-message"><span className="user-avatar" aria-hidden="true">你</span><div><strong className="message-author">你</strong><div className="user-bubble">{turn.userMessage}</div></div></div>
                     <div className="assistant-message">
-                      <div className="assistant-avatar"><img src="/assistant-daoyin.png" alt="" /></div>
+                      <div className="assistant-avatar"><BrandMark /></div>
                       <div className="assistant-body">
+                        <strong className="message-author">道引助手</strong>
                         {turn.tools.length > 0 ? (
                           <div className="tool-stack">
                             {turn.tools.map((tool) => {
@@ -701,9 +831,9 @@ export function App(): React.JSX.Element {
                               return (
                                 <div className={`tool-line ${tool.status} ${permission !== undefined ? "permission-tool" : ""}`} key={tool.id}>
                                   <i />
-                                  <span>
-                                    <b>{toolLabel(tool.name)}</b>
-                                    <small>{tool.text}</small>
+                                  <div>
+                                    <b>{toolLabel(tool.name)}<span className="tool-state-label">{tool.status === "running" ? "进行中" : tool.status === "completed" ? "完成" : "未完成"}</span></b>
+                                    {tool.text ? <details className="tool-details"><summary>查看详情</summary><p>{tool.text}</p></details> : null}
                                     {permission !== undefined ? (
                                       <div className="permission-box">
                                         <code>{permission.displayCommand}</code>
@@ -721,16 +851,17 @@ export function App(): React.JSX.Element {
                                         ) : <em>{permissionStatus === "approved" ? "已允许一次 · 发送“继续”后执行" : "授权已消费"}</em>}
                                       </div>
                                     ) : null}
-                                  </span>
+                                  </div>
                                 </div>
                               );
                             })}
                           </div>
                         ) : null}
-                        {turn.assistantText.length > 0 ? <div className={`assistant-text ${turn.status === "failed" ? "failed" : ""}`}>{turn.assistantText}</div> : null}
+                        {turn.assistantText.length > 0 ? <div className={`assistant-text ${turn.status === "failed" ? "failed" : ""}`}><MarkdownMessage text={turn.assistantText} /></div> : null}
+                        {turn.assistantText.length > 0 && turn.status !== "running" ? <div className="message-actions"><button type="button" aria-label="复制回答" onClick={() => void copyAnswer(turn)}><Icon name={copiedTurnId === turn.turnId ? "check" : "copy"} /><span>{copiedTurnId === turn.turnId ? "已复制" : "复制"}</span></button></div> : null}
                         {turn.status === "running" && turn.assistantText.length === 0 ? <div className="thinking-line"><span /><span /><span /></div> : null}
                         {turn.status === "cancelled" ? <div className="turn-state">已停止</div> : null}
-                        {turn.status === "interrupted" ? <div className="turn-state interrupted">运行时重启导致本回合中断；已完成证据仍保留</div> : null}
+                        {turn.status === "interrupted" ? <div className="turn-state interrupted">任务已中断，可以继续</div> : null}
                       </div>
                     </div>
                   </article>
@@ -759,17 +890,17 @@ export function App(): React.JSX.Element {
               />
               <div className="composer-actions">
                 <div>
-                  <button className="icon-button" type="button" aria-label="查看工作区文件" onClick={() => void openFiles()}><Icon name="plus" /></button>
-                  <span>{selectedSession?.activeTurnId !== null && selectedSession !== null ? "Agent 正在工作" : `${String(prompt.length)} / 20000`}</span>
+                  <button className="file-access" type="button" aria-label="查看工作区文件" onClick={() => void openFiles()}><Icon name="folder" /><span>访问文件</span></button>
+                  <span>{selectedSession?.activeTurnId !== null && selectedSession !== null ? "正在工作" : prompt.length > 18000 ? `${String(prompt.length)} / 20000` : ""}</span>
                 </div>
                 <div>
                   <button className={`planning-toggle ${planningEnabled ? "active" : ""}`} type="button" aria-pressed={planningEnabled} onClick={() => setPlanningEnabled((value) => !value)}>
-                    <Icon name="spark" />仔细规划
+                    <span>仔细规划</span><i className="planning-switch" aria-hidden="true" />
                   </button>
                   {selectedSession?.activeTurnId !== null && selectedSession !== null ? (
                     <button className="stop-button" type="button" aria-label="停止当前任务" onClick={() => void stopCurrentTurn()}><Icon name="stop" /></button>
                   ) : (
-                    <button className="send-button" type="submit" disabled={prompt.trim().length === 0 || sending || !connected} aria-label="发送任务"><Icon name="send" /></button>
+                    <button className="send-button" type="submit" disabled={prompt.trim().length === 0 || sending || !connected || !modelReady} aria-label="发送任务"><Icon name="send" /></button>
                   )}
                 </div>
               </div>
@@ -777,26 +908,25 @@ export function App(): React.JSX.Element {
           </div>
         </main>
 
-        {filesOpen ? (
-          <aside className="file-panel" aria-label="工作区文件">
-            <div className="file-panel-heading"><div><strong>工作区文件</strong><small>{workspace?.name ?? "工作区"}</small></div><button type="button" aria-label="关闭工作区文件" onClick={() => setFilesOpen(false)}><Icon name="close" /></button></div>
+        {workspaceManagerOpen ? <WorkspaceManager workspace={workspace} hasDraft={prompt.trim().length > 0} onClose={() => setWorkspaceManagerOpen(false)} /> : null}
+
+          <aside className={`file-panel ${filesOpen ? "is-open" : ""}`} aria-label="工作区文件" aria-hidden={!filesOpen || mobileNavVisible} inert={!filesOpen || mobileNavVisible}>
+            <div className="file-panel-heading"><strong>工作区文件</strong><button type="button" aria-label="关闭工作区文件" onClick={() => { setFilesOpen(false); restoreFocus(overlayTrigger.current); }}><Icon name="close" /></button></div>
             <div className="file-panel-root">{workspace?.root}</div>
+            <button className="file-panel-switch" type="button" onClick={() => setWorkspaceManagerOpen(true)}>选择或切换工作区 <span>↗</span></button>
             <div className="file-list">
-              {filesLoading ? <p>正在读取文件……</p> : files.map((file) => <div className="file-row" key={file}><Icon name="file" /><span>{file}</span></div>)}
+              {filesLoading ? <p>正在读取文件……</p> : files.length === 0 ? <p>工作区暂无文件</p> : files.map((file) => <div className="file-row" key={file}><Icon name="file" /><span title={file}>{file}</span></div>)}
             </div>
           </aside>
-        ) : null}
 
-        {orchestrationOpen ? (
-          <aside className="file-panel orchestration-panel" aria-label="任务与工作流状态">
+          <aside className={`file-panel orchestration-panel ${orchestrationOpen ? "is-open" : ""}`} aria-label="任务与工作流状态" aria-hidden={!orchestrationOpen || mobileNavVisible} inert={!orchestrationOpen || mobileNavVisible}>
             <div className="file-panel-heading">
-              <div><strong>任务状态</strong><small>{selectedSession?.title ?? "当前工作区"}</small></div>
+              <strong>任务状态</strong>
               <div className="panel-heading-actions">
                 <button type="button" aria-label="刷新任务状态" onClick={() => void refreshOrchestration()}><Icon name="spark" /></button>
-                <button type="button" aria-label="关闭任务状态" onClick={() => setOrchestrationOpen(false)}><Icon name="close" /></button>
+                <button type="button" aria-label="关闭任务状态" onClick={() => { setOrchestrationOpen(false); restoreFocus(overlayTrigger.current); }}><Icon name="close" /></button>
               </div>
             </div>
-            <div className="file-panel-root">Goal / Workflow / Child Agent · append-only state</div>
             <div className="orchestration-list">
               {orchestrationLoading && orchestration === null ? <p>正在读取任务状态……</p> : null}
               {orchestration !== null ? (
@@ -809,7 +939,6 @@ export function App(): React.JSX.Element {
                         {goal.description ? <p>{goal.description}</p> : null}
                         {goal.steps.length > 0 ? <div className="goal-steps">{goal.steps.map((step) => <span className={step.status} key={step.id}><i />{step.text}</span>)}</div> : null}
                         {goal.note ? <small>{goal.note}</small> : null}
-                        <code>{goal.id} · r{goal.revision}</code>
                       </div>
                     ))}
                   </section>
@@ -820,7 +949,6 @@ export function App(): React.JSX.Element {
                         <div className="orchestration-row-title"><strong>{workflow.name}</strong><em>{workflow.steps.length} 步</em></div>
                         {workflow.description ? <p>{workflow.description}</p> : null}
                         <small>{workflow.steps.map((step) => step.instruction).join(" → ")}</small>
-                        <code>{workflow.id}</code>
                       </div>
                     ))}
                   </section>
@@ -830,7 +958,6 @@ export function App(): React.JSX.Element {
                       <div className="run-row" key={run.id}>
                         <div className="orchestration-row-title"><strong>Workflow</strong><em className={`task-status ${run.status}`}>{orchestrationStatusLabel(run.status)}</em></div>
                         <small>{run.steps.map((step) => `${step.stepId}:${orchestrationStatusLabel(step.status)}`).join(" · ")}</small>
-                        <code>{run.id}</code>
                       </div>
                     ))}
                     {orchestration.childRuns.slice(-8).reverse().map((run) => (
@@ -838,7 +965,6 @@ export function App(): React.JSX.Element {
                         <div className="orchestration-row-title"><strong>Child Agent</strong><em className={`task-status ${run.status}`}>{orchestrationStatusLabel(run.status)}</em></div>
                         <p>{run.instruction}</p>
                         {run.finalText ? <small>{run.finalText}</small> : null}
-                        <code>{run.id} · {run.childSessionId}</code>
                       </div>
                     ))}
                   </section>
@@ -846,7 +972,6 @@ export function App(): React.JSX.Element {
               ) : null}
             </div>
           </aside>
-        ) : null}
       </div>
     </div>
   );

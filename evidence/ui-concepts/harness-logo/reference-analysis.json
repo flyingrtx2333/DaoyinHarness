@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\harness-logo\\reference.png",
+  "size": {
+    "width": 1280,
+    "height": 720
+  },
+  "aspect_ratio": 1.7777777777777777,
+  "top_colors": [
+    {
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "hex": "#ffffff",
+      "count": 676027
+    },
+    {
+      "rgb": [
+        246,
+        247,
+        249
+      ],
+      "hex": "#f6f7f9",
+      "count": 137059
+    },
+    {
+      "rgb": [
+        254,
+        255,
+        255
+      ],
+      "hex": "#feffff",
+      "count": 9806
+    },
+    {
+      "rgb": [
+        254,
+        254,
+        254
+      ],
+      "hex": "#fefefe",
+      "count": 9262
+    },
+    {
+      "rgb": [
+        252,
+        254,
+        253
+      ],
+      "hex": "#fcfefd",
+      "count": 4979
+    },
+    {
+      "rgb": [
+        253,
+        253,
+        253
+      ],
+      "hex": "#fdfdfd",
+      "count": 3878
+    },
+    {
+      "rgb": [
+        253,
+        255,
+        254
+      ],
+      "hex": "#fdfffe",
+      "count": 3461
+    },
+    {
+      "rgb": [
+        255,
+        254,
+        255
+      ],
+      "hex": "#fffeff",
+      "count": 2858
+    }
+  ]
+}

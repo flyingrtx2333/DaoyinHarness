@@ -9,24 +9,53 @@ if (!isAbsolute(databasePath) || !Number.isInteger(port) || port < 1024 || port 
   throw new Error("Set an absolute DAOYIN_CLOUD_DATABASE path and a valid DAOYIN_CLOUD_PORT.");
 }
 const repository = new SqliteCloudRepository(databasePath);
-const app = createPlatformCloudServer({ repository,
-  platformUrl: process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "",
-  serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
-  ...(appServiceToken ? { appServiceToken } : {}),
-});
-let closing = false;
-async function close(): Promise<void> {
-  if (closing) return;
-  closing = true;
-  await app.close();
-  repository.close();
+let app: ReturnType<typeof createPlatformCloudServer> | undefined;
+let heartbeat: ReturnType<typeof setInterval> | undefined;
+let closing: Promise<void> | undefined;
+
+function close(): Promise<void> {
+  if (closing !== undefined) return closing;
+  if (heartbeat !== undefined) clearInterval(heartbeat);
+  closing = (async () => {
+    try { await app?.close(); }
+    finally {
+      try { repository.releaseRuntimeLease(); }
+      finally { repository.close(); }
+    }
+  })();
+  return closing;
 }
-process.once("SIGINT", () => { void close(); });
-process.once("SIGTERM", () => { void close(); });
+
+function shutdown(failed = false): void {
+  if (failed) process.exitCode = 1;
+  void close().catch(() => {
+    process.exitCode = 1;
+    process.stderr.write("Cloud runtime shutdown failed; retained records need inspection.\n");
+  });
+}
+
 try {
+  // Validate platform config before acquiring ownership or touching prior task states.
+  app = createPlatformCloudServer({ repository,
+    platformUrl: process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "",
+    serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
+    ...(appServiceToken ? { appServiceToken } : {}),
+  });
+  const lease = repository.acquireRuntimeLease({ durationMs: 30_000, recoverInterrupted: true });
+  heartbeat = setInterval(() => {
+    try {
+      if (!repository.renewRuntimeLease()) {
+        process.stderr.write("Cloud runtime lost its execution lease; stopping without replay.\n");
+        shutdown(true);
+      }
+    } catch { shutdown(true); }
+  }, 10_000);
+  heartbeat.unref();
+  process.once("SIGINT", () => shutdown());
+  process.once("SIGTERM", () => shutdown());
   await app.listen({ host: "127.0.0.1", port });
-  process.stdout.write(`Shared Agent pilot listening on 127.0.0.1:${String(port)}\n`);
+  process.stdout.write(`Shared Agent pilot listening on 127.0.0.1:${String(port)}; interrupted prior runs: ${String(lease.recoveredRuns)}\n`);
 } catch {
   await close();
-  throw new Error("Cloud pilot could not start; check the explicit port and platform configuration.");
+  throw new Error("Cloud pilot could not start; check the explicit port, execution lease and platform configuration.");
 }

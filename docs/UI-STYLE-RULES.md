@@ -36,3 +36,10 @@
 在 Windows 浏览器中检查会话空态、已有回答、插件目录、插件选择器及本地工作台；至少覆盖 1280×720、桌面大屏、390px 和 320px 窄屏。检查跨页面字号与控件一致、内容无水平溢出、卡片内容完整、输入区可见、键盘焦点与滚动正常。
 
 相关入口为 [云端验收](../scripts/verify-cloud-modern-ui.mjs) 和 [本地验收](../scripts/verify-workbench-polish.mjs)。必须区分本地浏览器与模拟接口证据、真实模型调用及生产部署；本地通过不能写成已上线。
+
+### 2026-09-06 本轮验证
+
+- Windows / Node.js 22.23.2：`npm run typecheck`、`npm run build` 通过。
+- 云端正式打包方式的本地预览：18 张截图，覆盖 2073×1296、1672×941、1280×720、390×844、320×640。会话、回答、引用、发送与取消、重连回放、插件筛选、选择器及过期授权交互通过，无意外控制台错误或失败请求。接口为模拟数据，没有调用真实模型或部署。见 [云端报告](../evidence/ui-density-20260906/run-2026-09-06T02-22-45-492Z/browser-report.json)。
+- 本地 Vite 页面 / Edge：15 项检查通过，覆盖长对话、面板、导航、焦点恢复、滚动、减少动画及账号变更，API 和 WebSocket 为模拟数据。见 [本地报告](../evidence/ui-polish-20260905/run-2026-09-06T02-23-52-349Z/acceptance.json)。
+- 本轮全仓库 `npm run lint` 有 1 项错误：`agent-engine.ts` 的 `PendingAgentEvent` 未使用；`npm test` 为 218 通过、2 失败，分别为 `context-compactor.test.ts` 的策略版本期望和 `server/src/app.test.ts` 的中断恢复提示。失败文件不在此次样式修改范围内；这是检查时共享工作区的状态，不代表样式任务修复了这些问题。

@@ -1,0 +1,75 @@
+{
+  "reference": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\sidebar-20260906\\selected-reference.png",
+  "actual": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\sidebar-20260906\\run-2026-09-06T02-36-50-998Z\\sidebar-a-reference.png",
+  "size": {
+    "width": 1672,
+    "height": 941
+  },
+  "tolerance": 24,
+  "normalized_mae": 0.031057303507565564,
+  "pixel_similarity": 0.9689426964924345,
+  "within_tolerance_ratio": 0.9341374339626479,
+  "regions": {
+    "sidebar": {
+      "box": [
+        0,
+        0,
+        364,
+        941
+      ],
+      "normalized_mae": 0.03932785626853265,
+      "pixel_similarity": 0.9606721437314674,
+      "within_tolerance_ratio": 0.9361300230056872
+    },
+    "brand_and_actions": {
+      "box": [
+        0,
+        0,
+        364,
+        314
+      ],
+      "normalized_mae": 0.0456538829805971,
+      "pixel_similarity": 0.9543461170194029,
+      "within_tolerance_ratio": 0.9243805557499825
+    },
+    "history": {
+      "box": [
+        0,
+        314,
+        364,
+        400
+      ],
+      "normalized_mae": 0.041200253178194354,
+      "pixel_similarity": 0.9587997468218057,
+      "within_tolerance_ratio": 0.9333104395604396
+    },
+    "footer": {
+      "box": [
+        0,
+        827,
+        364,
+        114
+      ],
+      "normalized_mae": 0.04129507403501211,
+      "pixel_similarity": 0.9587049259649879,
+      "within_tolerance_ratio": 0.9177993059572007
+    },
+    "neighboring_catalog": {
+      "box": [
+        364,
+        0,
+        1308,
+        941
+      ],
+      "normalized_mae": 0.028755712372250566,
+      "pixel_similarity": 0.9712442876277494,
+      "within_tolerance_ratio": 0.9335829214155024
+    }
+  },
+  "thresholds": {
+    "max_mae": 0.035,
+    "min_within_tolerance": 0.9
+  },
+  "passed": true,
+  "violations": []
+}

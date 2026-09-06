@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1343" height="283" viewBox="0 0 1343 283" role="img" aria-labelledby="title desc">
+  <title id="title">方案 B：单行命令输入</title><desc id="desc">插件选择、问题输入和发送均在一行，最紧凑。</desc>
+  <defs><filter id="s" x="-10%" y="-60%" width="120%" height="220%"><feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#17356b" flood-opacity=".06"/></filter></defs>
+  <rect width="1343" height="283" fill="#fbfcff"/>
+  <rect x="42" y="74" width="1259" height="70" rx="12" fill="#fff" stroke="#dfe5ef" filter="url(#s)"/>
+  <rect x="58" y="91" width="36" height="36" rx="8" fill="#fff" stroke="#cfd8e8"/>
+  <text x="76" y="116" text-anchor="middle" fill="#446294" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="25">＋</text>
+  <line x1="110" y1="91" x2="110" y2="127" stroke="#e7ebf2"/>
+  <path d="M128 99h8v19h-8zM129.5 100.5h5v16h-5M140 99h8v19h-8zM141.5 100.5h5v16h-5" fill="none" stroke="#3864e8" stroke-width="1.6"/>
+  <text x="158" y="114" fill="#315ccf" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">官网知识</text>
+  <circle cx="228" cy="109" r="7" fill="#159e81"/><path d="M224.8 109l2.1 2.1 4.1-4.4" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="250" y1="91" x2="250" y2="127" stroke="#e7ebf2"/>
+  <text x="270" y="114" fill="#8791a5" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">描述你的问题…</text>
+  <rect x="1249" y="91" width="36" height="36" rx="8" fill="#3864e8"/>
+  <path d="M1267 117v-15M1261 108l6-6 6 6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="48" cy="174" r="7" fill="none" stroke="#8791a5" stroke-width="1.4"/><text x="48" y="177" text-anchor="middle" fill="#8791a5" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="10">i</text>
+  <text x="63" y="178" fill="#667183" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">依据公开资料回答，请核对引用</text>
+</svg>

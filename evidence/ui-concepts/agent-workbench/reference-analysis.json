@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\agent-workbench\\reference.png",
+  "size": {
+    "width": 1536,
+    "height": 960
+  },
+  "aspect_ratio": 1.6,
+  "top_colors": [
+    {
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "hex": "#ffffff",
+      "count": 1138297
+    },
+    {
+      "rgb": [
+        247,
+        248,
+        250
+      ],
+      "hex": "#f7f8fa",
+      "count": 197274
+    },
+    {
+      "rgb": [
+        254,
+        254,
+        254
+      ],
+      "hex": "#fefefe",
+      "count": 17658
+    },
+    {
+      "rgb": [
+        253,
+        253,
+        253
+      ],
+      "hex": "#fdfdfd",
+      "count": 9164
+    },
+    {
+      "rgb": [
+        233,
+        235,
+        239
+      ],
+      "hex": "#e9ebef",
+      "count": 7789
+    },
+    {
+      "rgb": [
+        250,
+        250,
+        250
+      ],
+      "hex": "#fafafa",
+      "count": 6474
+    },
+    {
+      "rgb": [
+        251,
+        252,
+        252
+      ],
+      "hex": "#fbfcfc",
+      "count": 5246
+    },
+    {
+      "rgb": [
+        88,
+        103,
+        216
+      ],
+      "hex": "#5867d8",
+      "count": 5217
+    }
+  ]
+}

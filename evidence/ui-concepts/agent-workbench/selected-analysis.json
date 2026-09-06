@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\agent-workbench\\concept-c.png",
+  "size": {
+    "width": 1586,
+    "height": 992
+  },
+  "aspect_ratio": 1.5987903225806452,
+  "top_colors": [
+    {
+      "rgb": [
+        250,
+        245,
+        240
+      ],
+      "hex": "#faf5f0",
+      "count": 124198
+    },
+    {
+      "rgb": [
+        251,
+        246,
+        241
+      ],
+      "hex": "#fbf6f1",
+      "count": 105662
+    },
+    {
+      "rgb": [
+        250,
+        246,
+        241
+      ],
+      "hex": "#faf6f1",
+      "count": 62778
+    },
+    {
+      "rgb": [
+        251,
+        247,
+        242
+      ],
+      "hex": "#fbf7f2",
+      "count": 60425
+    },
+    {
+      "rgb": [
+        252,
+        251,
+        249
+      ],
+      "hex": "#fcfbf9",
+      "count": 42997
+    },
+    {
+      "rgb": [
+        251,
+        246,
+        240
+      ],
+      "hex": "#fbf6f0",
+      "count": 38554
+    },
+    {
+      "rgb": [
+        251,
+        246,
+        242
+      ],
+      "hex": "#fbf6f2",
+      "count": 38478
+    },
+    {
+      "rgb": [
+        250,
+        245,
+        239
+      ],
+      "hex": "#faf5ef",
+      "count": 37272
+    }
+  ]
+}

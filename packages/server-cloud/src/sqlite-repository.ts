@@ -28,12 +28,15 @@ function run(row: Row): CloudRun {
 
 /**
  * Single-instance SQL adapter for the first cloud vertical slice and isolated tests.
- * This is NOT the production MySQL/multi-worker scheduler. No automatic startup takeover.
+ * This is NOT a MySQL/multi-worker scheduler. Opening the database never takes ownership.
+ * The standard runtime explicitly acquires a fenced lease before marking prior runs interrupted.
  * The caller owns the protected database directory and the connection lifecycle.
  */
 export class SqliteCloudRepository implements CloudRepository {
   public readonly memory: SqliteMemoryRepository;
   readonly #db: DatabaseSync;
+  #leaseOwner: string | null = null;
+  #leaseDurationMs = 30_000;
 
   public constructor(filename: string) {
     this.#db = new DatabaseSync(filename);
@@ -42,6 +45,9 @@ export class SqliteCloudRepository implements CloudRepository {
       PRAGMA busy_timeout = 5000;
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = FULL;
+      CREATE TABLE IF NOT EXISTS cloud_runtime_lease (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1), owner_id TEXT NOT NULL, expires_at INTEGER NOT NULL
+      ) STRICT;
       CREATE TABLE IF NOT EXISTS cloud_sessions (
         id TEXT PRIMARY KEY, scope_key TEXT NOT NULL, actor_id TEXT NOT NULL, scope_id TEXT NOT NULL,
         title TEXT NOT NULL, profile_id TEXT NOT NULL, profile_version TEXT NOT NULL, created_at TEXT NOT NULL
@@ -71,7 +77,64 @@ export class SqliteCloudRepository implements CloudRepository {
     this.memory = new SqliteMemoryRepository(this.#db, (operation) => this.#transaction(operation));
   }
 
+  /** Does not release a lease: explicit graceful shutdown and a crashed connection differ. */
   public close(): void { this.#db.close(); }
+
+  /** First adoption requires the legacy process to be stopped. Never shares one DB across workers. */
+  public acquireRuntimeLease(options: { durationMs?: number; recoverInterrupted?: boolean } = {}): { recoveredRuns: number } {
+    const duration = options.durationMs ?? 30_000;
+    if (!Number.isSafeInteger(duration) || duration < 1000 || duration > 300_000 || this.#leaseOwner !== null) {
+      throw new CloudError(409, "RUNTIME_LEASE_INVALID", "运行租约参数无效或当前连接已经取得租约。");
+    }
+    const owner = id("runtime");
+    const result = this.#transaction(() => {
+      const row = this.#db.prepare("SELECT * FROM cloud_runtime_lease WHERE singleton=1").get();
+      const instant = Date.now();
+      if (row !== undefined && Number(row.expires_at) > instant) {
+        throw new CloudError(409, "RUNTIME_ALREADY_ACTIVE", "该数据库已有有效执行实例，不能同时启动第二个服务。");
+      }
+      this.#db.prepare(`INSERT INTO cloud_runtime_lease VALUES (1,?,?)
+        ON CONFLICT(singleton) DO UPDATE SET owner_id=excluded.owner_id,expires_at=excluded.expires_at`).run(owner, instant + duration);
+      let recoveredRuns = 0;
+      if (options.recoverInterrupted === true) {
+        const active = this.#db.prepare("SELECT id,scope_key FROM cloud_runs WHERE status='running'").all();
+        for (const item of active) this.#interrupt(String(item.scope_key), String(item.id), "runtime_restart");
+        recoveredRuns = active.length;
+      }
+      return { recoveredRuns };
+    }, false);
+    this.#leaseOwner = owner;
+    this.#leaseDurationMs = duration;
+    return result;
+  }
+
+  public assertExecutionOwner(): void {
+    const row = this.#db.prepare("SELECT * FROM cloud_runtime_lease WHERE singleton=1").get();
+    // Embedded isolated repositories remain supported until this DB opts into lease ownership.
+    if (row === undefined && this.#leaseOwner === null) return;
+    if (row === undefined || row.owner_id !== this.#leaseOwner || Number(row.expires_at) <= Date.now()) {
+      throw new CloudError(503, "RUNTIME_LEASE_LOST", "当前实例不再拥有执行租约，不能继续模型、工具或状态写入。");
+    }
+  }
+
+  public renewRuntimeLease(): boolean {
+    if (this.#leaseOwner === null) return false;
+    return this.#transaction(() => {
+      const instant = Date.now();
+      const result = this.#db.prepare("UPDATE cloud_runtime_lease SET expires_at=? WHERE singleton=1 AND owner_id=? AND expires_at>?")
+        .run(instant + this.#leaseDurationMs, this.#leaseOwner, instant);
+      return result.changes === 1;
+    }, false);
+  }
+
+  /** Invoke only after the server has drained its work. A stale owner cannot release a successor. */
+  public releaseRuntimeLease(): void {
+    if (this.#leaseOwner === null) return;
+    this.#transaction(() => {
+      this.#db.prepare("UPDATE cloud_runtime_lease SET expires_at=0 WHERE singleton=1 AND owner_id=?").run(this.#leaseOwner);
+    }, false);
+    this.#leaseOwner = null;
+  }
 
   public async createSession(scope: ExecutionScope, input: Omit<CloudSession, "id" | "createdAt">): Promise<CloudSession> {
     const key = executionScopeKey(scope);
@@ -223,10 +286,12 @@ export class SqliteCloudRepository implements CloudRepository {
     return row;
   }
 
-  #transaction<T>(operation: () => T): T {
+  #transaction<T>(operation: () => T, enforceLease = true): T {
     this.#db.exec("BEGIN IMMEDIATE");
     try {
+      if (enforceLease) this.assertExecutionOwner();
       const result = operation();
+      if (enforceLease) this.assertExecutionOwner();
       this.#db.exec("COMMIT");
       return result;
     } catch (error) {

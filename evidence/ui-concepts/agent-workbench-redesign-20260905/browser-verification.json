@@ -1,0 +1,869 @@
+{
+  "origin": "http://127.0.0.1:4677",
+  "capturedAt": "2026-09-05T04:57:30.740Z",
+  "results": [
+    {
+      "name": "render-live",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 304,
+            "height": 992
+          },
+          ".top-bar": {
+            "x": 304,
+            "y": 0,
+            "width": 1282,
+            "height": 76
+          },
+          ".composer": {
+            "x": 419,
+            "y": 790,
+            "width": 1077,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 411,
+            "y": 76,
+            "width": 1085,
+            "height": 698
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "live-runtime",
+      "evidence": "Read-only real local runtime; no model call or session mutation"
+    },
+    {
+      "name": "render-desktop",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 304,
+            "height": 992
+          },
+          ".top-bar": {
+            "x": 304,
+            "y": 0,
+            "width": 1282,
+            "height": 76
+          },
+          ".composer": {
+            "x": 419,
+            "y": 790,
+            "width": 1077,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 411,
+            "y": 76,
+            "width": 1085,
+            "height": 698
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "render-files",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 304,
+            "height": 992
+          },
+          ".top-bar": {
+            "x": 304,
+            "y": 0,
+            "width": 1282,
+            "height": 76
+          },
+          ".composer": {
+            "x": 419,
+            "y": 790,
+            "width": 1077,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 411,
+            "y": 76,
+            "width": 1085,
+            "height": 698
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "render-tasks",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 304,
+            "height": 992
+          },
+          ".top-bar": {
+            "x": 304,
+            "y": 0,
+            "width": 1282,
+            "height": 76
+          },
+          ".composer": {
+            "x": 419,
+            "y": 790,
+            "width": 1077,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 411,
+            "y": 76,
+            "width": 1085,
+            "height": 698
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "render-permission",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 304,
+            "height": 992
+          },
+          ".top-bar": {
+            "x": 304,
+            "y": 0,
+            "width": 1282,
+            "height": 76
+          },
+          ".composer": {
+            "x": 419,
+            "y": 790,
+            "width": 1077,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 411,
+            "y": 76,
+            "width": 1085,
+            "height": 698
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "render-welcome",
+      "layout": {
+        "width": 1586,
+        "height": 992,
+        "scrollWidth": 1586,
+        "scrollHeight": 992,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 304,
+            "height": 992
+          },
+          ".top-bar": {
+            "x": 304,
+            "y": 0,
+            "width": 1282,
+            "height": 76
+          },
+          ".composer": {
+            "x": 419,
+            "y": 790,
+            "width": 1077,
+            "height": 148
+          },
+          ".transcript": null,
+          ".welcome": {
+            "x": 419,
+            "y": 272,
+            "width": 1077,
+            "height": 306
+          }
+        }
+      }
+    },
+    {
+      "name": "fixture-interactions",
+      "evidence": "Mocked APIs/WebSocket in real Edge",
+      "copy": true,
+      "search": true,
+      "sidebar": true,
+      "files": true,
+      "tasks": true,
+      "permissionDenyApprove": true,
+      "planning": true,
+      "duplicateSubmitBlocked": true,
+      "cancel": true,
+      "replay": true,
+      "reconnectFrom": 11,
+      "fork": true,
+      "newConversation": true,
+      "suggestion": true
+    },
+    {
+      "name": "render-1280",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 264,
+            "height": 720
+          },
+          ".top-bar": {
+            "x": 264,
+            "y": 0,
+            "width": 1016,
+            "height": 76
+          },
+          ".composer": {
+            "x": 312,
+            "y": 544,
+            "width": 928,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 304,
+            "y": 76,
+            "width": 936,
+            "height": 452
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "markdown-1280",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 264,
+            "height": 720
+          },
+          ".top-bar": {
+            "x": 264,
+            "y": 0,
+            "width": 1016,
+            "height": 76
+          },
+          ".composer": {
+            "x": 312,
+            "y": 544,
+            "width": 928,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 304,
+            "y": 76,
+            "width": 936,
+            "height": 452
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "files-1280",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 264,
+            "height": 720
+          },
+          ".top-bar": {
+            "x": 264,
+            "y": 0,
+            "width": 1016,
+            "height": 76
+          },
+          ".composer": {
+            "x": 312,
+            "y": 544,
+            "width": 928,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 304,
+            "y": 76,
+            "width": 936,
+            "height": 452
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "render-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 768,
+            "height": 64
+          },
+          ".composer": {
+            "x": 40,
+            "y": 852,
+            "width": 696,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 32,
+            "y": 64,
+            "width": 704,
+            "height": 772
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "markdown-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 768,
+            "height": 64
+          },
+          ".composer": {
+            "x": 40,
+            "y": 852,
+            "width": 696,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 32,
+            "y": 64,
+            "width": 704,
+            "height": 772
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "navigation-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 304,
+            "height": 1024
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 768,
+            "height": 64
+          },
+          ".composer": {
+            "x": 40,
+            "y": 852,
+            "width": 696,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 32,
+            "y": 64,
+            "width": 704,
+            "height": 772
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "files-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 768,
+            "height": 64
+          },
+          ".composer": {
+            "x": 40,
+            "y": 852,
+            "width": 696,
+            "height": 148
+          },
+          ".transcript": {
+            "x": 32,
+            "y": 64,
+            "width": 704,
+            "height": 772
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "render-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 696,
+            "width": 358,
+            "height": 136
+          },
+          ".transcript": {
+            "x": 12,
+            "y": 64,
+            "width": 366,
+            "height": 622
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "markdown-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 696,
+            "width": 358,
+            "height": 136
+          },
+          ".transcript": {
+            "x": 12,
+            "y": 64,
+            "width": 366,
+            "height": 622
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "navigation-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 304,
+            "height": 844
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 696,
+            "width": 358,
+            "height": 136
+          },
+          ".transcript": {
+            "x": 12,
+            "y": 64,
+            "width": 366,
+            "height": 622
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "files-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 696,
+            "width": 358,
+            "height": 136
+          },
+          ".transcript": {
+            "x": 12,
+            "y": 64,
+            "width": 366,
+            "height": 622
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "render-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 592,
+            "width": 288,
+            "height": 136
+          },
+          ".transcript": {
+            "x": 12,
+            "y": 64,
+            "width": 296,
+            "height": 518
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "markdown-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 592,
+            "width": 288,
+            "height": 136
+          },
+          ".transcript": {
+            "x": 12,
+            "y": 64,
+            "width": 296,
+            "height": 518
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "navigation-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 280,
+            "height": 740
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 592,
+            "width": 288,
+            "height": 136
+          },
+          ".transcript": {
+            "x": 12,
+            "y": 64,
+            "width": 296,
+            "height": 518
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "files-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 592,
+            "width": 288,
+            "height": 136
+          },
+          ".transcript": {
+            "x": 12,
+            "y": 64,
+            "width": 296,
+            "height": 518
+          },
+          ".welcome": null
+        }
+      }
+    },
+    {
+      "name": "render-signed-out",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 696,
+            "width": 358,
+            "height": 136
+          },
+          ".transcript": null,
+          ".welcome": {
+            "x": 20,
+            "y": 167.296875,
+            "width": 358,
+            "height": 415.390625
+          }
+        }
+      }
+    },
+    {
+      "name": "authentication-and-recovery",
+      "loginRedirect": true,
+      "signedOutSendDisabled": true,
+      "resume": true,
+      "evidence": "Mocked API; no credentials submitted"
+    },
+    {
+      "name": "render-error",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".studio-sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".top-bar": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 64
+          },
+          ".composer": {
+            "x": 20,
+            "y": 696,
+            "width": 358,
+            "height": 136
+          },
+          ".transcript": null,
+          ".welcome": {
+            "x": 20,
+            "y": 285.796875,
+            "width": 358,
+            "height": 178.390625
+          }
+        }
+      }
+    }
+  ],
+  "errors": [],
+  "failedRequests": [],
+  "expectedErrors": [
+    "503 http://127.0.0.1:4677/api/v1/bootstrap",
+    "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ]
+}

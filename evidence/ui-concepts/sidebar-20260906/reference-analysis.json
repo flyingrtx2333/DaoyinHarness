@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-density-20260906\\run-2026-09-06T02-22-45-492Z\\desktop-1280-plugins.png",
+  "size": {
+    "width": 1280,
+    "height": 720
+  },
+  "aspect_ratio": 1.7777777777777777,
+  "top_colors": [
+    {
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "hex": "#ffffff",
+      "count": 405314
+    },
+    {
+      "rgb": [
+        254,
+        254,
+        255
+      ],
+      "hex": "#fefeff",
+      "count": 200651
+    },
+    {
+      "rgb": [
+        245,
+        246,
+        249
+      ],
+      "hex": "#f5f6f9",
+      "count": 125276
+    },
+    {
+      "rgb": [
+        252,
+        252,
+        254
+      ],
+      "hex": "#fcfcfe",
+      "count": 17969
+    },
+    {
+      "rgb": [
+        253,
+        253,
+        254
+      ],
+      "hex": "#fdfdfe",
+      "count": 17406
+    },
+    {
+      "rgb": [
+        244,
+        245,
+        248
+      ],
+      "hex": "#f4f5f8",
+      "count": 16611
+    },
+    {
+      "rgb": [
+        252,
+        252,
+        253
+      ],
+      "hex": "#fcfcfd",
+      "count": 13123
+    },
+    {
+      "rgb": [
+        56,
+        100,
+        232
+      ],
+      "hex": "#3864e8",
+      "count": 8782
+    }
+  ]
+}

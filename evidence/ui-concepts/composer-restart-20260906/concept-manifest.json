@@ -1,0 +1,35 @@
+{
+  "screen": "cloud-composer-restart",
+  "reference": null,
+  "viewport": [
+    1343,
+    283
+  ],
+  "concepts": [
+    {
+      "id": "A",
+      "title": "来源桌",
+      "path": "concept-a.png",
+      "prompt_direction": "左侧固定来源桌，右侧独立写作面；插件不再是输入框底部标签。",
+      "strength": "来源状态清晰，输入区完整独立。",
+      "tradeoff": "需要为来源桌保留固定宽度。"
+    },
+    {
+      "id": "B",
+      "title": "研究工作页",
+      "path": "concept-b.png",
+      "prompt_direction": "开放式写作页搭配窄侧栏和基线发送动作，没有传统输入框外壳。",
+      "strength": "最不像聊天输入框，研究感最强。",
+      "tradeoff": "需要控制空状态时的垂直高度。"
+    },
+    {
+      "id": "C",
+      "title": "上下文丝带",
+      "path": "concept-c.png",
+      "prompt_direction": "插件成为左侧纵向上下文丝带，添加和发送独立成右侧动作轨道。",
+      "strength": "功能分区最鲜明，视觉识别最强。",
+      "tradeoff": "布局激进，需要针对窄屏重新收拢。"
+    }
+  ],
+  "selected": null
+}\n

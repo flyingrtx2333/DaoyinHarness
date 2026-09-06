@@ -14,6 +14,8 @@ import {
   API_VERSION,
   type AgentEvent,
   type ApiError,
+  type AuthenticationSummary,
+  type BeginAuthenticationResponse,
   type CreateSessionRequest,
   type CreateSessionResponse,
   type ForkSessionRequest,
@@ -34,6 +36,8 @@ import {
   type StartTurnResponse,
   type WorkspaceFilesResponse,
   type WorkspaceSummary,
+  type PickWorkspaceResponse,
+  type SwitchWorkspaceResponse,
 } from "@daoyin/harness-protocol";
 import { createBrowserTools, createMcpTools, createMemoryTools, createProcessTools, createSkillTools, createWebTools, createWorkspaceTools, ToolRegistry } from "@daoyin/harness-tools";
 import {
@@ -46,6 +50,9 @@ import {
   type SessionCompactionStore,
 } from "@daoyin/harness-workspace";
 import { createLocalPromptRegistry, type MemoryContextProvider, type OrchestrationContextProvider } from "./prompt-context.js";
+import { WorkspaceHistory, validateWorkspaceRoot } from "./workspace-history.js";
+import { pickWorkspaceDirectory } from "./folder-picker.js";
+import { runtimeAccountScope } from "./account-scope.js";
 
 export interface CreateAppOptions {
   port: number;
@@ -54,7 +61,10 @@ export interface CreateAppOptions {
   publicDir?: string;
   dataDir?: string;
   workspaceRoot?: string;
+  restoreLastWorkspace?: boolean;
+  pickWorkspaceDirectory?: () => Promise<string | null>;
   model?: ModelClient;
+  authentication?: HarnessAuthentication;
   memoryContextProvider?: MemoryContextProvider;
   browserExecutablePath?: string;
   mcpServers?: McpRemoteServerConfig[];
@@ -67,10 +77,19 @@ export interface CreateAppOptions {
   logger?: FastifyServerOptions["logger"];
 }
 
+export interface HarnessAuthentication {
+  readonly authority?: string;
+  status(): AuthenticationSummary;
+  beginAuthorization(): BeginAuthenticationResponse;
+  completeAuthorization(code: string, state: string): Promise<{ id: number; userName: string; tenantId: number }>;
+  logout(): Promise<void>;
+}
+
 type LiveSessionEventMessage = Extract<SessionEventStreamMessage, { type: "event" }>;
 type SessionEventSubscriber = (message: LiveSessionEventMessage) => void;
 
 interface RuntimeState {
+  accountId: string;
   csrfToken: string;
   sessionCookie: string;
   catalog: JsonSessionCatalog | null;
@@ -88,6 +107,7 @@ interface RuntimeState {
   compactionStore: SessionCompactionStore | null;
   promptRegistry: SystemPromptRegistry | null;
   model: ModelClient | null;
+  authentication: HarnessAuthentication | null;
   activeTurns: Map<string, AbortController>;
   eventSubscribers: Map<string, Set<SessionEventSubscriber>>;
 }
@@ -230,8 +250,9 @@ function parsePermissionDecisionBody(body: unknown): { approve: boolean } {
   return { approve };
 }
 
-async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeState> {
+async function createRuntimeState(options: CreateAppOptions, catalogDirectory?: string, accountId = "local"): Promise<RuntimeState> {
   const state: RuntimeState = {
+    accountId,
     csrfToken: randomBytes(32).toString("base64url"),
     sessionCookie: randomBytes(32).toString("base64url"),
     catalog: null,
@@ -249,107 +270,130 @@ async function createRuntimeState(options: CreateAppOptions): Promise<RuntimeSta
     compactionStore: null,
     promptRegistry: null,
     model: options.model ?? null,
+    authentication: options.authentication ?? null,
     activeTurns: new Map(),
     eventSubscribers: new Map(),
   };
 
+  if (options.model !== undefined && state.authentication !== null) {
+    const model = options.model;
+    const assertIdentity = (): void => {
+      if (runtimeAccountScope(options.dataDir, state.authentication).accountId !== state.accountId) {
+        throw Object.assign(new Error("账号状态已改变，请刷新后重新发起任务。"), { code: "AUTH_CONTEXT_CHANGED" });
+      }
+    };
+    state.model = {
+      async complete(request) {
+        assertIdentity();
+        const result = await model.complete(request);
+        assertIdentity();
+        return result;
+      },
+    };
+  }
   if (options.dataDir === undefined || options.workspaceRoot === undefined) return state;
 
-  const workspace = await Workspace.open(options.workspaceRoot);
-  const files = await workspace.listFiles();
-  state.workspace = workspace;
-  state.workspaceSummary = {
-    name: path.basename(workspace.root) || workspace.root,
-    root: workspace.root,
-    fileCount: files.length,
-  };
-  state.resourceScopeId = `resource_${createHash("sha256").update(workspace.root).digest("hex").slice(0, 24)}`;
-  state.catalog = new JsonSessionCatalog(path.join(options.dataDir, "state"));
-  const events = new JsonlSessionStore(path.join(options.dataDir, "transcripts"));
-  state.events = events;
-  const memoryStore = new JsonlMemoryStore(path.join(options.dataDir, "memory", "memories.jsonl"));
-  const orchestrationStore = new JsonlOrchestrationStore(path.join(options.dataDir, "orchestration", "state.jsonl"));
-  const compactionStore = new JsonlCompactionStore(path.join(options.dataDir, "compactions"));
-  const processService = await ProcessService.create(workspace.root, { sandboxMode: options.sandboxMode ?? "auto" });
-  const processPermissions = new JsonlProcessPermissionStore(path.join(options.dataDir, "process", "permissions.jsonl"));
-  const browserService = await BrowserService.create(options.browserExecutablePath === undefined ? {} : { executablePath: options.browserExecutablePath });
-  const mcpManager = await McpManager.connect(options.mcpServers ?? [], {
-    clientVersion: options.version,
-    ...(options.mcpClientFactory === undefined ? {} : { clientFactory: options.mcpClientFactory }),
-  });
-  state.memoryStore = memoryStore;
-  state.orchestrationStore = orchestrationStore;
-  state.compactionStore = compactionStore;
-  state.browserService = browserService;
-  state.mcpManager = mcpManager;
-  state.processService = processService;
-  state.processPermissions = processPermissions;
-
-  const tools = new ToolRegistry();
-  tools.registerPack({ id: "workspace", tools: createWorkspaceTools(workspace) });
-  tools.registerPack({ id: "process", tools: createProcessTools(processService, processPermissions, workspace) });
-  tools.registerPack({ id: "web", tools: createWebTools() });
-  if (browserService.status.available) tools.registerPack({ id: "browser", tools: createBrowserTools(browserService) });
-  const mcpTools = createMcpTools(mcpManager);
-  if (mcpTools.length > 0) tools.registerPack({ id: "mcp", tools: mcpTools });
-  tools.registerPack({ id: "skills", tools: createSkillTools(workspace) });
-  tools.registerPack({ id: "memory", tools: createMemoryTools(memoryStore) });
-
-  const childExcludedTools = new Set(["run_package_script", "memory_remember", "memory_update", "memory_forget"]);
-  const childTools = new ToolRegistry(tools.definitions().filter((definition) => !childExcludedTools.has(definition.name)));
-
-  const memoryContextProvider: MemoryContextProvider = async (input) => {
-    const hits = await memoryStore.search({
-      accountId: input.accountId,
-      sessionId: input.sessionId,
-      resourceScopeId: input.scopeId,
-      query: input.userMessage,
-      limit: 5,
+  try {
+    const workspace = await Workspace.open(options.workspaceRoot);
+    const files = await workspace.listFiles();
+    state.workspace = workspace;
+    state.workspaceSummary = {
+      name: path.basename(workspace.root) || workspace.root,
+      root: workspace.root,
+      fileCount: files.length,
+    };
+    state.resourceScopeId = `resource_${createHash("sha256").update(workspace.root).digest("hex").slice(0, 24)}`;
+    state.catalog = new JsonSessionCatalog(catalogDirectory ?? path.join(options.dataDir, "state"));
+    const events = new JsonlSessionStore(path.join(options.dataDir, "transcripts"));
+    state.events = events;
+    const memoryStore = new JsonlMemoryStore(path.join(options.dataDir, "memory", "memories.jsonl"));
+    const orchestrationStore = new JsonlOrchestrationStore(path.join(options.dataDir, "orchestration", "state.jsonl"));
+    const compactionStore = new JsonlCompactionStore(path.join(options.dataDir, "compactions"));
+    const processService = await ProcessService.create(workspace.root, { sandboxMode: options.sandboxMode ?? "auto" });
+    const processPermissions = new JsonlProcessPermissionStore(path.join(options.dataDir, "process", "permissions.jsonl"));
+    const browserService = await BrowserService.create(options.browserExecutablePath === undefined ? {} : { executablePath: options.browserExecutablePath });
+    state.browserService = browserService;
+    const mcpManager = await McpManager.connect(options.mcpServers ?? [], {
+      clientVersion: options.version,
+      ...(options.mcpClientFactory === undefined ? {} : { clientFactory: options.mcpClientFactory }),
     });
-    const builtIn = hits.length === 0 ? null : JSON.stringify(hits.map((hit) => ({
-      id: hit.record.id,
-      scope: hit.record.scope,
-      kind: hit.record.kind,
-      content: hit.record.content,
-      confidence: hit.record.confidence,
-      sourceEventIds: hit.record.sourceEventIds,
-      score: hit.score,
-    })));
-    const external = await options.memoryContextProvider?.(input);
-    return [builtIn, external?.trim() || null].filter((value): value is string => typeof value === "string" && value.length > 0).join("\n") || null;
-  };
-  const orchestrationContextProvider: OrchestrationContextProvider = async (input) => {
-    const snapshot = await orchestrationStore.snapshot(input.accountId, input.scopeId, input.sessionId);
-    const goals = snapshot.goals
-      .filter((goal) => goal.status === "active" || goal.status === "blocked")
-      .slice(0, 8)
-      .map((goal) => ({ id: goal.id, title: goal.title, status: goal.status, revision: goal.revision, steps: goal.steps, note: goal.note }));
-    const workflows = snapshot.workflows.slice(0, 12).map((workflow) => ({ id: workflow.id, name: workflow.name, description: workflow.description, stepCount: workflow.steps.length }));
-    const workflowRuns = snapshot.workflowRuns.slice(-8).map((run) => ({ id: run.id, workflowId: run.workflowId, status: run.status, steps: run.steps }));
-    const childRuns = snapshot.childRuns.slice(-8).map((run) => ({ id: run.id, status: run.status, instruction: run.instruction.slice(0, 500), finalText: run.finalText.slice(0, 800) }));
-    if (goals.length === 0 && workflows.length === 0 && workflowRuns.length === 0 && childRuns.length === 0) return null;
-    return JSON.stringify({ goals, workflows, workflowRuns, childRuns });
-  };
-  const promptRegistry = createLocalPromptRegistry({
-    workspace,
-    workspaceSummary: state.workspaceSummary,
-    sandboxStatus: processService.sandboxStatus,
-    memoryContextProvider,
-    orchestrationContextProvider,
-  });
-  const childRunner = new ChildAgentRunner({
-    model: state.model,
-    tools: childTools,
-    events,
-    promptRegistry,
-    store: orchestrationStore,
-    compactionStore,
-  });
-  const workflowService = new WorkflowService(orchestrationStore, childRunner);
-  tools.registerPack({ id: "orchestration", tools: createOrchestrationTools({ store: orchestrationStore, children: childRunner, workflows: workflowService }) });
-  state.tools = tools;
-  state.promptRegistry = promptRegistry;
-  return state;
+    state.memoryStore = memoryStore;
+    state.orchestrationStore = orchestrationStore;
+    state.compactionStore = compactionStore;
+    state.browserService = browserService;
+    state.mcpManager = mcpManager;
+    state.processService = processService;
+    state.processPermissions = processPermissions;
+
+    const tools = new ToolRegistry();
+    tools.registerPack({ id: "workspace", tools: createWorkspaceTools(workspace) });
+    tools.registerPack({ id: "process", tools: createProcessTools(processService, processPermissions, workspace) });
+    tools.registerPack({ id: "web", tools: createWebTools() });
+    if (browserService.status.available) tools.registerPack({ id: "browser", tools: createBrowserTools(browserService) });
+    const mcpTools = createMcpTools(mcpManager);
+    if (mcpTools.length > 0) tools.registerPack({ id: "mcp", tools: mcpTools });
+    tools.registerPack({ id: "skills", tools: createSkillTools(workspace) });
+    tools.registerPack({ id: "memory", tools: createMemoryTools(memoryStore) });
+
+    const childExcludedTools = new Set(["run_package_script", "memory_remember", "memory_update", "memory_forget"]);
+    const childTools = new ToolRegistry(tools.definitions().filter((definition) => !childExcludedTools.has(definition.name)));
+
+    const memoryContextProvider: MemoryContextProvider = async (input) => {
+      const hits = await memoryStore.search({
+        accountId: input.accountId,
+        sessionId: input.sessionId,
+        resourceScopeId: input.scopeId,
+        query: input.userMessage,
+        limit: 5,
+      });
+      const builtIn = hits.length === 0 ? null : JSON.stringify(hits.map((hit) => ({
+        id: hit.record.id,
+        scope: hit.record.scope,
+        kind: hit.record.kind,
+        content: hit.record.content,
+        confidence: hit.record.confidence,
+        sourceEventIds: hit.record.sourceEventIds,
+        score: hit.score,
+      })));
+      const external = await options.memoryContextProvider?.(input);
+      return [builtIn, external?.trim() || null].filter((value): value is string => typeof value === "string" && value.length > 0).join("\n") || null;
+    };
+    const orchestrationContextProvider: OrchestrationContextProvider = async (input) => {
+      const snapshot = await orchestrationStore.snapshot(input.accountId, input.scopeId, input.sessionId);
+      const goals = snapshot.goals
+        .filter((goal) => goal.status === "active" || goal.status === "blocked")
+        .slice(0, 8)
+        .map((goal) => ({ id: goal.id, title: goal.title, status: goal.status, revision: goal.revision, steps: goal.steps, note: goal.note }));
+      const workflows = snapshot.workflows.slice(0, 12).map((workflow) => ({ id: workflow.id, name: workflow.name, description: workflow.description, stepCount: workflow.steps.length }));
+      const workflowRuns = snapshot.workflowRuns.slice(-8).map((run) => ({ id: run.id, workflowId: run.workflowId, status: run.status, steps: run.steps }));
+      const childRuns = snapshot.childRuns.slice(-8).map((run) => ({ id: run.id, status: run.status, instruction: run.instruction.slice(0, 500), finalText: run.finalText.slice(0, 800) }));
+      if (goals.length === 0 && workflows.length === 0 && workflowRuns.length === 0 && childRuns.length === 0) return null;
+      return JSON.stringify({ goals, workflows, workflowRuns, childRuns });
+    };
+    const promptRegistry = createLocalPromptRegistry({
+      workspace,
+      workspaceSummary: state.workspaceSummary,
+      sandboxStatus: processService.sandboxStatus,
+      memoryContextProvider,
+      orchestrationContextProvider,
+    });
+    const childRunner = new ChildAgentRunner({
+      model: state.model,
+      tools: childTools,
+      events,
+      promptRegistry,
+      store: orchestrationStore,
+      compactionStore,
+    });
+    const workflowService = new WorkflowService(orchestrationStore, childRunner);
+    tools.registerPack({ id: "orchestration", tools: createOrchestrationTools({ store: orchestrationStore, children: childRunner, workflows: workflowService }) });
+    state.tools = tools;
+    state.promptRegistry = promptRegistry;
+    return state;
+  } catch (error) {
+    await Promise.allSettled([state.browserService?.close(), state.mcpManager?.close()]);
+    throw error;
+  }
 }
 
 function sandboxStatusFor(options: CreateAppOptions, state: RuntimeState): SandboxRuntimeStatus {
@@ -383,8 +427,10 @@ function healthFor(options: CreateAppOptions, state: RuntimeState): RuntimeHealt
       sandbox: state.processService === null ? "planned" : sandbox.available ? "ready" : "unavailable",
       database: state.catalog === null ? "planned" : "ready",
       workspace: state.workspace === null ? "planned" : "ready",
-      authentication: "planned",
-      modelGateway: state.model === null ? "planned" : "ready",
+      authentication: state.authentication === null ? "planned" : "ready",
+      modelGateway: state.model === null
+        ? "planned"
+        : state.authentication === null || state.authentication.status().status === "signed_in" ? "ready" : "unavailable",
       browser: state.browserService === null ? "planned" : state.browserService.status.available ? "ready" : "unavailable",
       mcp: state.mcpManager === null ? "planned" : state.mcpManager.configuredCount === 0 || state.mcpManager.connectedCount > 0 ? "ready" : "unavailable",
       orchestration: state.orchestrationStore === null ? "planned" : "ready",
@@ -468,7 +514,7 @@ async function reconcileSessionActivity(
   const previousEventSeq = events.at(-1)?.eventSeq ?? 0;
   const interruption = await state.events.append({
     type: "turn.interrupted",
-    accountId: "local",
+    accountId: state.accountId,
     scopeId: state.resourceScopeId,
     sessionId: session.id,
     turnId: activeTurnId,
@@ -510,9 +556,8 @@ async function inheritedEventsForSession(
   const segments: AgentEvent[][] = [];
   const seen = new Set<string>([session.id]);
   let cursor = session;
-  for (let depth = 0; depth < 8; depth += 1) {
+  while (cursor.forkedFrom !== undefined) {
     const reference = cursor.forkedFrom;
-    if (reference === undefined) break;
     if (seen.has(reference.sourceSessionId)) {
       throw Object.assign(new Error("Session fork ancestry contains a cycle."), { code: "SESSION_FORK_CYCLE" });
     }
@@ -522,9 +567,6 @@ async function inheritedEventsForSession(
     const sourceEvents = await state.events.read(source.id);
     segments.unshift(sourceEvents.filter((event) => event.eventSeq <= reference.sourceEventSeq));
     cursor = source;
-    if (depth === 7 && cursor.forkedFrom !== undefined) {
-      throw Object.assign(new Error("Session fork ancestry exceeds the supported depth."), { code: "SESSION_FORK_DEPTH_EXCEEDED" });
-    }
   }
   return segments.flat();
 }
@@ -579,20 +621,82 @@ async function apiFailure(reply: import("fastify").FastifyReply, error: unknown)
   const code = typeof candidate.code === "string" ? candidate.code : "INTERNAL_ERROR";
   const message = typeof candidate.message === "string" ? candidate.message : "本地运行时发生未知错误。";
   const status = code === "SESSION_NOT_FOUND" || code === "SESSION_FORK_SOURCE_MISSING" || code === "PROCESS_PERMISSION_NOT_FOUND" ? 404
-    : code === "PROCESS_PERMISSION_SCOPE_DENIED" ? 403
-      : code === "SESSION_BUSY" || code === "SESSION_STILL_RUNNING" || code === "SESSION_FORK_CYCLE" || code === "SESSION_FORK_DEPTH_EXCEEDED" || code === "PROCESS_PERMISSION_CONSUMED" ? 409
-        : code === "INVALID_BODY" || code === "SESSION_FORK_BOUNDARY_INVALID" ? 400
-          : 500;
+    : code === "AUTH_REQUIRED" || code === "MODEL_AUTH_REQUIRED" ? 401
+      : code === "PROCESS_PERMISSION_SCOPE_DENIED" || code === "AUTH_IDENTITY_INVALID" ? 403
+        : code === "SESSION_BUSY" || code === "SESSION_STILL_RUNNING" || code === "SESSION_FORK_CYCLE" || code === "PROCESS_PERMISSION_CONSUMED" || code === "AUTH_RUNTIME_BUSY" || code === "AUTH_CONTEXT_CHANGED" ? 409
+          : code === "INVALID_BODY" || code === "SESSION_FORK_BOUNDARY_INVALID" || code === "WORKSPACE_ROOT_INVALID" ? 400
+            : code === "MODEL_AUTH_RATE_LIMITED" ? 429
+              : code === "MODEL_AUTH_TIMEOUT" ? 504
+                : code === "MODEL_AUTH_NETWORK" || code === "MODEL_AUTH_UNAVAILABLE" ? 503 : 500;
   await reply.code(status).send(invalidRequest(code, message, status >= 500));
 }
 
+async function prepareAccountRuntime(options: CreateAppOptions): Promise<{
+  state: RuntimeState; history: WorkspaceHistory | null; scopedOptions: CreateAppOptions;
+}> {
+  const scope = runtimeAccountScope(options.dataDir, options.authentication);
+  const scopedOptions: CreateAppOptions = { ...options, ...(scope.dataDir === undefined ? {} : { dataDir: scope.dataDir }) };
+  const initialRoot = options.workspaceRoot === undefined ? undefined : await validateWorkspaceRoot(options.workspaceRoot);
+  const history = scope.dataDir === undefined || initialRoot === undefined ? null : await WorkspaceHistory.open(scope.dataDir, initialRoot);
+  let startupRoot = initialRoot;
+  if (options.restoreLastWorkspace && history?.recent[0] !== undefined) {
+    try { startupRoot = await validateWorkspaceRoot(history.recent[0].root); } catch { /* Keep the explicit startup fallback. */ }
+  }
+  const state = await createRuntimeState({ ...scopedOptions, ...(startupRoot === undefined ? {} : { workspaceRoot: startupRoot }) }, startupRoot === undefined ? undefined : history?.catalogDirectory(startupRoot), scope.accountId);
+  try {
+    if (scope.accountId !== runtimeAccountScope(options.dataDir, options.authentication).accountId) {
+      throw Object.assign(new Error("账号在初始化期间发生变化，请重新加载。"), { code: "AUTH_CONTEXT_CHANGED" });
+    }
+    if (startupRoot !== undefined) await history?.remember(startupRoot);
+    return { state, history, scopedOptions };
+  } catch (error) {
+    await Promise.allSettled([state.browserService?.close(), state.mcpManager?.close()]);
+    throw error;
+  }
+}
+
 export async function createApp(options: CreateAppOptions): Promise<FastifyInstance> {
-  const state = await createRuntimeState(options);
+  let { state, history, scopedOptions } = await prepareAccountRuntime(options);
+  let workspaceRevision = randomBytes(16).toString("hex");
+  let switching = false;
+  const inFlight = new Set<string>();
+  const executingRequests = new Set<string>();
+  const sockets = new Set<{ close(code: number, reason: string): void }>();
+
+  function requireIdleAuthentication(): void {
+    if (state.activeTurns.size > 0 || inFlight.size > 1) {
+      throw Object.assign(new Error("当前仍有任务或操作在进行，请完成或停止后再切换账号。"), { code: "AUTH_RUNTIME_BUSY" });
+    }
+  }
+  async function rebindAccountRuntime(): Promise<void> {
+    // Called only while the exclusive switching gate is held. A failed rebuild
+    // leaves the old files intact; the identity guard below fails closed.
+    const prepared = await prepareAccountRuntime(options);
+    const previous = state;
+    state = prepared.state;
+    history = prepared.history;
+    scopedOptions = prepared.scopedOptions;
+    workspaceRevision = randomBytes(16).toString("hex");
+    for (const socket of sockets) socket.close(1008, "account changed; refresh required");
+    await Promise.allSettled([previous.browserService?.close(), previous.mcpManager?.close()]);
+  }
   const app = Fastify({
     logger: options.logger ?? false,
     trustProxy: false,
   });
   await app.register(fastifyWebsocket);
+  app.addHook("onRoute", (route) => {
+    if (!route.url.startsWith("/api/v1/")) return;
+    const handler = route.handler;
+    route.handler = async function (request, reply) {
+      executingRequests.add(request.id);
+      try { return await handler.call(this, request, reply); }
+      finally {
+        executingRequests.delete(request.id);
+        inFlight.delete(request.id);
+      }
+    };
+  });
   app.addHook("onClose", async () => {
     await Promise.all([
       state.browserService?.close(),
@@ -601,6 +705,17 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   });
 
   app.addHook("onRequest", async (request, reply) => {
+    if (request.url.startsWith("/api/v1/")) {
+      if (switching) {
+        await reply.code(409).send(invalidRequest("WORKSPACE_SWITCHING", "正在切换工作区，请稍后重试。", true));
+        return;
+      }
+      if (!request.url.startsWith("/api/v1/bootstrap") && request.headers["x-daoyin-workspace"] !== undefined && request.headers["x-daoyin-workspace"] !== workspaceRevision) {
+        await reply.code(409).send(invalidRequest("WORKSPACE_CHANGED", "工作区已在其他页面切换，请刷新后继续。"));
+        return;
+      }
+      inFlight.add(request.id);
+    }
     const host = request.headers.host;
     if (
       host === undefined ||
@@ -626,6 +741,31 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         return;
       }
     }
+
+    const routePath = request.url.split("?", 1)[0] ?? request.url;
+    if (routePath.startsWith("/api/v1/") && !routePath.startsWith("/api/v1/auth/") && routePath !== "/api/v1/health") {
+      try {
+        if (runtimeAccountScope(options.dataDir, options.authentication).accountId !== state.accountId) {
+          for (const controller of state.activeTurns.values()) controller.abort();
+          for (const socket of sockets) socket.close(1008, "account changed; refresh required");
+          if (routePath !== "/api/v1/bootstrap") {
+            await reply.code(409).send(invalidRequest("AUTH_CONTEXT_CHANGED", "账号状态已改变，请刷新后继续。"));
+            return;
+          }
+          requireIdleAuthentication();
+          switching = true;
+          try { await rebindAccountRuntime(); }
+          finally { switching = false; }
+        }
+      } catch (error) { await apiFailure(reply, error); return; }
+    }
+  });
+
+  app.addHook("onResponse", async (request) => { inFlight.delete(request.id); });
+  app.addHook("onRequestAbort", async (request) => {
+    // A disconnected client must not leave a permanent lock. Work already in a
+    // handler keeps the lock until its own completion (e.g. an open folder dialog).
+    if (!executingRequests.has(request.id)) inFlight.delete(request.id);
   });
 
   app.addHook("onSend", async (_request, reply, payload) => {
@@ -645,13 +785,112 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     void reply.header("Set-Cookie", sessionCookieHeader(state.sessionCookie));
     return {
       csrfToken: state.csrfToken,
+      workspaceRevision,
       health: healthFor(options, state),
+      authentication: state.authentication?.status() ?? { status: "signed_out", account: null },
       sandbox: sandboxStatusFor(options, state),
       workspace: state.workspaceSummary,
       sessions,
       tools: state.tools?.capabilities() ?? [],
       mcpServers: state.mcpManager?.statuses() ?? [],
     };
+  });
+
+  async function transitionAuthentication(action: () => Promise<unknown>): Promise<void> {
+    requireIdleAuthentication();
+    switching = true;
+    try {
+      await action();
+      await rebindAccountRuntime();
+    } finally { switching = false; }
+  }
+
+  app.post("/api/v1/auth/login", async (_request, reply): Promise<BeginAuthenticationResponse | void> => {
+    try {
+      requireIdleAuthentication();
+      if (state.authentication === null) throw Object.assign(new Error("道引科技账号登录尚未配置。"), { code: "AUTH_NOT_CONFIGURED" });
+      return state.authentication.beginAuthorization();
+    } catch (error) { await apiFailure(reply, error); }
+  });
+
+  app.get("/api/v1/auth/callback", async (request, reply): Promise<void> => {
+    const { code, state: callbackState, error } = request.query as { code?: unknown; state?: unknown; error?: unknown };
+    let title = "登录成功";
+    let message = "账号已连接，正在返回工作台。";
+    let ok = true;
+    try {
+      if (error !== undefined) throw new Error("账号授权未完成，请重新登录。");
+      if (typeof code !== "string" || code.length === 0 || code.length > 4096 || typeof callbackState !== "string" || callbackState.length === 0 || callbackState.length > 256) {
+        throw new Error("登录回调参数无效，请重新登录。");
+      }
+      const authentication = state.authentication;
+      if (authentication === null) throw new Error("道引账号登录尚未配置。");
+      await transitionAuthentication(() => authentication.completeAuthorization(code, callbackState));
+      void reply.header("Set-Cookie", sessionCookieHeader(state.sessionCookie));
+    } catch (callbackError) {
+      ok = false;
+      title = "登录失败";
+      message = callbackError instanceof Error ? callbackError.message : "登录回调处理失败，请重新登录。";
+    }
+    const safeTitle = title.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    const safeMessage = message.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    // External CSS respects the runtime's style-src 'self' policy; no inline exception.
+    void reply.type("text/html; charset=utf-8").send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${ok ? '<meta http-equiv="refresh" content="2;url=/">' : ""}<title>${safeTitle}</title><link rel="icon" href="/assets/daoyin-logo.png"><link rel="stylesheet" href="/assets/auth-callback.css"></head><body><main class="auth-result ${ok ? "" : "failed"}"><img src="/assets/daoyin-logo.png" width="40" height="40" alt="道引科技"><h1>${safeTitle}</h1><p role="status">${safeMessage}</p><a href="/">返回工作台</a></main></body></html>`);
+  });
+
+  app.post("/api/v1/auth/logout", async (_request, reply): Promise<{ success: true } | void> => {
+    try {
+      const authentication = state.authentication;
+      if (authentication !== null) await transitionAuthentication(() => authentication.logout());
+      void reply.header("Set-Cookie", sessionCookieHeader(state.sessionCookie));
+      return { success: true };
+    } catch (error) { await apiFailure(reply, error); }
+  });
+
+  app.get("/api/v1/workspaces", async () => ({
+    recent: history?.recent ?? [],
+    nativePickerAvailable: options.pickWorkspaceDirectory !== undefined || process.platform === "win32",
+  }));
+
+  let pickerBusy = false;
+  app.post("/api/v1/workspaces/pick", async (_request, reply): Promise<PickWorkspaceResponse | void> => {
+    if (pickerBusy) { await reply.code(409).send(invalidRequest("WORKSPACE_PICKER_BUSY", "文件夹选择窗口已打开。")); return; }
+    pickerBusy = true;
+    try {
+      const root = await (options.pickWorkspaceDirectory ?? pickWorkspaceDirectory)();
+      return { root: root === null ? null : await validateWorkspaceRoot(root) };
+    } catch (error) {
+      await apiFailure(reply, error);
+    } finally { pickerBusy = false; }
+  });
+
+  app.post("/api/v1/workspaces/switch", async (request, reply): Promise<SwitchWorkspaceResponse | void> => {
+    if (state.activeTurns.size > 0 || inFlight.size > 1) {
+      await reply.code(409).send(invalidRequest("WORKSPACE_BUSY", "当前工作区仍有任务或操作在进行，请完成或停止后再切换。", true)); return;
+    }
+    switching = true;
+    let next: RuntimeState | null = null;
+    try {
+      requireRuntime(state);
+      if (history === null) throw Object.assign(new Error("工作区管理尚未初始化。"), { code: "RUNTIME_NOT_INITIALIZED" });
+      const body = request.body as { root?: unknown } | null;
+      const root = await validateWorkspaceRoot(body?.root);
+      if (root === state.workspace.root) return { workspace: state.workspaceSummary };
+      next = await createRuntimeState({ ...scopedOptions, workspaceRoot: root }, history.catalogDirectory(root), state.accountId);
+      await history.remember(root);
+      const previous = state;
+      next.sessionCookie = previous.sessionCookie;
+      state = next;
+      next = null;
+      workspaceRevision = randomBytes(16).toString("hex");
+      for (const socket of sockets) socket.close(1008, "workspace changed; refresh required");
+      await Promise.allSettled([previous.browserService?.close(), previous.mcpManager?.close()]);
+      requireRuntime(state);
+      return { workspace: state.workspaceSummary };
+    } catch (error) {
+      if (next !== null) await Promise.allSettled([next.browserService?.close(), next.mcpManager?.close()]);
+      await apiFailure(reply, error);
+    } finally { switching = false; }
   });
 
   app.get("/api/v1/workspace/files", async (_request, reply): Promise<WorkspaceFilesResponse | void> => {
@@ -671,7 +910,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
       if (sessionId !== undefined && await state.catalog.get(sessionId) === undefined) {
         throw Object.assign(new Error("会话不存在。"), { code: "SESSION_NOT_FOUND" });
       }
-      return state.orchestrationStore.snapshot("local", state.resourceScopeId, sessionId);
+      return state.orchestrationStore.snapshot(state.accountId, state.resourceScopeId, sessionId);
     } catch (error) {
       await apiFailure(reply, error);
     }
@@ -681,7 +920,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     try {
       requireRuntime(state);
       const { sessionId } = request.query as { sessionId?: string };
-      return state.processPermissions.list("local", state.resourceScopeId, sessionId);
+      return state.processPermissions.list(state.accountId, state.resourceScopeId, sessionId);
     } catch (error) {
       await apiFailure(reply, error);
     }
@@ -692,7 +931,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
       requireRuntime(state);
       const { requestId } = request.params as { requestId: string };
       const { approve } = parsePermissionDecisionBody(request.body);
-      return state.processPermissions.decide(requestId, "local", state.resourceScopeId, approve);
+      return await state.processPermissions.decide(requestId, state.accountId, state.resourceScopeId, approve);
     } catch (error) {
       await apiFailure(reply, error);
     }
@@ -777,6 +1016,11 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   });
 
   app.get("/api/v1/sessions/:sessionId/events/ws", { websocket: true }, (socket, request) => {
+    // A replay keeps its original runtime even if the workspace switches while IO is pending.
+    const streamState = state;
+    inFlight.delete(request.id);
+    sockets.add(socket);
+    socket.once("close", () => { sockets.delete(socket); });
     const { sessionId } = request.params as { sessionId: string };
     const { after } = request.query as { after?: string };
     let lastSent = parsePositiveInteger(after, 0);
@@ -808,28 +1052,28 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
 
     void (async () => {
       try {
-        requireRuntime(state);
-        if (cookieValue(request.headers.cookie, "daoyin_harness_session") !== state.sessionCookie) {
+        requireRuntime(streamState);
+        if (cookieValue(request.headers.cookie, "daoyin_harness_session") !== streamState.sessionCookie) {
           send({ type: "error", code: "LOCAL_SESSION_REQUIRED", message: "本地浏览器会话无效，请刷新页面。" });
           socket.close(1008, "local session required");
           return;
         }
-        let session = await state.catalog.get(sessionId);
+        let session = await streamState.catalog.get(sessionId);
         if (session === undefined) {
           send({ type: "error", code: "SESSION_NOT_FOUND", message: "会话不存在。" });
           socket.close(1008, "session not found");
           return;
         }
 
-        unsubscribe = subscribeSessionEvents(state, sessionId, subscriber);
-        const replay = await state.events.read(sessionId, lastSent);
-        session = (await state.catalog.get(sessionId)) ?? session;
+        unsubscribe = subscribeSessionEvents(streamState, sessionId, subscriber);
+        const replay = await streamState.events.read(sessionId, lastSent);
+        session = (await streamState.catalog.get(sessionId)) ?? session;
         for (const event of replay) sendEvent({ type: "event", event, session });
         pending.sort((left, right) => left.event.eventSeq - right.event.eventSeq);
         for (const message of pending) sendEvent(message);
         pending.length = 0;
         live = true;
-        session = (await state.catalog.get(sessionId)) ?? session;
+        session = (await streamState.catalog.get(sessionId)) ?? session;
         send({ type: "ready", session, lastEventSeq: lastSent });
       } catch (error) {
         const candidate = error as { code?: unknown; message?: unknown };
@@ -844,55 +1088,59 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   });
 
   app.post("/api/v1/sessions/:sessionId/turns", async (request, reply): Promise<StartTurnResponse | void> => {
+    const turnState = state;
     try {
-      requireRuntime(state);
+      requireRuntime(turnState);
+      if (turnState.authentication !== null && turnState.authentication.status().status !== "signed_in") {
+        throw Object.assign(new Error("请先登录道引账号。"), { code: "AUTH_REQUIRED" });
+      }
       const { sessionId } = request.params as { sessionId: string };
-      const found = await state.catalog.get(sessionId);
+      const found = await turnState.catalog.get(sessionId);
       if (found === undefined) throw Object.assign(new Error("会话不存在。"), { code: "SESSION_NOT_FOUND" });
-      const reconciled = await reconcileSessionActivity(state, found);
+      const reconciled = await reconcileSessionActivity(turnState, found);
       const current = reconciled.session;
       if (current.activeTurnId !== null) throw Object.assign(new Error("这个会话已有任务正在执行。"), { code: "SESSION_BUSY" });
 
       const body = parseTurnBody(request.body);
-      const inheritedEvents = await inheritedEventsForSession(state, current);
+      const inheritedEvents = await inheritedEventsForSession(turnState, current);
       const turnId = `turn_${crypto.randomUUID().replaceAll("-", "")}`;
       const controller = new AbortController();
-      state.activeTurns.set(turnId, controller);
-      await state.catalog.update(sessionId, {
+      turnState.activeTurns.set(turnId, controller);
+      await turnState.catalog.update(sessionId, {
         activeTurnId: turnId,
         updatedAt: new Date().toISOString(),
         title: current.title === "新对话" ? body.message.slice(0, 40) : current.title,
       });
 
-      const model: ModelClient = state.model ?? {
+      const model: ModelClient = turnState.model ?? {
         async complete() {
           throw new Error("真实模型网关尚未登录。会话与工作区已经接通，但当前不会伪造模型执行结果。");
         },
       };
       const engine = new AgentEngine({
         model,
-        tools: state.tools,
-        events: state.events,
-        promptRegistry: state.promptRegistry,
-        compactionStore: state.compactionStore,
+        tools: turnState.tools,
+        events: turnState.events,
+        promptRegistry: turnState.promptRegistry,
+        compactionStore: turnState.compactionStore,
         ...(options.compactionRetainRecentTurns === undefined ? {} : { compactionRetainRecentTurns: options.compactionRetainRecentTurns }),
         ...(options.compactionTriggerUncompactedTurns === undefined ? {} : { compactionTriggerUncompactedTurns: options.compactionTriggerUncompactedTurns }),
         ...(options.compactionTriggerCharacters === undefined ? {} : { compactionTriggerCharacters: options.compactionTriggerCharacters }),
         ...(options.compactionMaxSummaryCharacters === undefined ? {} : { compactionMaxSummaryCharacters: options.compactionMaxSummaryCharacters }),
         onEvent: async (event) => {
           const terminal = event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled" || event.type === "turn.interrupted";
-          const session = await state.catalog.update(sessionId, {
+          const session = await turnState.catalog.update(sessionId, {
             lastEventSeq: event.eventSeq,
             updatedAt: event.occurredAt,
             ...(terminal ? { activeTurnId: null } : {}),
           });
-          publishSessionEvent(state, event, session);
+          publishSessionEvent(turnState, event, session);
         },
       });
 
       void engine.runTurn({
-        accountId: "local",
-        scopeId: state.resourceScopeId,
+        accountId: turnState.accountId,
+        scopeId: turnState.resourceScopeId,
         sessionId,
         turnId,
         userMessage: body.message,
@@ -900,10 +1148,10 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         ...(body.planning ? { systemInstruction: "Before acting, reason through the task structure and dependencies carefully. Keep the visible answer concise unless the user asks for detail." } : {}),
         signal: controller.signal,
       }).finally(async () => {
-        state.activeTurns.delete(turnId);
-        const latest = await state.catalog.get(sessionId);
+        turnState.activeTurns.delete(turnId);
+        const latest = await turnState.catalog.get(sessionId);
         if (latest?.activeTurnId === turnId) {
-          await state.catalog.update(sessionId, { activeTurnId: null, updatedAt: new Date().toISOString() });
+          await turnState.catalog.update(sessionId, { activeTurnId: null, updatedAt: new Date().toISOString() });
         }
       }).catch(() => undefined);
 

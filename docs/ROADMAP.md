@@ -58,7 +58,7 @@ Deliverables:
 - normalized model request/response/tool-call contract;
 - quota, membership and audit integration without exposing provider keys locally.
 
-Current state: the normalized Daoyin AI Gateway `ModelClient` is implemented in `packages/cloud`, including HTTPS/loopback policy, bounded timeout/response handling, strict assistant/tool-call parsing and stable gateway error mapping. A development-only process-memory credential bridge is wired through the CLI so a real gateway can be exercised before OAuth exists. Main-platform OAuth endpoints, credential-store adapters, token refresh/rotation and the production Gateway service are still required.
+Current state: the Windows runtime, main-platform OAuth endpoints and user-authenticated Agent gateway are implemented. PKCE authorization, server-side state, short-lived access tokens, rotating refresh tokens, DPAPI storage, authenticated bootstrap state and assistant/tool-call normalization have local automated and browser evidence. Production deployment, real-account no-tool/tool-backed model acceptance, refresh-family replay revocation and platform device-grant management remain required.
 
 Exit criteria:
 

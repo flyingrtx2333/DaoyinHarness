@@ -7,6 +7,7 @@ describe("CLI arguments", () => {
       openBrowser: true,
       dataDir: "C:/data",
       workspaceRoot: expect.stringMatching(/workspace$/u),
+      restoreLastWorkspace: true,
       sandboxMode: "auto",
       mcpServers: [],
       logLevel: "info",
@@ -28,6 +29,7 @@ describe("CLI arguments", () => {
     expect(result.logLevel).toBe("debug");
     expect(result.dataDir).toMatch(/runtime-data$/u);
     expect(result.workspaceRoot).toMatch(/demo-project$/u);
+    expect(result.restoreLastWorkspace).toBe(false);
   });
 
   it("parses explicit remote MCP servers and environment-backed Bearer tokens", () => {

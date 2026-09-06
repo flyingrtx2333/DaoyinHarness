@@ -1,0 +1,198 @@
+{
+  "checkedAt": "2026-09-06T01:48:34.597Z",
+  "platform": "win32",
+  "node": "v22.23.2",
+  "environment": "Windows / Edge; real compiled UI; all APIs and WebSockets mocked; no model calls or user-data mutations",
+  "verdict": "passed",
+  "results": [
+    {
+      "name": "compact-layout-and-local-logo",
+      "sizes": {
+        "sidebar": 240,
+        "header": 52,
+        "account": 44
+      }
+    },
+    {
+      "name": "desktop",
+      "layout": {
+        "width": 1440,
+        "height": 900,
+        "scrollWidth": 1440,
+        "scrollHeight": 900,
+        "composer": {
+          "x": 430,
+          "y": 772,
+          "width": 820,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "sidebar-motion-and-persistence",
+      "animation": {
+        "width": 240,
+        "samples": [
+          0,
+          -75.81108856201172,
+          -133.92977905273438,
+          -174.48924255371094,
+          -200.50473022460938,
+          -216.88455200195312,
+          -226.77963256835938,
+          -232.78448486328125,
+          -236.2970733642578,
+          -238.28115844726562,
+          -239.32647705078125,
+          -239.80453491210938,
+          -239.97152709960938,
+          -239.9998779296875,
+          -240,
+          -240,
+          -240,
+          -240,
+          -240,
+          -240,
+          -240,
+          -240,
+          -240,
+          -240
+        ],
+        "inert": true
+      }
+    },
+    {
+      "name": "files",
+      "layout": {
+        "width": 1440,
+        "height": 900,
+        "scrollWidth": 1440,
+        "scrollHeight": 900,
+        "composer": {
+          "x": 430,
+          "y": 772,
+          "width": 820,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "drawer-exit-focus-and-dialog-close"
+    },
+    {
+      "name": "preserve-reader-scroll-position"
+    },
+    {
+      "name": "viewport-1280",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "composer": {
+          "x": 350,
+          "y": 592,
+          "width": 820,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "viewport-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024,
+        "composer": {
+          "x": 16,
+          "y": 896,
+          "width": 736,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "navigation-768",
+      "layout": {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "scrollHeight": 1024,
+        "composer": {
+          "x": 16,
+          "y": 896,
+          "width": 736,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "viewport-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "composer": {
+          "x": 12,
+          "y": 718,
+          "width": 366,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "navigation-390",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "composer": {
+          "x": 12,
+          "y": 718,
+          "width": 366,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "viewport-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740,
+        "composer": {
+          "x": 12,
+          "y": 614,
+          "width": 296,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "navigation-320",
+      "layout": {
+        "width": 320,
+        "height": 740,
+        "scrollWidth": 320,
+        "scrollHeight": 740,
+        "composer": {
+          "x": 12,
+          "y": 614,
+          "width": 296,
+          "height": 114
+        }
+      }
+    },
+    {
+      "name": "reduced-motion"
+    },
+    {
+      "name": "account-change-clears-stale-ui-and-stops-reconnect"
+    }
+  ],
+  "errors": []
+}

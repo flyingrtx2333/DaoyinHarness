@@ -1,0 +1,71 @@
+{
+  "screen": "Harness cloud workbench",
+  "date": "2026-09-06",
+  "route": "https://www.daoyintech.com/harness/",
+  "reference": "reference.png",
+  "referenceAnalysis": "reference-analysis.json",
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "concepts": [
+    {
+      "id": "A",
+      "title": "雾白 · 专注对话",
+      "layout": "浅色侧栏与居中对话画布，输入框插件选择器",
+      "strength": "轻盈清晰，适合高频问答",
+      "tradeoff": "执行信息和插件管理需要展开",
+      "state": "空会话，插件选择器打开",
+      "path": "concept-a.png",
+      "prompt": "Use case: ui-mockup. Create Concept A, a complete modern Chinese desktop Agent workbench for 道引 Harness. The supplied screenshot is product/information-architecture reference only; entirely redesign the visual system and composition, do not lightly restyle it. Render a complete 1280x720 widescreen 16:9 viewport, edge to edge, no browser chrome or device mockup.\nDirection A: \"雾白 · 专注对话\". A premium, exceptionally refined light productivity application. Mist-gray background, white inset canvas with 20px rounded top corners, one hairline edge, extremely subtle diffuse shadow; crisp ink Chinese typography and cobalt blue/teal accents. Fine typographic hierarchy with beautiful spacing; avoid the clumsy oversized plain form of the reference. Small blue/teal folded geometric brand symbol.\nComposition: a restrained 208px warm-gray left sidebar with logo and 道引 Harness, prominent text navigation 会话 / 插件 (会话 active), 新建会话, slim 搜索会话, 最近会话 with small muted label 暂无会话. Bottom sidebar 访客空间 and small 授权 30 分钟, 官网 link. Main canvas has a compact 56px toolbar 新会话, right 重新连接. Open central composition with a small elegant iridescent folded ribbon mark, heading 今天，想完成什么？ at 32px, two clean compact suggested prompts 了解道引的产品 and 查看文旅方案. A beautiful substantial white composer sits around the lower-middle with placeholder 描述你的问题…; at its BOTTOM LEFT a clearly visible plus icon button and selected 官网知识 chip; BOTTOM RIGHT compact cobalt rounded-square up-arrow send button. Tiny footer 依据公开资料回答.\nShow the plus-selector POPOVER OPEN upward just above the plus button, laid out with exquisite alignment, not covering the central headline: title 选择插件; row 官网知识 with readable 已选; row 短剧制作 with readable 待接入; row 网站与应用 待接入; row 文旅影像 待接入; footer 查看全部插件. Maintain real status: only 官网知识 is available, all other business integrations unavailable. Menu shape, shadow and sizing should feel like a premium native command palette.\nSubtle faint blue-lilac atmospheric tint localized behind the folded mark only, mostly neutral UI. Use generous negative space with meaningful grouping, no giant hero illustration, no dashboard metrics, no fake active video jobs or claimed capabilities, no meaningless icons. Realistic production UI, legible clean simplified Chinese, tastefully dense at viewport scale. Avoid thick borders, excessive pills, gray-on-gray unreadable text, giant greeting hero, card grids, gradients across the whole screen, watermarks, external logos. This must be visually much more modern and polished than the reference.",
+      "generatedSize": {
+        "width": 1672,
+        "height": 941
+      },
+      "review": "视觉检查通过；生成图中的文案、图标和细节均为设计示意，实施时须与现有契约核对"
+    },
+    {
+      "id": "B",
+      "title": "夜航 · 执行控制台",
+      "layout": "深色导航轨、会话栏、对话与右侧执行信息",
+      "strength": "工具进度与资料来源持续可见",
+      "tradeoff": "信息密度较高，小屏需要折叠侧栏",
+      "state": "示意对话与生成状态，并非实际任务结果",
+      "path": "concept-b.png",
+      "prompt": "Use case: ui-mockup. Create Concept B for 道引 Harness, a complete Chinese desktop unified Agent workbench. Original screenshot is information-architecture reference only, not a styling target. Render the full 1280x720 landscape 16:9 application viewport, no browser chrome, no device frame.\nDirection B: \"夜航 · 执行控制台\". Premium graphite-dark professional software, not a gaming dashboard. Sophisticated near-black #101318 with layered charcoal #191e26 surfaces, subtly lighter slate separators, high-contrast off-white Chinese text and an extremely restrained electric periwinkle/cyan accent. Sharp hierarchy, small precise outlined icons, compact radius 8-12px, thin dividers, minimal gradients, absolutely no neon border glow.\nComposition is materially different from a two-column chatbot: left 64px vertical icon rail with small folded blue-teal geometric logo and labeled 会话 / 插件 icons, below small account icon; adjacent 190px conversation column with brand Harness, 新建会话, 搜索会话, 最近会话, one selected item 产品与应用场景. Bottom 访客空间 and 授权 30 分钟. Center ~730px conversation workspace: compact toolbar 产品与应用场景, at top right 重新连接. User message aligned toward right asks 请介绍道引的产品与应用场景. Assistant section with small brand mark, readable heading 先从公开资料开始, a brief two-line paragraph 我会检索官网资料，整理产品方向与适用场景，并保留来源供你核对。 A beautifully understated inline execution record shows checkmark 已检索公开资料 with 3 条参考资料, then two source rows 道引科技与平台能力总览 / 产品与服务说明, short descriptors only, no fabricated statistics. Use a tasteful small running indicator on 整理回答中 with a real-looking 停止生成 button in the composer instead of send for this active-state concept.\nFar-right persistent 270px tool/context inspector has heading 当前插件 with 官网知识 and clear 已启用 label, small capabilities 公开资料检索 / 来源引用; separate section 更多插件 shows 短剧制作, 网站与应用, 文旅影像 each with unambiguous 待接入 in neutral gray. These are NOT currently executable. Lower section 参考资料 mirrors small plain source links; no metrics or unnecessary charts.\nAt bottom of central column a high-quality docked composer on a slightly raised dark surface, placeholder 继续描述你的问题…, clearly visible PLUS icon at bottom LEFT and 官网知识 selected chip; right 停止生成. Tiny footer 依据公开资料回答. Crisp Chinese UI typography with a comfortable reading measure, accurate utility labels. Full frame edges visible. All functions remain consistent: conversation list/search/new, plugin navigation, plus selection, send/cancel states, source review, visitor scope.\nMake this look like mature precision creative/developer tooling with immaculate alignment. No fake terminal code, no colorful data charts, no video generation progress or claim of enabled short-drama creation, no external logos, no watermark, no lorem ipsum, no decorative hero art.",
+      "generatedSize": {
+        "width": 1672,
+        "height": 941
+      },
+      "review": "视觉检查通过；生成图中的文案、图标和细节均为设计示意，实施时须与现有契约核对"
+    },
+    {
+      "id": "C",
+      "title": "暖白 · 创作工作室",
+      "layout": "暖白插件目录，横向能力条目与固定底部输入框",
+      "strength": "创作气质鲜明，插件发现更直接",
+      "tradeoff": "插件页信息更多，默认对话页需对应设计",
+      "state": "插件页与当前选中能力详情",
+      "path": "concept-c.png",
+      "prompt": "Design concept C: 暖白 · 创作工作室, a high-fidelity complete desktop web application UI for 道引 Harness, a unified Agent workbench. Use the attached current page only to understand existing product functions. Independently redesign the layout. Full 1280 by 720 desktop viewport, 16:9 composition, flat frontal screenshot, no browser chrome, no mockup device, no watermarks. This must be a warm editorial creative workspace, materially different from both a centered pale SaaS chat and a dark three-column execution console.\n\nArt direction: warm ivory paper background, charcoal text, restrained burnt-orange and sage accents, very crisp thin rules, beautiful spacious typography, subtle tactile depth, premium contemporary creative software. No giant gradients, no illustrations of people, no decorative hero filling the workspace. Small original blue/teal folded geometric logo next to Harness at top left.\n\nComposition: 200px left navigation with + 新建会话, 搜索会话, 会话 and selected 插件 nav, restrained recent sessions below and 访客空间 / 会话保留 30 分钟 at bottom. Main area is an editorial plugin workspace, spacious and asymmetrically composed. Top header has 工作台 / 插件 and a discreet 重新连接 control. Main title 把想法，变成作品。 with restrained subheading 为对话选择合适的能力. Main lower area organizes plugin capabilities as elegant horizontal editorial rows with large simple icons and hairline separators, not a grid of generic dashboard cards. Available leading row 官网知识, blue/teal status 可使用, supporting text 查询道引产品、服务与公开资料, action 添加到对话. Other three compact rows: 短剧制作 / 待接入, 网站与应用 / 待接入, 文旅影像 / 待接入. Their descriptions should be subdued and avoid any suggestion jobs are executable. You may place a quiet selected-plugin details column to the right with 官网知识 / 只读检索 / 公开资料, and a small geometric folded-paper motif, but keep the primary reading surface generous.\n\nPersistent composer integrated into bottom of main area: white rounded input with placeholder 输入你的问题…; clearly visible plus + at LOWER LEFT inside input, selected chip 官网知识 next to it, orange or charcoal send arrow at lower right. This composer is part of the proposed modern design while viewing plugins. Keep it elegant and useful. No fabricated upload function, billing balance, running video job, metrics, enabled enterprise account, or login action. Only 官网知识 is available; the other capabilities explicitly remain 待接入. Chinese labels must be clear, visually coherent and legible. Complete composition must fit the viewport. The result should feel like a fresh polished 2026 creative application with differentiated typography, horizontal editorial hierarchy and accessible contrast, not a marketing landing page.",
+      "generatedSize": {
+        "width": 1672,
+        "height": 941
+      },
+      "review": "视觉检查通过；生成图中的文案、图标和细节均为设计示意，实施时须与现有契约核对"
+    }
+  ],
+  "selected": "A",
+  "selectedReference": "selected-reference.png",
+  "comparisonViewport": { "width": 1672, "height": 941 },
+  "status": "implemented-locally-with-documented-visual-residuals",
+  "acceptanceNotes": "implementation-notes.md",
+  "constraints": [
+    "仅官网知识可用；短剧制作、网站与应用、文旅影像待接入",
+    "保留会话、插件导航及输入框左下角加号",
+    "用户选择 A 后完成本地前端实现与验收；未提交或部署",
+    "实施时复用实际HarnessLogo组件；生成图不作为整页背景",
+    "示意快捷键、账户入口、插件描述及30分钟文案须按实际接口与行为校准，不视为新增已实现功能"
+  ],
+  "skill": "C:/Users/17489/.codex/skills/concept-to-ui/SKILL.md"
+}

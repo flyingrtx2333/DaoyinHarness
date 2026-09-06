@@ -1,0 +1,14 @@
+{
+  "selected_reference": "selected-d-aurora-fold.png",
+  "production_treatment": "selected redraw PNG resource, copied without modification",
+  "production_asset": "packages/ui/public/assets/harness-logo.png",
+  "asset_sha256": "9787c04c92cabad5f3e638744fe59e9c86b63041475f56c8e53222a6aed646ca",
+  "production_component": "packages/ui/src/cloud/HarnessLogo.tsx",
+  "consuming_selectors": [
+    ".brand-mark .harness-logo",
+    ".empty-mark .harness-logo",
+    ".mini-mark .harness-logo"
+  ],
+  "raster_asset_served": true,
+  "page_icons": ["favicon", "apple-touch-icon"]
+}

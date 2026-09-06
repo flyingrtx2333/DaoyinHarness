@@ -1,0 +1,41 @@
+{
+  "screen": "cloud-composer-controls",
+  "reference": "C:/Users/17489/AppData/Local/Temp/codex-clipboard-bef473a3-7d70-41e6-a865-c38af08bbbee.png",
+  "viewport": [
+    1343,
+    283
+  ],
+  "concepts": [
+    {
+      "id": "A",
+      "title": "双层命令栏",
+      "path": "layout-a.png",
+      "imagegen_path": "generated-a.png",
+      "prompt_direction": "写作区在上、统一底栏在下；插件选择保持为紧凑来源控制。",
+      "strength": "兼顾多行输入与清晰控件分组。",
+      "tradeoff": "高度比单行方案多。",
+      "vector_source": "layout-a.svg"
+    },
+    {
+      "id": "B",
+      "title": "单行命令输入",
+      "path": "layout-b.png",
+      "imagegen_path": "generated-b.png",
+      "prompt_direction": "插件、问题和发送放进同一行。",
+      "strength": "最紧凑，按钮关系一眼可懂。",
+      "tradeoff": "长文本输入时会自然扩展为多行。",
+      "vector_source": "layout-b.svg"
+    },
+    {
+      "id": "C",
+      "title": "轻量工具栏",
+      "path": "layout-c.png",
+      "imagegen_path": "generated-c.png",
+      "prompt_direction": "写作区在上，插件和引用提示合并进同一底栏。",
+      "strength": "减少输入框外的冗余文字。",
+      "tradeoff": "底栏信息密度略高。",
+      "vector_source": "layout-c.svg"
+    }
+  ],
+  "selected": null
+}\n

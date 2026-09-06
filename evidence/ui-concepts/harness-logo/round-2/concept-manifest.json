@@ -1,0 +1,32 @@
+{
+  "screen": "harness-cloud-workbench-brand-mark-round-2",
+  "reference": "../reference.png",
+  "viewport": [1280, 720],
+  "concepts": [
+    {
+      "id": "D",
+      "title": "Aurora Fold",
+      "path": "concept-d-aurora-fold.png",
+      "prompt_direction": "A folded indigo and cyan portal, moving from a utility badge toward a premium entry mark.",
+      "strength": "Crisp, contemporary and highly recognizable in a small square.",
+      "tradeoff": "The new cyan treatment would need a small supporting color update in the current blue-only workbench."
+    },
+    {
+      "id": "E",
+      "title": "Ink Signal",
+      "path": "concept-e-ink-signal.png",
+      "prompt_direction": "A single energetic ink-like gesture resolves at a precise copper proof point.",
+      "strength": "Warmer and more distinctive; gives Harness a human intent-to-execution story.",
+      "tradeoff": "Most expressive option, so the final SVG must simplify the brush texture for small sizes."
+    },
+    {
+      "id": "F",
+      "title": "Open Portal",
+      "path": "concept-f-open-portal.png",
+      "prompt_direction": "Two translucent offset bands create an open doorway in plum and coral.",
+      "strength": "The freshest visual identity and strongest visual separation from typical AI products.",
+      "tradeoff": "The largest departure from the current website palette and requires a more intentional supporting theme."
+    }
+  ],
+  "selected": "D"
+}

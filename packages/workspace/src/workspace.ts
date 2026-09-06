@@ -2,6 +2,7 @@ import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } fro
 import path from "node:path";
 
 const WINDOWS_DEVICE_NAME = /(^|[\\/])(con|prn|aux|nul|com[1-9]|lpt[1-9])($|[.\\/])/i;
+const IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".venv", "__pycache__", ".cache", "coverage", "dist", "build", "claude-code-main"]);
 
 export interface WorkspaceLimits {
   maxFileBytes: number;
@@ -101,6 +102,7 @@ export class Workspace {
           continue;
         }
         if (entry.isDirectory()) {
+          if (IGNORED_DIRECTORIES.has(entry.name.toLowerCase())) continue;
           await visit(absolute, depth + 1);
         } else if (entry.isFile()) {
           results.push(toPortable(path.relative(this.#root, absolute)));

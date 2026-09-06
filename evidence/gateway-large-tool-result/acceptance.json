@@ -1,0 +1,77 @@
+{
+  "verifiedAt": "2026-09-05T03:49:22.376Z",
+  "environment": "Windows PowerShell, Node.js 22.23.2",
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "test": {
+      "files": 31,
+      "passed": 116
+    },
+    "build": "passed",
+    "runtimeBootstrap": 200,
+    "realModel": "completed"
+  },
+  "realModelHttp": [
+    {
+      "status": 200,
+      "messages": [
+        {
+          "role": "system",
+          "characters": 4681
+        },
+        {
+          "role": "user",
+          "characters": 89
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "messages": [
+        {
+          "role": "system",
+          "characters": 4681
+        },
+        {
+          "role": "user",
+          "characters": 89
+        },
+        {
+          "role": "assistant_tool_calls",
+          "characters": 0
+        },
+        {
+          "role": "tool",
+          "characters": 23953
+        }
+      ]
+    }
+  ],
+  "originalToolResultCharacters": 129744,
+  "limits": {
+    "derivedToolResult": 24000,
+    "gatewayMessage": 100000
+  },
+  "runtime": {
+    "url": "http://127.0.0.1:4677",
+    "processId": 16748,
+    "activeTurns": 0
+  },
+  "scope": [
+    "packages/agent-core/src/model-tool-result.ts",
+    "packages/agent-core/src/model-tool-result.test.ts",
+    "packages/agent-core/src/agent-engine.ts",
+    "packages/agent-core/src/agent-engine.test.ts",
+    "packages/cloud/src/gateway-model-client.ts",
+    "packages/cloud/src/gateway-model-client.test.ts",
+    "scripts/verify-large-tool-result.mjs",
+    "docs/adr/0003-bounded-model-tool-results.md"
+  ],
+  "commitCreated": false,
+  "notes": [
+    "User session events are preserved; verification used a separate transcript",
+    "No main-platform code or deployment changed",
+    "This bounds individual tool results; it is not a full filesystem pagination or aggregate-context-budget feature"
+  ]
+}

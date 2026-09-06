@@ -1,0 +1,11 @@
+{
+  "route": "http://127.0.0.1:4677/",
+  "viewport": [
+    1536,
+    960
+  ],
+  "observed": "Current active conversation; broad icon rail and floating session pane; warm near-white background; raw markdown displayed as plain text; oversized composer; tiny Chinese text",
+  "scope": "React/Vite frontend only; preserve API, authentication, conversation replay, permission decisions, cancellation and workspace boundaries",
+  "sourceState": "Existing uncommitted UI and authentication work preserved",
+  "conceptState": "Illustrative active conversation across all three concepts"
+}

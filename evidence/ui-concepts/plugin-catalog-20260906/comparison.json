@@ -1,0 +1,75 @@
+{
+  "reference": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\plugin-catalog-20260906\\selected-reference.png",
+  "actual": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\plugin-catalog-20260906\\run-2026-09-06T02-54-22-956Z\\plugin-c-reference.png",
+  "size": {
+    "width": 1576,
+    "height": 998
+  },
+  "tolerance": 24,
+  "normalized_mae": 0.012923311039317611,
+  "pixel_similarity": 0.9870766889606823,
+  "within_tolerance_ratio": 0.971628536260338,
+  "regions": {
+    "header": {
+      "box": [
+        0,
+        0,
+        1576,
+        90
+      ],
+      "normalized_mae": 0.013970367052630415,
+      "pixel_similarity": 0.9860296329473696,
+      "within_tolerance_ratio": 0.9529610829103214
+    },
+    "search": {
+      "box": [
+        1100,
+        132,
+        345,
+        56
+      ],
+      "normalized_mae": 0.03544675841351033,
+      "pixel_similarity": 0.9645532415864897,
+      "within_tolerance_ratio": 0.8805383022774327
+    },
+    "first_row": {
+      "box": [
+        129,
+        242,
+        1316,
+        137
+      ],
+      "normalized_mae": 0.03958737090114816,
+      "pixel_similarity": 0.9604126290988518,
+      "within_tolerance_ratio": 0.9052204202072194
+    },
+    "second_row": {
+      "box": [
+        129,
+        416,
+        1316,
+        137
+      ],
+      "normalized_mae": 0.03203987605292156,
+      "pixel_similarity": 0.9679601239470784,
+      "within_tolerance_ratio": 0.9351219133405808
+    },
+    "catalog": {
+      "box": [
+        129,
+        124,
+        1316,
+        429
+      ],
+      "normalized_mae": 0.029193811797065865,
+      "pixel_similarity": 0.9708061882029342,
+      "within_tolerance_ratio": 0.9336957368872263
+    }
+  },
+  "thresholds": {
+    "max_mae": 0.035,
+    "min_within_tolerance": 0.9
+  },
+  "passed": true,
+  "violations": []
+}

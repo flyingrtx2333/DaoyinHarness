@@ -1,0 +1,75 @@
+{
+  "reference": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\cloud-modern-20260906-side\\selected-reference.png",
+  "actual": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\cloud-modern-20260906-side\\desktop-picker.png",
+  "size": {
+    "width": 1672,
+    "height": 941
+  },
+  "tolerance": 24,
+  "normalized_mae": 0.016288113497623175,
+  "pixel_similarity": 0.9837118865023768,
+  "within_tolerance_ratio": 0.9693634990771296,
+  "regions": {
+    "sidebar": {
+      "box": [
+        0,
+        0,
+        292,
+        941
+      ],
+      "normalized_mae": 0.019032516465939342,
+      "pixel_similarity": 0.9809674835340607,
+      "within_tolerance_ratio": 0.957954231144367
+    },
+    "header": {
+      "box": [
+        292,
+        21,
+        1360,
+        89
+      ],
+      "normalized_mae": 0.008406900543870334,
+      "pixel_similarity": 0.9915930994561296,
+      "within_tolerance_ratio": 0.9836417713152676
+    },
+    "welcome": {
+      "box": [
+        700,
+        210,
+        560,
+        300
+      ],
+      "normalized_mae": 0.052757648615001554,
+      "pixel_similarity": 0.9472423513849985,
+      "within_tolerance_ratio": 0.9054702380952381
+    },
+    "picker": {
+      "box": [
+        378,
+        470,
+        258,
+        300
+      ],
+      "normalized_mae": 0.04433856884700478,
+      "pixel_similarity": 0.9556614311529952,
+      "within_tolerance_ratio": 0.8942248062015504
+    },
+    "composer": {
+      "box": [
+        416,
+        650,
+        1110,
+        198
+      ],
+      "normalized_mae": 0.019198188087076976,
+      "pixel_similarity": 0.980801811912923,
+      "within_tolerance_ratio": 0.9454636454636455
+    }
+  },
+  "thresholds": {
+    "max_mae": 0.035,
+    "min_within_tolerance": 0.9
+  },
+  "passed": true,
+  "violations": []
+}

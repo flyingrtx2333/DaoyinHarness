@@ -1,0 +1,82 @@
+{
+  "source": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\agent-workbench-redesign-20260905\\reference.png",
+  "size": {
+    "width": 1536,
+    "height": 960
+  },
+  "aspect_ratio": 1.6,
+  "top_colors": [
+    {
+      "rgb": [
+        251,
+        248,
+        243
+      ],
+      "hex": "#fbf8f3",
+      "count": 158119
+    },
+    {
+      "rgb": [
+        255,
+        252,
+        249
+      ],
+      "hex": "#fffcf9",
+      "count": 154432
+    },
+    {
+      "rgb": [
+        252,
+        248,
+        244
+      ],
+      "hex": "#fcf8f4",
+      "count": 150119
+    },
+    {
+      "rgb": [
+        250,
+        246,
+        241
+      ],
+      "hex": "#faf6f1",
+      "count": 148157
+    },
+    {
+      "rgb": [
+        251,
+        247,
+        242
+      ],
+      "hex": "#fbf7f2",
+      "count": 113602
+    },
+    {
+      "rgb": [
+        251,
+        247,
+        243
+      ],
+      "hex": "#fbf7f3",
+      "count": 93010
+    },
+    {
+      "rgb": [
+        252,
+        249,
+        244
+      ],
+      "hex": "#fcf9f4",
+      "count": 87830
+    },
+    {
+      "rgb": [
+        252,
+        249,
+        245
+      ],
+      "hex": "#fcf9f5",
+      "count": 81154
+    }
+  ]
+}

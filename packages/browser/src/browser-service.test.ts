@@ -38,9 +38,16 @@ describe("BrowserService discovery", () => {
     await service.close();
   });
 
-  it("includes the environment override before platform defaults", () => {
-    const candidates = browserExecutableCandidates({ DAOYIN_HARNESS_BROWSER_EXECUTABLE: "/custom/browser" }, "linux");
-    expect(candidates[0]).toBe(path.resolve("/custom/browser"));
-    expect(candidates).toContain("/usr/bin/google-chrome");
+  it("includes the environment override before Windows browser defaults", () => {
+    const environment = {
+      DAOYIN_HARNESS_BROWSER_EXECUTABLE: "C:\\custom\\browser.exe",
+      PROGRAMFILES: "C:\\Program Files",
+      "PROGRAMFILES(X86)": "C:\\Program Files (x86)",
+      LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local",
+    };
+    const candidates = browserExecutableCandidates(environment, "win32");
+    expect(candidates[0]).toBe(path.resolve(environment.DAOYIN_HARNESS_BROWSER_EXECUTABLE));
+    expect(candidates).toContain(path.resolve(environment.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"));
+    expect(candidates).toContain(path.resolve(environment.PROGRAMFILES, "Microsoft", "Edge", "Application", "msedge.exe"));
   });
 });

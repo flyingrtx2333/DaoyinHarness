@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-09-05T05:01:50.432Z",
+  "platform": "win32",
+  "node": "v22.23.2",
+  "pid": 11872,
+  "workspace": "D:\\AllProjects\\DaoyinHarness",
+  "fileCount": 262,
+  "originalSessionCount": 1,
+  "originalEventSeq": 17,
+  "workspacesApiReady": true,
+  "liveDialogVisible": true,
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "tests": "126 passed in 32 files",
+    "build": "passed",
+    "workbenchUi": "26 checks passed",
+    "workspaceUi": "7 checks passed",
+    "nativePicker": "visible dialog and cancellation passed"
+  },
+  "errors": []
+}

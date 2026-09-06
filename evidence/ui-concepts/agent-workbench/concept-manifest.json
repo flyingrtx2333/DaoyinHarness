@@ -1,0 +1,42 @@
+{
+  "screen": "agent-workbench",
+  "reference": "evidence/ui-concepts/agent-workbench/reference.png",
+  "reference_viewport": [1536, 960],
+  "concept_size": [1586, 992],
+  "product_mode": "workspace",
+  "visual_thesis": "A modern Agent workspace should make the conversation and current work dominant while moving account, files, tasks, recovery, and diagnostics into concise contextual controls.",
+  "content_plan": [
+    "session navigation and search",
+    "conversation or focused first-use canvas",
+    "inline tool activity and permissions",
+    "persistent prompt composer",
+    "contextual account, workspace, task, fork, and resume controls"
+  ],
+  "concepts": [
+    {
+      "id": "A",
+      "title": "Calm Precision",
+      "path": "concept-a.png",
+      "prompt_direction": "Bright editorial productivity workspace with a compact icon rail, session drawer, restrained indigo, and a tactile command composer; no permanent right sidebar or diagnostic tag row.",
+      "strength": "The clearest, safest evolution of the existing product with excellent daylight readability.",
+      "tradeoff": "The familiar sidebar composition is less visually radical than the other directions."
+    },
+    {
+      "id": "B",
+      "title": "Midnight Operations",
+      "path": "concept-b.png",
+      "prompt_direction": "Dark graphite Agent command workspace with cyan live signals, a broad transcript canvas, and a compact inline execution timeline.",
+      "strength": "Feels most like a serious modern Agent and makes active tool work exceptionally clear.",
+      "tradeoff": "A dark system requires more careful contrast, editor, and long-reading tuning."
+    },
+    {
+      "id": "C",
+      "title": "Focused Canvas",
+      "path": "concept-c.png",
+      "prompt_direction": "Warm porcelain spatial workspace with a slim dark rail, floating session palette, coral action color, and a restrained layered-paper seed motif.",
+      "strength": "Most distinctive and human, with the prompt surface as the unmistakable focal point.",
+      "tradeoff": "The illustrative motif and floating palette add more visual personality and implementation effort."
+    }
+  ],
+  "selected": "C"
+}

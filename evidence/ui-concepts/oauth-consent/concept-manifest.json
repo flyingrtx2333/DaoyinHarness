@@ -1,0 +1,41 @@
+{
+  "screen": "oauth-consent",
+  "reference": "evidence/ui-concepts/oauth-consent/reference.png",
+  "reference_viewport": [1536, 960],
+  "concept_size": [1586, 992],
+  "screen_archetype": "desktop authentication gateway",
+  "copy_budget": [
+    "one heading",
+    "two field labels",
+    "one primary action",
+    "one permission scope",
+    "one password trust line"
+  ],
+  "concepts": [
+    {
+      "id": "A",
+      "title": "Calm Precision — Login",
+      "path": "concept-a.png",
+      "prompt_direction": "Bright split-screen companion with a subtle network field, indigo action, and only the AI scope plus one trust line.",
+      "strength": "Highly legible and clearly related to the light workbench.",
+      "tradeoff": "The split layout is conventional, though much more polished than the current card."
+    },
+    {
+      "id": "B",
+      "title": "Midnight Operations — Login",
+      "path": "concept-b.png",
+      "prompt_direction": "Minimal dark gateway with one restrained orbit motif, cyan focus states, and no footer, feature grid, or duplicated security claims.",
+      "strength": "Strongest end-to-end product continuity with the dark Agent cockpit.",
+      "tradeoff": "Needs disciplined dark-mode form and autofill styling across browsers."
+    },
+    {
+      "id": "C",
+      "title": "Focused Canvas — Login",
+      "path": "concept-c.png",
+      "prompt_direction": "Warm asymmetric authorization canvas with coral action, shared dark rail, and the layered-paper seed illustration.",
+      "strength": "Warmest and most ownable account experience.",
+      "tradeoff": "The shared rail makes the authorization screen feel more application-like than neutral OAuth."
+    }
+  ],
+  "selected": "C"
+}

@@ -18,6 +18,7 @@ export interface CliOptions {
   openBrowser: boolean;
   dataDir: string;
   workspaceRoot: string;
+  restoreLastWorkspace?: boolean;
   sandboxMode: SandboxMode;
   mcpServers: CliMcpServerOption[];
   logLevel: LogLevel;
@@ -61,6 +62,7 @@ export function parseArgs(args: readonly string[], defaultDataDir: string, defau
     openBrowser: true,
     dataDir: defaultDataDir,
     workspaceRoot: resolve(defaultWorkspaceRoot),
+    restoreLastWorkspace: true,
     sandboxMode: "auto",
     mcpServers: [],
     logLevel: "info",
@@ -87,6 +89,7 @@ export function parseArgs(args: readonly string[], defaultDataDir: string, defau
         index += 1;
         break;
       case "--workspace":
+        result.restoreLastWorkspace = false;
         result.workspaceRoot = resolve(nextValue(args, index, arg));
         index += 1;
         break;

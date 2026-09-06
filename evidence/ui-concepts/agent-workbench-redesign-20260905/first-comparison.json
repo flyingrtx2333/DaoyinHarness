@@ -1,0 +1,64 @@
+{
+  "reference": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\agent-workbench-redesign-20260905\\selected.png",
+  "actual": "D:\\AllProjects\\DaoyinHarness\\evidence\\ui-concepts\\agent-workbench-redesign-20260905\\render-desktop.png",
+  "size": {
+    "width": 1586,
+    "height": 992
+  },
+  "tolerance": 24,
+  "normalized_mae": 0.028935291811201694,
+  "pixel_similarity": 0.9710647081887983,
+  "within_tolerance_ratio": 0.9397741833787577,
+  "regions": {
+    "sidebar": {
+      "box": [
+        0,
+        0,
+        304,
+        992
+      ],
+      "normalized_mae": 0.03763202888328506,
+      "pixel_similarity": 0.9623679711167149,
+      "within_tolerance_ratio": 0.9130279074702886
+    },
+    "header": {
+      "box": [
+        304,
+        0,
+        1282,
+        76
+      ],
+      "normalized_mae": 0.016974533470502907,
+      "pixel_similarity": 0.9830254665294971,
+      "within_tolerance_ratio": 0.9635643320469661
+    },
+    "conversation": {
+      "box": [
+        410,
+        116,
+        1090,
+        636
+      ],
+      "normalized_mae": 0.04070769330562221,
+      "pixel_similarity": 0.9592923066943778,
+      "within_tolerance_ratio": 0.9169292020079626
+    },
+    "composer": {
+      "box": [
+        419,
+        790,
+        1076,
+        148
+      ],
+      "normalized_mae": 0.017376686767677365,
+      "pixel_similarity": 0.9826233132323227,
+      "within_tolerance_ratio": 0.9614123882246559
+    }
+  },
+  "thresholds": {
+    "max_mae": 0.035,
+    "min_within_tolerance": 0.9
+  },
+  "passed": true,
+  "violations": []
+}

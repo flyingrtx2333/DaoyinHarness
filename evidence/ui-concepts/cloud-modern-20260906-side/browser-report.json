@@ -1,0 +1,612 @@
+{
+  "evidence": "Windows local browser; production bundle; mocked business API; no live model",
+  "checks": [
+    "Aurora Fold bytes, image loading/aspect ratio, favicon and release manifest",
+    "Picker availability, Escape and focus restoration",
+    "Plugin navigation, filtering and return to composer",
+    "Suggestion fill, send, tool progress and cancellation",
+    "Source disclosure, reconnect/reload replay, session search and new session",
+    "1280 desktop and 390/320 mobile geometry, picker and navigation",
+    "Expired authorization recovery and disabled submission"
+  ],
+  "errors": [],
+  "failedRequests": [],
+  "expectedErrors": [
+    "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "captures": [
+    {
+      "name": "desktop-empty",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 291.921875,
+            "height": 941
+          },
+          ".main": {
+            "x": 291.921875,
+            "y": 21,
+            "width": 1360.078125,
+            "height": 899
+          },
+          ".topbar": {
+            "x": 305.921875,
+            "y": 21,
+            "width": 1332.078125,
+            "height": 89
+          },
+          ".empty-state": {
+            "x": 478.953125,
+            "y": 110,
+            "width": 986,
+            "height": 417.75
+          },
+          ".composer": {
+            "x": 417.953125,
+            "y": 651.859375,
+            "width": 1108,
+            "height": 191.953125
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-picker",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 291.921875,
+            "height": 941
+          },
+          ".main": {
+            "x": 291.921875,
+            "y": 21,
+            "width": 1360.078125,
+            "height": 899
+          },
+          ".topbar": {
+            "x": 305.921875,
+            "y": 21,
+            "width": 1332.078125,
+            "height": 89
+          },
+          ".empty-state": {
+            "x": 478.953125,
+            "y": 110,
+            "width": 986,
+            "height": 417.75
+          },
+          ".composer": {
+            "x": 417.953125,
+            "y": 651.859375,
+            "width": 1108,
+            "height": 191.953125
+          },
+          ".plugin-picker": {
+            "x": 378.953125,
+            "y": 471.8125,
+            "width": 254,
+            "height": 295
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop-plugins",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 291.921875,
+            "height": 941
+          },
+          ".main": {
+            "x": 291.921875,
+            "y": 21,
+            "width": 1360.078125,
+            "height": 899
+          },
+          ".topbar": {
+            "x": 305.921875,
+            "y": 21,
+            "width": 1332.078125,
+            "height": 89
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-running",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 291.921875,
+            "height": 941
+          },
+          ".main": {
+            "x": 291.921875,
+            "y": 21,
+            "width": 1360.078125,
+            "height": 899
+          },
+          ".topbar": {
+            "x": 305.921875,
+            "y": 21,
+            "width": 1332.078125,
+            "height": 89
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 417.953125,
+            "y": 651.859375,
+            "width": 1108,
+            "height": 191.953125
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-answer",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 291.921875,
+            "height": 941
+          },
+          ".main": {
+            "x": 291.921875,
+            "y": 21,
+            "width": 1360.078125,
+            "height": 899
+          },
+          ".topbar": {
+            "x": 305.921875,
+            "y": 21,
+            "width": 1332.078125,
+            "height": 89
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 417.953125,
+            "y": 651.859375,
+            "width": 1108,
+            "height": 191.953125
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-1280",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 224,
+            "height": 720
+          },
+          ".main": {
+            "x": 224,
+            "y": 16,
+            "width": 1040,
+            "height": 688
+          },
+          ".topbar": {
+            "x": 238,
+            "y": 16,
+            "width": 1012,
+            "height": 72
+          },
+          ".empty-state": {
+            "x": 256,
+            "y": 88,
+            "width": 976,
+            "height": 329.515625
+          },
+          ".composer": {
+            "x": 319.6875,
+            "y": 498.8125,
+            "width": 848.625,
+            "height": 147.59375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-1280-picker",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 224,
+            "height": 720
+          },
+          ".main": {
+            "x": 224,
+            "y": 16,
+            "width": 1040,
+            "height": 688
+          },
+          ".topbar": {
+            "x": 238,
+            "y": 16,
+            "width": 1012,
+            "height": 72
+          },
+          ".empty-state": {
+            "x": 256,
+            "y": 88,
+            "width": 976,
+            "height": 329.515625
+          },
+          ".composer": {
+            "x": 319.6875,
+            "y": 498.8125,
+            "width": 848.625,
+            "height": 147.59375
+          },
+          ".plugin-picker": {
+            "x": 300.6875,
+            "y": 284.40625,
+            "width": 254,
+            "height": 295
+          }
+        }
+      }
+    },
+    {
+      "name": "mobile",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 18,
+            "y": 8,
+            "width": 354,
+            "height": 65
+          },
+          ".empty-state": {
+            "x": 26,
+            "y": 73,
+            "width": 338,
+            "height": 366.078125
+          },
+          ".composer": {
+            "x": 20,
+            "y": 656,
+            "width": 350,
+            "height": 138
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-picker",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 18,
+            "y": 8,
+            "width": 354,
+            "height": 65
+          },
+          ".empty-state": {
+            "x": 26,
+            "y": 73,
+            "width": 338,
+            "height": 366.078125
+          },
+          ".composer": {
+            "x": 20,
+            "y": 656,
+            "width": 350,
+            "height": 138
+          },
+          ".plugin-picker": {
+            "x": 31,
+            "y": 436,
+            "width": 254,
+            "height": 295
+          }
+        }
+      }
+    },
+    {
+      "name": "mobile-plugins",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 18,
+            "y": 8,
+            "width": 354,
+            "height": 65
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-small",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 18,
+            "y": 8,
+            "width": 284,
+            "height": 65
+          },
+          ".empty-state": {
+            "x": 26,
+            "y": 73,
+            "width": 268,
+            "height": 291.6875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 452,
+            "width": 280,
+            "height": 138
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-small-picker",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 18,
+            "y": 8,
+            "width": 284,
+            "height": 65
+          },
+          ".empty-state": {
+            "x": 26,
+            "y": 73,
+            "width": 268,
+            "height": 291.6875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 452,
+            "width": 280,
+            "height": 138
+          },
+          ".plugin-picker": {
+            "x": 31,
+            "y": 232,
+            "width": 254,
+            "height": 295
+          }
+        }
+      }
+    },
+    {
+      "name": "mobile-small-plugins",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 18,
+            "y": 8,
+            "width": 284,
+            "height": 65
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-expired",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 18,
+            "y": 8,
+            "width": 284,
+            "height": 65
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 20,
+            "y": 452,
+            "width": 280,
+            "height": 138
+          },
+          ".plugin-picker": null
+        }
+      }
+    }
+  ]
+}

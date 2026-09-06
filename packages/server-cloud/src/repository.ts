@@ -41,6 +41,8 @@ export interface BoundRunStores {
 /** Every user-facing lookup is scoped. Implementations must atomically claim requests. */
 export interface CloudRepository {
   readonly memory?: CloudMemoryRepository;
+  /** Optional for isolated stores; production adapters fence stale executors before external work. */
+  assertExecutionOwner?(): void;
   createSession(scope: ExecutionScope, input: Omit<CloudSession, "id" | "createdAt">): Promise<CloudSession>;
   listSessions(scope: ExecutionScope): Promise<CloudSession[]>;
   getSession(scope: ExecutionScope, sessionId: string): Promise<CloudSession>;

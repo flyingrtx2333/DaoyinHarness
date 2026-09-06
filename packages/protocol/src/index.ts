@@ -27,6 +27,20 @@ export interface RuntimeHealth {
   };
 }
 
+export interface DaoyinAccountSummary {
+  id: number;
+  userName: string;
+  tenantId: number;
+}
+
+export type AuthenticationSummary =
+  | { status: "signed_out" | "authorizing"; account: null }
+  | { status: "signed_in"; account: DaoyinAccountSummary };
+
+export interface BeginAuthenticationResponse {
+  authorizationUrl: string;
+}
+
 export interface ApiError {
   error: {
     code: string;
@@ -210,6 +224,21 @@ export interface LocalSessionSummary {
   forkedFrom?: SessionForkReference;
 }
 
+export interface RecentWorkspace {
+  name: string;
+  root: string;
+  lastOpenedAt: string;
+}
+
+export interface WorkspaceHistoryResponse {
+  recent: RecentWorkspace[];
+  nativePickerAvailable: boolean;
+}
+
+export interface SwitchWorkspaceRequest { root: string; }
+export interface PickWorkspaceResponse { root: string | null; }
+export interface SwitchWorkspaceResponse { workspace: WorkspaceSummary; }
+
 export interface WorkspaceSummary {
   name: string;
   root: string;
@@ -302,8 +331,10 @@ export interface OrchestrationSnapshot {
 }
 
 export interface RuntimeBootstrap {
+  workspaceRevision?: string;
   csrfToken: string;
   health: RuntimeHealth;
+  authentication: AuthenticationSummary;
   sandbox: SandboxRuntimeStatus;
   workspace: WorkspaceSummary | null;
   sessions: LocalSessionSummary[];

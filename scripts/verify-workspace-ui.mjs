@@ -1,0 +1,125 @@
+/* global document, innerWidth */
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { chromium } from "playwright-core";
+import { createApp } from "../packages/server/dist/index.js";
+
+// Real local server + real file tools; the model and native picker are injected fixtures.
+const evidence = path.resolve("evidence/workspace-management");
+await mkdir(evidence, { recursive: true });
+const run = await mkdtemp(path.join(evidence, "run-"));
+const a = path.join(run, "项目 A");
+const b = path.join(run, "项目 B");
+await mkdir(a); await mkdir(b);
+await mkdir(path.join(a, "node_modules"));
+await writeFile(path.join(a, "node_modules", "hidden.txt"), "internal");
+await writeFile(path.join(a, "a.txt"), "A");
+await writeFile(path.join(b, "b.txt"), "B");
+let chosen = null;
+let pickerGate = null;
+let pickerStarted = false;
+let finish;
+const app = await createApp({
+  port: 4698, version: "workspace-acceptance", startedAt: new Date().toISOString(),
+  dataDir: path.join(run, "data"), workspaceRoot: a, publicDir: path.resolve("packages/ui/dist"),
+  pickWorkspaceDirectory: async () => { pickerStarted = true; if (pickerGate) await pickerGate; return chosen; },
+  model: { async complete() { await new Promise(resolve => { finish = resolve; }); return { kind: "assistant", content: "任务已完成。" }; } },
+});
+await app.listen({ host: "127.0.0.1", port: 4698 });
+const browser = await chromium.launch({ channel: "msedge", headless: true });
+const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+const page = await context.newPage();
+const errors = [];
+page.on("pageerror", error => errors.push(error.message));
+const checks = [];
+const waitFor = async (test) => { for (let i = 0; i < 100; i++) { if (await test()) return; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error("Acceptance condition timed out"); };
+const manager = () => page.getByRole("dialog", { name: "切换工作区" });
+const openManager = async () => { await page.getByRole("button", { name: "切换工作区", exact: true }).click(); await manager().waitFor(); };
+const currentIs = async (name) => waitFor(async () => (await page.locator(".sidebar-workspace").innerText()).includes(name));
+try {
+  await page.goto("http://127.0.0.1:4698/"); await currentIs("项目 A");
+  await page.getByLabel("工作区", { exact: true }).click();
+  await page.getByText("a.txt", { exact: true }).waitFor();
+  assert.equal(await page.getByText("node_modules/hidden.txt", { exact: true }).count(), 0);
+  await page.getByRole("button", { name: "选择或切换工作区" }).click();
+  await manager().waitFor();
+  await page.getByRole("button", { name: "选择文件夹", exact: true }).click();
+  await waitFor(async () => await page.getByRole("button", { name: "选择文件夹", exact: true }).isEnabled());
+  assert.equal(await page.getByLabel("文件夹路径", { exact: true }).inputValue(), "");
+  checks.push("file panel entry; internal directory excluded; picker cancellation preserves path");
+  chosen = b;
+  await page.getByRole("button", { name: "选择文件夹", exact: true }).click();
+  await waitFor(async () => await page.getByLabel("文件夹路径", { exact: true }).inputValue() === b);
+  await page.screenshot({ path: path.join(evidence, "desktop-dialog.png") });
+  await page.getByLabel("文件夹路径", { exact: true }).fill(path.join(run, "missing"));
+  await page.getByRole("button", { name: "打开工作区", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "文件夹不存在" }).waitFor();
+  assert.ok((await page.locator(".workspace-current").innerText()).includes("项目 A"));
+  await page.getByRole("button", { name: "关闭工作区管理" }).click();
+  await page.getByRole("button", { name: "关闭工作区文件" }).click();
+  checks.push("native picker adapter supplies candidate; invalid path leaves active workspace unchanged");
+  await page.locator(".composer textarea").fill("A 的独立任务");
+  await page.getByRole("button", { name: "发送任务", exact: true }).click();
+  await waitFor(() => typeof finish === "function");
+  await openManager();
+  await page.getByLabel("文件夹路径", { exact: true }).fill(b);
+  await page.getByRole("button", { name: "打开工作区", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "仍有任务" }).waitFor();
+  finish();
+  await waitFor(async () => (await page.locator(".transcript").innerText()).includes("任务已完成。"));
+  checks.push("active turn blocks switching with actionable message");
+  const stale = await context.newPage();
+  await stale.goto("http://127.0.0.1:4698/");
+  await stale.locator(".sidebar-workspace").filter({ hasText: "项目 A" }).waitFor();
+  await page.getByRole("button", { name: "打开工作区", exact: true }).click();
+  await currentIs("项目 B");
+  assert.equal(await page.locator(".session-row").count(), 0);
+  await page.getByLabel("工作区", { exact: true }).click();
+  await page.getByText("b.txt", { exact: true }).waitFor();
+  assert.equal(await page.getByText("a.txt", { exact: true }).count(), 0);
+  await stale.locator(".welcome.error-state").filter({ hasText: "账号或工作区已改变" }).waitFor();
+  assert.equal(await stale.locator(".session-row").count(), 0);
+  assert.equal(await stale.getByRole("button", { name: "发送任务", exact: true }).isDisabled(), true);
+  await stale.close();
+  checks.push("switch reload clears session/file state; stale tab receives refresh instruction");
+  await openManager();
+  await manager().getByRole("button").filter({ hasText: "项目 A" }).click();
+  await currentIs("项目 A");
+  await page.getByRole("button").filter({ hasText: "A 的独立任务" }).waitFor();
+  await page.reload(); await currentIs("项目 A");
+  checks.push("recent workspace restores original session after round trip and page refresh");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "打开会话导航" }).click();
+  await openManager();
+  await page.screenshot({ path: path.join(evidence, "mobile-dialog.png") });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  assert.ok(await page.locator("dialog").evaluate(element => element.scrollWidth <= element.clientWidth));
+  await page.keyboard.press("Escape");
+  await page.locator("dialog").waitFor({ state: "detached" });
+  assert.equal(await page.locator("dialog").count(), 0);
+  checks.push("390px mobile dialog fits viewport; Escape dismisses modal");
+  let releasePicker;
+  pickerGate = new Promise(resolve => { releasePicker = resolve; });
+  pickerStarted = false;
+  const abandoned = await context.newPage();
+  await abandoned.goto("http://127.0.0.1:4698/");
+  await abandoned.getByRole("button", { name: "切换工作区", exact: true }).click();
+  await abandoned.getByRole("button", { name: "选择文件夹", exact: true }).click();
+  await waitFor(() => pickerStarted);
+  await abandoned.close();
+  releasePicker();
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await openManager();
+  await page.getByLabel("文件夹路径", { exact: true }).fill(b);
+  await page.getByRole("button", { name: "打开工作区", exact: true }).click();
+  await currentIs("项目 B");
+  checks.push("abandoned picker request releases its switch lock after the dialog completes");
+  assert.deepEqual(errors, []);
+  await writeFile(path.join(evidence, "browser-acceptance.json"), JSON.stringify({ checkedAt: new Date().toISOString(), environment: "Windows / Edge / real isolated local API", injected: ["model response", "native picker return"], checks, errors }, null, 2));
+  console.log(JSON.stringify({ passed: checks.length, errors }));
+} finally {
+  finish?.();
+  await browser.close();
+  await app.close();
+}

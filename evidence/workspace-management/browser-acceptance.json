@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-09-06T05:59:19.417Z",
+  "environment": "Windows / Edge / real isolated local API",
+  "injected": [
+    "model response",
+    "native picker return"
+  ],
+  "checks": [
+    "file panel entry; internal directory excluded; picker cancellation preserves path",
+    "native picker adapter supplies candidate; invalid path leaves active workspace unchanged",
+    "active turn blocks switching with actionable message",
+    "switch reload clears session/file state; stale tab receives refresh instruction",
+    "recent workspace restores original session after round trip and page refresh",
+    "390px mobile dialog fits viewport; Escape dismisses modal",
+    "abandoned picker request releases its switch lock after the dialog completes"
+  ],
+  "errors": []
+}

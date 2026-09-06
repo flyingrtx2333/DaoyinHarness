@@ -1,4 +1,5 @@
 import type {
+  BeginAuthenticationResponse,
   CreateSessionResponse,
   ForkSessionResponse,
   OrchestrationSnapshot,
@@ -9,9 +10,24 @@ import type {
   SessionSearchResponse,
   StartTurnResponse,
   WorkspaceFilesResponse,
+  WorkspaceHistoryResponse,
+  PickWorkspaceResponse,
+  SwitchWorkspaceResponse,
 } from "@daoyin/harness-protocol";
 
 let csrfToken = "";
+let workspaceRevision = "";
+let runtimeInvalidated = false;
+export const RUNTIME_CONTEXT_CHANGED_EVENT = "daoyin:runtime-context-changed";
+
+export function invalidateRuntimeContext(): void {
+  if (runtimeInvalidated) return;
+  runtimeInvalidated = true;
+  window.dispatchEvent(new Event(RUNTIME_CONTEXT_CHANGED_EVENT));
+}
+function staleRuntimeError(): Error {
+  return Object.assign(new Error("账号或工作区已改变，请刷新后继续。"), { code: "AUTH_CONTEXT_CHANGED" });
+}
 
 interface ApiErrorShape {
   error?: {
@@ -31,21 +47,40 @@ async function responseError(response: Response): Promise<Error> {
 }
 
 async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
+  if (runtimeInvalidated && url !== "/api/v1/bootstrap") throw staleRuntimeError();
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
+  if (workspaceRevision.length > 0) headers.set("X-Daoyin-Workspace", workspaceRevision);
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
   if (csrfToken.length > 0 && init.method !== undefined && init.method !== "GET") {
     headers.set("X-Daoyin-CSRF", csrfToken);
   }
   const response = await fetch(url, { ...init, headers, credentials: "same-origin" });
-  if (!response.ok) throw await responseError(response);
-  return (await response.json()) as T;
+  if (!response.ok) {
+    const error = await responseError(response);
+    const code = (error as Error & { code?: string }).code;
+    if (code === "WORKSPACE_CHANGED" || code === "AUTH_CONTEXT_CHANGED") invalidateRuntimeContext();
+    throw error;
+  }
+  const payload = (await response.json()) as T;
+  if (runtimeInvalidated && url !== "/api/v1/bootstrap" && url !== "/api/v1/auth/logout" && url !== "/api/v1/workspaces/switch") throw staleRuntimeError();
+  return payload;
 }
 
 export async function bootstrapRuntime(signal?: AbortSignal): Promise<RuntimeBootstrap> {
   const payload = await request<RuntimeBootstrap>("/api/v1/bootstrap", signal === undefined ? {} : { signal });
   csrfToken = payload.csrfToken;
+  workspaceRevision = payload.workspaceRevision ?? "";
+  runtimeInvalidated = false;
   return payload;
+}
+
+export function beginAuthentication(): Promise<BeginAuthenticationResponse> {
+  return request<BeginAuthenticationResponse>("/api/v1/auth/login", { method: "POST", body: "{}" });
+}
+
+export function logoutAuthentication(): Promise<{ success: true }> {
+  return request<{ success: true }>("/api/v1/auth/logout", { method: "POST", body: "{}" });
 }
 
 export function createSession(title?: string): Promise<CreateSessionResponse> {
@@ -113,6 +148,18 @@ export function cancelTurn(sessionId: string, turnId: string): Promise<{ status:
 
 export function getWorkspaceFiles(signal?: AbortSignal): Promise<WorkspaceFilesResponse> {
   return request<WorkspaceFilesResponse>("/api/v1/workspace/files", signal === undefined ? {} : { signal });
+}
+
+export function getWorkspaceHistory(): Promise<WorkspaceHistoryResponse> {
+  return request<WorkspaceHistoryResponse>("/api/v1/workspaces");
+}
+
+export function pickWorkspace(): Promise<PickWorkspaceResponse> {
+  return request<PickWorkspaceResponse>("/api/v1/workspaces/pick", { method: "POST", body: "{}" });
+}
+
+export function switchWorkspace(root: string): Promise<SwitchWorkspaceResponse> {
+  return request<SwitchWorkspaceResponse>("/api/v1/workspaces/switch", { method: "POST", body: JSON.stringify({ root }) });
 }
 
 export function getOrchestrationSnapshot(sessionId?: string, signal?: AbortSignal): Promise<OrchestrationSnapshot> {

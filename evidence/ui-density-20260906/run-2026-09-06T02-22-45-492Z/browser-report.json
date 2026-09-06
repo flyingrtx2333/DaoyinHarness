@@ -1,0 +1,1000 @@
+{
+  "evidence": "Windows local browser; production bundle; mocked business API; no live model",
+  "checks": [
+    "Aurora Fold bytes, image loading/aspect ratio, favicon and release manifest",
+    "Picker availability, Escape and focus restoration",
+    "Plugin navigation, filtering and return to composer",
+    "Suggestion fill, send, tool progress and cancellation",
+    "Source disclosure, reconnect/reload replay, session search and new session",
+    "1280 desktop and 390/320 mobile geometry, picker and navigation",
+    "Expired authorization recovery and disabled submission"
+  ],
+  "errors": [],
+  "failedRequests": [],
+  "expectedErrors": [
+    "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "captures": [
+    {
+      "name": "desktop-empty",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 560,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 560,
+            "y": 757.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-picker",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 560,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 560,
+            "y": 757.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": {
+            "x": 573,
+            "y": 576.8125,
+            "width": 264,
+            "height": 252
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop-plugins",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 361.96875,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 361.96875,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 603.9375,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 603.9375,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-running",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 560,
+            "y": 757.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-answer",
+      "layout": {
+        "width": 1672,
+        "height": 941,
+        "scrollWidth": 1672,
+        "scrollHeight": 941,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 941
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 917
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1420,
+            "height": 52
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 560,
+            "y": 757.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-large",
+      "layout": {
+        "width": 2073,
+        "height": 1296,
+        "scrollWidth": 2073,
+        "scrollHeight": 1296,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 1296
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 1272
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 760.5,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 760.5,
+            "y": 1112.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-large-picker",
+      "layout": {
+        "width": 2073,
+        "height": 1296,
+        "scrollWidth": 2073,
+        "scrollHeight": 1296,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 1296
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 1272
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 760.5,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 760.5,
+            "y": 1112.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": {
+            "x": 773.5,
+            "y": 931.8125,
+            "width": 264,
+            "height": 252
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop-large-plugins",
+      "layout": {
+        "width": 2073,
+        "height": 1296,
+        "scrollWidth": 2073,
+        "scrollHeight": 1296,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 361.96875,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 361.96875,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 603.9375,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 603.9375,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 1296
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 1272
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1821,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-1280",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 720
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 696
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 364,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 364,
+            "y": 536.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "desktop-1280-picker",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 720
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 696
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 364,
+            "y": 64,
+            "width": 780,
+            "height": 243.1875
+          },
+          ".composer": {
+            "x": 364,
+            "y": 536.8125,
+            "width": 780,
+            "height": 128
+          },
+          ".plugin-picker": {
+            "x": 377,
+            "y": 355.8125,
+            "width": 264,
+            "height": 252
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop-1280-plugins",
+      "layout": {
+        "width": 1280,
+        "height": 720,
+        "scrollWidth": 1280,
+        "scrollHeight": 720,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 361.96875,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 361.96875,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 603.9375,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 603.9375,
+            "height": 225.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 720
+          },
+          ".main": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 696
+          },
+          ".topbar": {
+            "x": 240,
+            "y": 12,
+            "width": 1028,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 350,
+            "height": 271.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 656.4375,
+            "width": 350,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-picker",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 350,
+            "height": 271.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 656.4375,
+            "width": 350,
+            "height": 140.375
+          },
+          ".plugin-picker": {
+            "x": 33,
+            "y": 439.8125,
+            "width": 264,
+            "height": 292
+          }
+        }
+      }
+    },
+    {
+      "name": "mobile-plugins",
+      "layout": {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "scrollHeight": 844,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 399.15625,
+            "height": 233.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 680.3125,
+            "height": 265.15625,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 930.28125,
+            "height": 233.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 1180.25,
+            "height": 233.96875,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 828
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 374,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-small",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 280,
+            "height": 259.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 452.4375,
+            "width": 280,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-small-picker",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 20,
+            "y": 60,
+            "width": 280,
+            "height": 259.1875
+          },
+          ".composer": {
+            "x": 20,
+            "y": 452.4375,
+            "width": 280,
+            "height": 140.375
+          },
+          ".plugin-picker": {
+            "x": 33,
+            "y": 235.8125,
+            "width": 256,
+            "height": 292
+          }
+        }
+      }
+    },
+    {
+      "name": "mobile-small-plugins",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [
+          {
+            "bottom": 424.34375,
+            "height": 259.15625,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 730.6875,
+            "height": 290.34375,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 1005.84375,
+            "height": 259.15625,
+            "padding": "16px",
+            "titleSize": "16px"
+          },
+          {
+            "bottom": 1281,
+            "height": 259.15625,
+            "padding": "16px",
+            "titleSize": "16px"
+          }
+        ],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".composer": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".plugin-picker": null
+        }
+      }
+    },
+    {
+      "name": "mobile-expired",
+      "layout": {
+        "width": 320,
+        "height": 640,
+        "scrollWidth": 320,
+        "scrollHeight": 640,
+        "typography": {
+          "body": "14px",
+          "title": "13px"
+        },
+        "cards": [],
+        "regions": {
+          ".sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          ".main": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 624
+          },
+          ".topbar": {
+            "x": 8,
+            "y": 8,
+            "width": 304,
+            "height": 52
+          },
+          ".empty-state": null,
+          ".composer": {
+            "x": 20,
+            "y": 452.4375,
+            "width": 280,
+            "height": 140.375
+          },
+          ".plugin-picker": null
+        }
+      }
+    }
+  ]
+}
