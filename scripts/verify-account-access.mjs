@@ -9,6 +9,7 @@ import { chromium } from "playwright-core";
 if (process.platform !== "win32") throw new Error("Windows acceptance required.");
 const release = JSON.parse(execFileSync(process.execPath, ["scripts/build-workbench-release.mjs", ...(process.argv.includes("--committed") ? [] : ["--preview"])], { encoding: "utf8", windowsHide: true }));
 const output = resolve(process.argv.find(argument => argument.startsWith("--output="))?.slice(9) ?? "output/playwright/account-access");
+const harnessOnly = process.argv.includes("--harness-only");
 const platformOutput = resolve("../DaoyinTechnology/frontend/dist");
 const csp = (await readFile("deployment/harness-workbench.conf", "utf8")).match(/Content-Security-Policy "([^"]+)"/u)[1];
 await mkdir(output, { recursive: true });
@@ -193,11 +194,19 @@ try {
   checks.push("company visitor entry includes platform login and registration links on narrow and desktop screens");
   account = "a";
   await page.evaluate(() => window.localStorage.setItem("athletereel_token", "existing-platform-login-fixture"));
-  await page.goto(base + "/login?redirect=%2Fharness%2F%3Fapp%3Dsaishi");
-  await page.waitForURL(base + "/harness/?app=saishi");
-  await page.getByText("账号 a 的回答", { exact: true }).waitFor();
-  assert.equal(requests.some(req => req.path === "/api/auth/account-session"), true);
-  checks.push("existing platform login enters Harness without password or grant prompts");
+  if (harnessOnly) {
+    // The independent Harness CI checkout does not contain the separately built
+    // platform login application. Do not serve a made-up login page as evidence.
+    await page.goto(base + "/harness/?app=saishi");
+    await page.getByText("账号 a 的回答", { exact: true }).waitFor();
+    checks.push("Harness-only scope: platform login-app navigation NOT exercised; account BFF is mocked");
+  } else {
+    await page.goto(base + "/login?redirect=%2Fharness%2F%3Fapp%3Dsaishi");
+    await page.waitForURL(base + "/harness/?app=saishi");
+    await page.getByText("账号 a 的回答", { exact: true }).waitFor();
+    assert.equal(requests.some(req => req.path === "/api/auth/account-session"), true);
+    checks.push("existing platform login enters Harness without password or grant prompts");
+  }
   for (const width of [1280, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     if (width < 600) await page.getByRole("button", { name: "展开会话导航" }).click();
