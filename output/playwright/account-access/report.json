@@ -6,6 +6,7 @@
     "signed-in, picker, catalog and layout 390px",
     "signed-in, picker, catalog and layout 320px",
     "same-account reconnection preserves the draft",
+    "profile avatar loads under production CSP, falls back on failure and refreshes",
     "account switch removes old transcript",
     "signed-out state has platform login without grant entry",
     "company visitor entry includes platform login and registration links on narrow and desktop screens",
