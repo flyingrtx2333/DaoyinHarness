@@ -24,4 +24,12 @@
 
 ## 生产结果
 
-联合发布进行中。提交版本、备份路径、迁移数量、线上 WebSocket 与真实模型验收将在实际完成后补充。
+- Harness 运行时与静态资源：`efe56eb9926d200fa952145b483b61e629c51b25`。Windows 从 Git 提交构建，独立运行时锁文件经 `npm ci --omit=dev --ignore-scripts` 验证；服务器逐文件校验 SHA-256 后安装 81 项运行时依赖。旧依赖目录未复用。
+- 主平台后端与官网前端：`11f750738b5415b8d0f10c2307b337fe65e09fd1`。后端 [CI 34023886427](https://github.com/flyingrtx2333/daoyintech/actions/runs/34023886427) 与前端 [CI 34023886370](https://github.com/flyingrtx2333/daoyintech/actions/runs/34023886370) 均成功；服务器镜像已核对并固定到该提交。
+- 备份目录：`/var/backups/daoyin-agent/ws-postgres-20260906`。包括原 PostgreSQL dump、`public-before-postgres.sqlite`、原服务环境、原镜像配置、Nginx 配置和发布路径。导入共 1,087 行：12 会话、26 Run、1,049 事件，其余六张业务表为零；逐表数量和逐行内容 SHA-256 全部一致。
+- 17:20（北京时间）切换后，运行时 `/health` 为 available，主平台 `/health` 为 ok；活动 PostgreSQL 租约正常。Nginx 测试和重载通过，复用现有 Upgrade map，为官网、赛事及内部 Harness 三跳启用 WebSocket，静态 CSP 允许精确同源 wss。既有 vhost 重复 server_name 警告未改变服务结果。
+- 17:23 真实生产公开访客验收：两轮模型调用成功，56 个正文增量、1 次工具开始和完成，转圈与未完成正文均实际可见；首正文约 11.98 秒。实际 WebSocket 断开重连后按游标恢复，正常连接时无 HTTP 周期轮询；第二次发送保留第一轮 DOM，恰好提交两次，页面无错误。
+- 17:24 再次核对：14 会话、30 Run、1,188 事件；迁移前的全部 1,087 行仍逐行一致，租约有效。新增记录来自上线公开问答验收。
+- 生产 HTTPS 四项静态文件哈希、匿名访问拒绝、外域 Origin 拒绝、登录跳转均已验证。用户头像/菜单/设置使用真实生产资源与模拟私人账号验证；没有代替用户完成私人账号登录或赛事业务验收。
+
+当前仍是单执行实例云端基础服务，`productionReady:false` 的健康字段表示多实例能力未交付，不表示服务不可用。
