@@ -51,7 +51,8 @@ export type ToolExecution = ToolSuccess | ToolFailure;
 
 export interface ToolDefinition extends ToolDescriptor {
   auditInput?(input: Record<string, unknown>): unknown;
-  execute(input: Record<string, unknown>, signal: AbortSignal, context: ToolExecutionContext): Promise<ToolSuccess>;
+  /** Return a bounded user-safe failure for expected outcomes; raw exceptions stay redacted. */
+  execute(input: Record<string, unknown>, signal: AbortSignal, context: ToolExecutionContext): Promise<ToolExecution>;
 }
 
 /** Called without request during discovery, and WITH the exact request before execution. */

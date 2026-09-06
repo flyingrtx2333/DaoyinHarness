@@ -7,6 +7,15 @@ const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request
 const event = (eventSeq: number, type: string, payload: unknown, occurredAt = run.createdAt): AgentEvent => ({ id: `event_${eventSeq}`, eventSeq, type, payload, sessionId: run.sessionId, turnId: run.id, accountId: "visitor_1", scopeId: "scope_1", occurredAt }) as AgentEvent;
 
 describe("cloud workbench transcript projection (replay fixtures)", () => {
+  it("displays stable image references before the answer and preserves them after cancellation/replay", () => {
+    const image = { image_id: 3, event_id: 2, image_kind: "highlight", title: "赛事照片", url: "https://evil.invalid/tracker" };
+    const completed = event(1, "tool.completed", { toolCallId: "photos", toolName: "saishi_list_images", evidence: { result: { tool: "saishi_list_images", data: { items: [image, image, { ...image, image_id: -1 }, { ...image, image_kind: "../../" }] } } } });
+    const expected = [{ id: 3, eventId: 2, kind: "highlight", title: "赛事照片" }];
+    expect(projectTurns([{ ...run, status: "running" }], [completed])[0]?.images).toEqual(expected);
+    expect(projectTurns([{ ...run, status: "cancelled" }], [completed, completed])[0]?.images).toEqual(expected);
+    expect(projectTurns([run], [{ ...completed, turnId: "foreign" }])[0]?.images).toEqual([]);
+    expect(JSON.stringify(expected)).not.toContain("evil.invalid");
+  });
   it("appends chunks within a block and separates model steps while retaining live tool state", () => {
     const events = [event(1, "assistant.delta", { delta: "先查询", contentBlockId: "pre" }),
       event(2, "tool.started", { toolCallId: "lookup", toolName: "saishi_list_events", displayText: "raw" }),

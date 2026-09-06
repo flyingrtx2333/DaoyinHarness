@@ -6,6 +6,7 @@ export const SAISHI_PROFILE = "saishi-readonly";
 const scopes: Readonly<Record<string, string>> = Object.freeze({
   saishi_list_events: "saishi.events.read", saishi_get_event: "saishi.events.read",
   saishi_list_cameras: "saishi.cameras.read", saishi_list_materials: "saishi.materials.read",
+  saishi_list_images: "saishi.materials.read",
   saishi_get_map: "saishi.maps.read", saishi_find_participants: "saishi.participants.read",
   saishi_get_timeline: "saishi.timelines.read", saishi_get_job: "saishi.jobs.read",
 });
@@ -65,7 +66,8 @@ const outputKeys = new Set(["items", "has_more", "next_after_id", "id", "title",
   "record_status", "updated_at", "created_at", "done_at", "media_type", "stream_id", "source", "duration", "process_status", "process_progress",
   "revision", "published", "image_asset_id", "points", "routes", "key", "label", "kind", "x", "y", "point_keys", "path_vertex_count",
   "person", "map_revision", "observed_count", "point_count", "diagnostics", "basis", "timezone", "route", "observed", "observed_at", "last_seen_at",
-  "material_count", "timeline_keys", "missing_time", "unbound_camera", "job_type", "progress", "video_id", "reel_id"]);
+  "material_count", "timeline_keys", "missing_time", "unbound_camera", "job_type", "progress", "video_id", "reel_id",
+  "image_id", "image_kind", "event_id", "captured_at"]);
 function cleanData(value: unknown, depth = 0): JsonValue {
   if (depth > 12) throw new Error("Saishi result nesting exceeded.");
   if (value === null || typeof value === "boolean") return value;
@@ -90,6 +92,7 @@ export function createSaishiProfile(catalog: unknown, identity: ExecutionIdentit
   if (!isSaishiIdentity(identity) || !isRecord(catalog) || catalog.id !== SAISHI_PROFILE || catalog.version !== "1" ||
       typeof catalog.instructions !== "string" || catalog.instructions.length > 10000 || !catalog.instructions.trim() || !Array.isArray(catalog.tools)) throw new Error("Invalid Saishi profile.");
   const seen = new Set<string>();
+  const pageReads = new Map<string, Set<string>>();
   const tools: CloudToolBinding[] = catalog.tools.map((raw) => {
     if (!isRecord(raw) || typeof raw.name !== "string" || !Object.hasOwn(scopes, raw.name) || seen.has(raw.name) || !identity.allowedTools.includes(raw.name) ||
         typeof raw.description !== "string" || raw.description.length > 2000 || !isRecord(raw.annotations) || raw.annotations.readOnlyHint !== true ||
@@ -109,6 +112,15 @@ export function createSaishiProfile(catalog: unknown, identity: ExecutionIdentit
         execute: async (input, signal, context) => {
           const current = context.executionIdentity;
           if (!current || !context.toolCallId || !isSaishiIdentity(current) || current.authorizationId !== identity.authorizationId || !validateSaishiInput(schema, input)) throw new Error("Saishi identity or input invalid.");
+          if (name === "saishi_list_images" || name === "saishi_list_materials") {
+            const key = `${context.turnId}:${name}`;
+            const reads = pageReads.get(key) ?? new Set<string>();
+            const page = JSON.stringify(Object.entries(input).sort(([a], [b]) => a.localeCompare(b)));
+            if (reads.has(page) || reads.size >= 2) return { ok: false, code: "MEDIA_PAGE_LIMIT", retryable: false,
+              message: "本轮已查询素材，请先展示已有图片或说明结果；需要更多时由用户继续请求，不重复翻页。" };
+            if (pageReads.size > 256) pageReads.delete(pageReads.keys().next().value!);
+            reads.add(page); pageReads.set(key, reads);
+          }
           const value = await client.call(name, input, current, context.turnId, context.toolCallId, signal);
           signal.throwIfAborted();
           return { ok: true, summary: "已读取授权范围内的赛事数据", evidence: {
