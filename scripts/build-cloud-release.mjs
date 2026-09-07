@@ -6,7 +6,10 @@ import { createRequire } from "node:module";
 const { build } = createRequire(new URL("../packages/cli/package.json", import.meta.url))("esbuild");
 
 // Read committed source directly: shared-checkout WIP never enters the artifact.
-if (process.platform !== "win32") throw new Error("Build releases from Windows.");
+// An independent server clone is not a Windows/WSL shared checkout.
+if (process.platform !== "win32" && !(process.platform === "linux" && process.argv.includes("--server-linux") && !process.env.WSL_INTEROP && !process.env.WSL_DISTRO_NAME)) {
+  throw new Error("Use Windows or explicitly pass --server-linux in an independent Linux server clone.");
+}
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", windowsHide: true });
 const revision = git("rev-parse", "HEAD").trim();
 const read = (path) => git("show", `${revision}:${path}`);

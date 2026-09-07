@@ -1,5 +1,26 @@
 # 单实例官网发布
 
+## 当前服务器发布（2026-09-07）
+
+当前线上使用 PostgreSQL 和专用 `daoyin-harness-cloud.service`，不是下文早期试运行的 SQLite。`/etc/daoyin-harness/cloud.env` 保持原样，服务运行于 `/opt/daoyin-harness/current/main.mjs`，Node 为 `/opt/daoyin-harness/node/bin/node`。工作台地址为 `https://www.daoyintech.com/harness/`。
+
+独立 Linux 服务器副本可显式使用 `--server-linux` 构建已提交的 HEAD；Windows/WSL 共用目录仍遵守根目录限制。无需运行模拟测试、全量回归或数据库迁移：
+
+```text
+/opt/daoyin-harness/node/bin/node scripts/inspect-live-deployment.mjs
+/opt/daoyin-harness/node/bin/node scripts/build-cloud-release.mjs --server-linux
+/opt/daoyin-harness/node/bin/node scripts/build-workbench-release.mjs --server-linux
+/opt/daoyin-harness/node/bin/node scripts/deploy-existing-server.mjs --apply <完整提交SHA>
+```
+
+发布脚本核验产物哈希，安装生产依赖且禁止安装脚本，在切换前拒绝仍有活动 Run 的情况。保留旧版本目录与旧哈希资源，先停止旧实例，再切换运行时链接并启动，readiness 正常后切换工作台链接。核对公网 release.json、HTML 与静态资源哈希、匿名 API 401。失败时恢复旧链接并重新启动旧版本，不回滚或删除用户数据。部署日志位于 `/opt/daoyin-harness/deployments/`，不包含密钥。
+
+上述为真实部署与健康检查，不是模型效果测试。需要功能验收时，仅用小样本真实模型和实际业务链路；不得由健康检查推断私人记忆授权已接通。不要改主平台权限、Nginx 或其他业务服务来掩盖上游配置缺失。
+
+## 早期试运行记录（历史参考，不作为当前配置）
+
+下文的 SQLite、Windows 全套测试要求已经过时。测试规则以 `AGENTS.md` 和 `docs/TESTING.md` 为准，数据库以当前生产 PostgreSQL 为准。
+
 本目录部署共享 AgentEngine 的官网只读 Profile。服务监听主机回环 4700，
 由现有官网 HTTPS 代理。主平台保管访客 Cookie、授权、配额和费用记录。
 SQLite 与服务分离保存在 `/var/lib/daoyin-harness`；只允许一个 Worker。
