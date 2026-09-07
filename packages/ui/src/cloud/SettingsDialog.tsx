@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { buildChannelLabel, buildInfo, buildUpdatedAt, buildVersion } from "./build-info.js";
 import type { WorkbenchPreferences } from "./preferences.js";
 
 export function SettingsDialog({ preferences, onChange, onClose, saveError }: {
@@ -19,6 +20,18 @@ export function SettingsDialog({ preferences, onChange, onClose, saveError }: {
     </select></div>
     <label className="settings-toggle"><span>回复时自动滚动</span><input type="checkbox" checked={preferences.autoScroll} onChange={(event) => onChange({ ...preferences, autoScroll: event.target.checked })} /></label>
     {saveError && <p role="alert" className="settings-error">{saveError}</p>}
+    <section className="settings-about" aria-labelledby="settings-about-title">
+      <h3 id="settings-about-title">关于道引 Harness</h3>
+      <dl className="settings-version">
+        <dt>当前版本</dt>
+        <dd><span title={buildInfo.revision ? `代码提交：${buildInfo.revision}` : undefined}>{buildVersion}</span>{buildChannelLabel && <span className="settings-build-channel">{buildChannelLabel}</span>}</dd>
+        <dt>更新时间</dt>
+        <dd>{buildUpdatedAt && buildInfo.builtAt
+          ? <><time dateTime={buildInfo.builtAt}>{buildUpdatedAt}</time> UTC+8</>
+          : buildInfo.channel === "development" ? "开发环境未构建" : "未提供"}</dd>
+      </dl>
+      <p className="settings-version-note">更新时间为当前前端版本的构建时间。</p>
+    </section>
     <footer><button type="button" className="primary" onClick={onClose}>完成</button></footer>
   </dialog>;
 }

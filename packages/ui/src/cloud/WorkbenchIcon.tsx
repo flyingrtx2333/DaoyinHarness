@@ -1,4 +1,4 @@
-type IconName = "chat" | "plugin" | "edit" | "search" | "user" | "globe" | "book" | "story" | "image" | "pin" | "arrow" | "stop" | "chevron" | "connection" | "menu" | "settings" | "logout" | "plus";
+type IconName = "chat" | "plugin" | "edit" | "search" | "user" | "globe" | "book" | "story" | "image" | "pin" | "arrow" | "stop" | "chevron" | "connection" | "menu" | "settings" | "logout" | "plus" | "more" | "pushpin" | "archive" | "restore" | "trash";
 
 const paths: Record<IconName, string> = {
   chat: "M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Zm2 5h10M7 13h6",
@@ -19,6 +19,11 @@ const paths: Record<IconName, string> = {
   settings: "M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6",
   logout: "M9 3H4v18h5M10 12h11m-5-5 5 5-5 5",
   plus: "M12 5v14M5 12h14",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
+  pushpin: "M8 3h8l-1 7 4 4v2H5v-2l4-4-1-7Zm4 13v6",
+  archive: "M3 3h18v5H3V3Zm2 5v13h14V8M9 12h6",
+  restore: "M4 10a8 8 0 1 1 0 6M4 4v6h6M12 7v5l3 2",
+  trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7",
 };
 
 export function WorkbenchIcon({ name }: { name: IconName }): React.JSX.Element {

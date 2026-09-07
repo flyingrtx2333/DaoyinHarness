@@ -29,6 +29,13 @@ export function withCommittedSessionEvents(base: CloudRepository): CloudReposito
     createSession: (scope, input) => base.createSession(scope, input),
     listSessions: (scope) => base.listSessions(scope),
     getSession: (scope, sessionId) => base.getSession(scope, sessionId),
+    ...(base.manageSession === undefined ? {} : {
+      async manageSession(scope: ExecutionScope, sessionId: string, action: import("./repository.js").SessionAction) {
+        const result = await base.manageSession!(scope, sessionId, action);
+        notify(scope, sessionId);
+        return result;
+      },
+    }),
     getRun: (scope, runId) => base.getRun(scope, runId),
     findRequest: (scope, sessionId, requestId) => base.findRequest(scope, sessionId, requestId),
     listRuns: (scope, sessionId) => base.listRuns(scope, sessionId),

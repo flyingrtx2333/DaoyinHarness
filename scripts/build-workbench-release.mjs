@@ -14,6 +14,10 @@ const git = (...args) => execFileSync("git", args, { encoding: "utf8", windowsHi
 const revision = git("rev-parse", "HEAD").trim();
 const root = resolve(".");
 const read = (path) => preview ? readFile(resolve(path), "utf8") : Promise.resolve(git("show", `${revision}:${path}`));
+const { version } = JSON.parse(await read("package.json"));
+if (typeof version !== "string" || !version.trim()) throw new Error("Workbench package version missing");
+// The UI and release manifest share the exact same immutable build identity.
+const buildInfo = { version, revision, builtAt: new Date().toISOString(), channel: preview ? "preview" : "release" };
 const logoPath = "packages/ui/public/assets/harness-logo.png";
 const output = resolve(".cache", "workbench-release", preview ? "preview" : revision);
 await mkdir(output, { recursive: true });
@@ -21,7 +25,7 @@ const result = await build({
   entryPoints: ["packages/ui/src/cloud/main.tsx"], bundle: true, platform: "browser", format: "esm", target: "es2022",
   outdir: `${output}/assets`, entryNames: "workbench-[hash]", minify: true, jsx: "automatic",
   assetNames: "[name]-[hash]", publicPath: "/harness/assets",
-  define: { "process.env.NODE_ENV": '"production"' }, metafile: true, legalComments: "eof",
+  define: { "process.env.NODE_ENV": '"production"', __HARNESS_BUILD_INFO__: JSON.stringify(buildInfo) }, metafile: true, legalComments: "eof",
   plugins: [{ name: "committed-workbench-source", setup(builder) {
     builder.onLoad({ filter: /packages[\\/]ui[\\/]public[\\/]assets[\\/]harness-logo\.png$/ }, async () => ({
       contents: preview ? await readFile(resolve(logoPath)) : execFileSync("git", ["show", `${revision}:${logoPath}`], { windowsHide: true }),
@@ -52,5 +56,5 @@ if (!js || !css || !logo) throw new Error("Workbench assets missing");
 await writeFile(`${output}/index.html`, `<!doctype html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f6f7f9"><meta name="description" content="道引 Harness 云端工作台：公开知识问答、会话与资料引用。"><title>道引 Harness 工作台</title><link rel="icon" type="image/png" href="/harness/assets/${logo}"><link rel="apple-touch-icon" href="/harness/assets/${logo}"><link rel="stylesheet" href="/harness/assets/${css}"><script type="module" src="/harness/assets/${js}"></script></head><body><div id="root"></div><noscript>请启用 JavaScript 使用工作台。</noscript></body></html>\n`);
 const files = {};
 for (const file of ["index.html", `assets/${js}`, `assets/${css}`, `assets/${logo}`]) files[file] = createHash("sha256").update(await readFile(`${output}/${file}`)).digest("hex");
-await writeFile(`${output}/release.json`, JSON.stringify({ revision, preview, builtAt: new Date().toISOString(), files }, null, 2));
-console.log(JSON.stringify({ output, revision, preview, files }, null, 2));
+await writeFile(`${output}/release.json`, JSON.stringify({ ...buildInfo, preview, files }, null, 2));
+console.log(JSON.stringify({ output, ...buildInfo, preview, files }, null, 2));

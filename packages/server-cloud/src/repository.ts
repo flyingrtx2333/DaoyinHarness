@@ -15,7 +15,12 @@ export interface CloudSession {
   profileId: string;
   profileVersion: string;
   createdAt: string;
+  pinnedAt?: string | null;
+  archivedAt?: string | null;
 }
+
+export const SESSION_ACTIONS = ["pin", "unpin", "archive", "restore", "delete"] as const;
+export type SessionAction = typeof SESSION_ACTIONS[number];
 
 export interface CloudRun {
   id: string;
@@ -53,6 +58,8 @@ export interface CloudRepository {
   createSession(scope: ExecutionScope, input: Omit<CloudSession, "id" | "createdAt">): Promise<CloudSession>;
   listSessions(scope: ExecutionScope): Promise<CloudSession[]>;
   getSession(scope: ExecutionScope, sessionId: string): Promise<CloudSession>;
+  /** Desired-state actions are idempotent. null means soft-deleted; events remain immutable. */
+  manageSession?(scope: ExecutionScope, sessionId: string, action: SessionAction): Promise<CloudSession | null>;
   acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string): Promise<{ run: CloudRun; created: boolean }>;
   getRun(scope: ExecutionScope, runId: string): Promise<CloudRun>;
   findRequest(scope: ExecutionScope, sessionId: string, requestId: string): Promise<CloudRun | undefined>;

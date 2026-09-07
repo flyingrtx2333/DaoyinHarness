@@ -4,7 +4,7 @@ import { createCloudMemoryRuntime } from "./memory-tools.js";
 import { AUTONOMOUS_MEMORY_INSTRUCTIONS, isMemoryToolName } from "./memory-agent-policy.js";
 import { ToolRegistry, type ToolDefinition, type ToolRequest } from "@daoyin/harness-tools/registry";
 import { assertExecutionIdentity, ExecutionAccessError, sameExecutionScope, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
-import { CloudError, type BoundRunStores, type CloudRepository, type CloudRun } from "./repository.js";
+import { CloudError, SESSION_ACTIONS, type BoundRunStores, type CloudRepository, type CloudRun, type SessionAction } from "./repository.js";
 import { registerMemoryRoutes } from "./memory-routes.js";
 import { registerCloudEventStream, type EventStreamLimits } from "./event-stream.js";
 import { withCommittedSessionEvents } from "./event-repository.js";
@@ -219,6 +219,18 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   app.get<{ Params: { sessionId: string } }>("/api/v1/cloud/sessions/:sessionId", { schema: { params: sessionParams } }, async (request) => ({
     session: await options.repository.getSession(identityFor(request), request.params.sessionId),
   }));
+  app.post<{ Params: { sessionId: string }; Body: { action: SessionAction; confirm?: boolean } }>("/api/v1/cloud/sessions/:sessionId/manage", {
+    schema: { params: sessionParams, body: { type: "object", required: ["action"], additionalProperties: false,
+      properties: { action: { type: "string", enum: [...SESSION_ACTIONS] }, confirm: { type: "boolean" } } } },
+  }, async (request) => {
+    const identity = identityFor(request);
+    if (!options.repository.manageSession) throw new CloudError(501, "SESSION_MANAGEMENT_UNAVAILABLE", "当前存储尚未支持会话管理。");
+    if (request.body.action === "delete" && request.body.confirm !== true) {
+      throw new CloudError(400, "DELETE_CONFIRMATION_REQUIRED", "删除会话需要明确确认。");
+    }
+    const session = await options.repository.manageSession(identity, request.params.sessionId, request.body.action);
+    return { session, deleted: request.body.action === "delete" };
+  });
   app.get<{ Params: { sessionId: string } }>("/api/v1/cloud/sessions/:sessionId/runs", { schema: { params: sessionParams } }, async (request) => ({
     runs: await options.repository.listRuns(identityFor(request), request.params.sessionId),
   }));

@@ -4,7 +4,8 @@ import { assertHistoryAdmission, readCompleteHistory } from "./history-policy.js
 import { assertExecutionIdentity, executionScopeKey, type AppendCompactionInput, type ExecutionIdentity, type ExecutionScope } from "@daoyin/harness-contracts";
 import type { AgentEvent, AgentEventType, PendingAgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
 import { PostgresMemoryRepository, migratePostgresMemory } from "./postgres-memory-repository.js";
-import { CloudError, type BoundRunStores, type CloudRepository, type CloudRun, type CloudSession } from "./repository.js";
+import { CloudError, type BoundRunStores, type CloudRepository, type CloudRun, type CloudSession, type SessionAction } from "./repository.js";
+import { applySessionAction, sessionState } from "./session-management.js";
 
 type Row = Record<string, unknown>;
 type TransactionClient = PoolClient;
@@ -16,8 +17,10 @@ const asNumber = (value: unknown): number => Number(value);
 const asBoolean = (value: unknown): boolean => value === true || value === 1 || value === "1" || value === "t";
 
 function session(row: Row): CloudSession {
+  const state = sessionState(row);
   return { id: String(row.id), title: String(row.title), profileId: String(row.profile_id),
-    profileVersion: String(row.profile_version), createdAt: String(row.created_at) };
+    profileVersion: String(row.profile_version), createdAt: String(row.created_at),
+    pinnedAt: state.pinnedAt, archivedAt: state.archivedAt };
 }
 
 function run(row: Row): CloudRun {
@@ -35,6 +38,9 @@ const cloudSchema = [
     id TEXT PRIMARY KEY, scope_key TEXT NOT NULL, actor_id TEXT NOT NULL, scope_id TEXT NOT NULL,
     title TEXT NOT NULL, profile_id TEXT NOT NULL, profile_version TEXT NOT NULL, created_at TEXT NOT NULL
   )`,
+  "ALTER TABLE cloud_sessions ADD COLUMN IF NOT EXISTS pinned_at TEXT",
+  "ALTER TABLE cloud_sessions ADD COLUMN IF NOT EXISTS archived_at TEXT",
+  "ALTER TABLE cloud_sessions ADD COLUMN IF NOT EXISTS deleted_at TEXT",
   "CREATE INDEX IF NOT EXISTS cloud_sessions_scope ON cloud_sessions(scope_key, created_at)",
   `CREATE TABLE IF NOT EXISTS cloud_runs (
     id TEXT PRIMARY KEY, scope_key TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES cloud_sessions(id),
@@ -104,7 +110,8 @@ export class PostgresCloudRepository implements CloudRepository {
       AND NOT pg_is_in_recovery() AND has_table_privilege('cloud_events','SELECT')
       AND has_table_privilege('cloud_events','INSERT') AND has_table_privilege('cloud_runs','SELECT')
       AND has_table_privilege('cloud_runs','INSERT') AND has_table_privilege('cloud_runs','UPDATE')
-      AND has_table_privilege('cloud_sessions','SELECT') AND has_table_privilege('cloud_sessions','INSERT') AS ready`);
+      AND has_table_privilege('cloud_sessions','SELECT') AND has_table_privilege('cloud_sessions','INSERT')
+      AND has_table_privilege('cloud_sessions','UPDATE') AS ready`);
     if (result.rows[0]?.ready !== true) throw new Error("Database permissions or role are not ready.");
     await this.assertExecutionOwner();
   }
@@ -120,6 +127,8 @@ export class PostgresCloudRepository implements CloudRepository {
       const check = await this.pool.query<{ relation: string | null }>("SELECT to_regclass($1) AS relation", [table]);
       if (check.rows[0]?.relation === null) throw new Error("PostgreSQL schema is incomplete.");
     }
+    // Fail readiness before serving the new API against an unmigrated database.
+    await this.pool.query("SELECT pinned_at,archived_at,deleted_at FROM cloud_sessions WHERE FALSE");
   }
 
   public async acquireRuntimeLease(options: { durationMs?: number; recoverInterrupted?: boolean } = {}): Promise<{ recoveredRuns: number }> {
@@ -192,12 +201,29 @@ export class PostgresCloudRepository implements CloudRepository {
   }
 
   public async listSessions(scope: ExecutionScope): Promise<CloudSession[]> {
-    const result = await this.pool.query<Row>("SELECT * FROM cloud_sessions WHERE scope_key=$1 ORDER BY created_at DESC,id DESC LIMIT 100", [executionScopeKey(scope)]);
+    const result = await this.pool.query<Row>(`SELECT * FROM cloud_sessions WHERE scope_key=$1 AND deleted_at IS NULL
+      ORDER BY (pinned_at IS NOT NULL) DESC,pinned_at DESC,created_at DESC,id DESC LIMIT 500`, [executionScopeKey(scope)]);
     return result.rows.map(session);
   }
 
   public async getSession(scope: ExecutionScope, sessionId: string): Promise<CloudSession> {
     return session(await this.#session(this.pool, executionScopeKey(scope), sessionId));
+  }
+
+  public async manageSession(scope: ExecutionScope, sessionId: string, action: SessionAction): Promise<CloudSession | null> {
+    const key = executionScopeKey(scope);
+    return this.#transaction(async (client) => {
+      // The same session lock fences new Run admission, including other tabs.
+      const current = await this.#session(client, key, sessionId, true, action === "delete");
+      const next = applySessionAction(sessionState(current), action);
+      if (action === "archive" || action === "delete") {
+        const active = await client.query("SELECT id FROM cloud_runs WHERE session_id=$1 AND status='running'", [sessionId]);
+        if (active.rows.length) throw new CloudError(409, "SESSION_BUSY", "会话正在生成，请先停止生成后再操作。");
+      }
+      const result = await client.query<Row>(`UPDATE cloud_sessions SET pinned_at=$1,archived_at=$2,deleted_at=$3
+        WHERE id=$4 AND scope_key=$5 RETURNING *`, [next.pinnedAt, next.archivedAt, next.deletedAt, sessionId, key]);
+      return next.deletedAt ? null : session(result.rows[0]!);
+    });
   }
 
   public async acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string): Promise<{ run: CloudRun; created: boolean }> {
@@ -207,13 +233,14 @@ export class PostgresCloudRepository implements CloudRepository {
     }
     const key = executionScopeKey(identity);
     return this.#transaction(async (client) => {
-      await this.#session(client, key, sessionId, true);
+      const selectedSession = await this.#session(client, key, sessionId, true);
       const inputHash = digest(userMessage);
       const previous = await client.query<Row>("SELECT * FROM cloud_runs WHERE session_id=$1 AND request_id=$2 AND scope_key=$3 FOR UPDATE", [sessionId, requestId, key]);
       if (previous.rows[0] !== undefined) {
         if (String(previous.rows[0].input_hash) !== inputHash) throw new CloudError(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同消息。");
         return { run: run(previous.rows[0]), created: false };
       }
+      if (selectedSession.archived_at) throw new CloudError(409, "SESSION_ARCHIVED", "请先恢复已归档的会话。");
       const active = await client.query("SELECT id FROM cloud_runs WHERE session_id=$1 AND status='running' FOR UPDATE", [sessionId]);
       if (active.rows[0] !== undefined) throw new CloudError(409, "SESSION_BUSY", "当前会话已有任务，请等待完成或取消。");
       const usage = await client.query<{ events: string; bytes: string; runs: string }>(`SELECT COUNT(*) AS events,
@@ -323,14 +350,15 @@ export class PostgresCloudRepository implements CloudRepository {
     }
   }
 
-  async #session(client: Pool | TransactionClient, key: string, sessionId: string, lock = false): Promise<Row> {
-    const result = await client.query<Row>(`SELECT * FROM cloud_sessions WHERE id=$1 AND scope_key=$2${lock ? " FOR UPDATE" : ""}`, [sessionId, key]);
+  async #session(client: Pool | TransactionClient, key: string, sessionId: string, lock = false, includeDeleted = false): Promise<Row> {
+    const result = await client.query<Row>(`SELECT * FROM cloud_sessions WHERE id=$1 AND scope_key=$2${includeDeleted ? "" : " AND deleted_at IS NULL"}${lock ? " FOR UPDATE" : ""}`, [sessionId, key]);
     if (result.rows[0] === undefined) throw notFound();
     return result.rows[0];
   }
 
   async #run(client: Pool | TransactionClient, key: string, runId: string, lock = false): Promise<Row> {
-    const result = await client.query<Row>(`SELECT * FROM cloud_runs WHERE id=$1 AND scope_key=$2${lock ? " FOR UPDATE" : ""}`, [runId, key]);
+    const result = await client.query<Row>(`SELECT r.* FROM cloud_runs r JOIN cloud_sessions s ON s.id=r.session_id
+      WHERE r.id=$1 AND r.scope_key=$2 AND s.scope_key=$2 AND s.deleted_at IS NULL${lock ? " FOR UPDATE OF r" : ""}`, [runId, key]);
     if (result.rows[0] === undefined) throw notFound();
     return result.rows[0];
   }

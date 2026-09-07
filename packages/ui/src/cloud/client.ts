@@ -1,7 +1,7 @@
 import type { AgentEvent } from "@daoyin/harness-protocol";
-import type { CloudRun, CloudSession } from "../../../server-cloud/src/repository.js";
+import type { CloudRun, CloudSession, SessionAction } from "../../../server-cloud/src/repository.js";
 
-export type { CloudRun, CloudSession };
+export type { CloudRun, CloudSession, SessionAction };
 export interface AccountProfile { username: string; avatarUrl: string | null }
 
 function accountProfile(value: unknown): AccountProfile | undefined {
@@ -123,6 +123,28 @@ export class WorkbenchClient {
   }
   public async sessions(signal?: AbortSignal): Promise<CloudSession[]> {
     return (await this.#request<{ sessions: CloudSession[] }>("/sessions", undefined, signal)).sessions;
+  }
+  public async manageSession(sessionId: string, action: SessionAction, confirm = false): Promise<CloudSession | null> {
+    if (!identifier(sessionId)) throw new WorkbenchError("会话标识无效。");
+    if (action === "delete" && !confirm) throw new WorkbenchError("请先确认删除会话。");
+    try {
+      const result = await this.#request<{ session: CloudSession | null; deleted: boolean }>(
+        `/sessions/${encodeURIComponent(sessionId)}/manage`, { action, ...(action === "delete" ? { confirm: true } : {}) });
+      if (action === "delete") {
+        if (result.deleted !== true || result.session !== null) throw new WorkbenchError("删除结果尚未确认，请刷新会话列表后重试。");
+        this.#forget(sessionId);
+        return null;
+      }
+      if (result.deleted !== false || !result.session || result.session.id !== sessionId) throw new WorkbenchError("会话状态尚未确认，请刷新后重试。");
+      return result.session;
+    } catch (cause) {
+      if (cause instanceof WorkbenchError) {
+        if ([404, 405, 501].includes(cause.status)) throw new WorkbenchError("会话管理接口尚未接通，或该会话已被移除。请刷新后重试。", cause.status);
+        if (cause.status === 409) throw new WorkbenchError("会话正在生成或状态已变化，请先停止生成并刷新后重试。", 409);
+        if (cause.status === 0) throw new WorkbenchError("操作结果尚未确认，请刷新会话列表后重试。");
+      }
+      throw cause;
+    }
   }
   public async createSession(title: string, expectedProfileId = "company-public"): Promise<CloudSession> {
     if (/saishi_agent_[A-Za-z0-9_-]{64}/u.test(title)) throw new WorkbenchError("检测到访问凭证，请勿发送到聊天。业务数据使用当前登录账号访问。");

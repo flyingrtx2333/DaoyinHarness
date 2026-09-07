@@ -4,7 +4,8 @@ import { assertHistoryAdmission, readCompleteHistory } from "./history-policy.js
 import { SqliteMemoryRepository } from "./memory-repository.js";
 import { assertExecutionIdentity, executionScopeKey, type AppendCompactionInput, type ExecutionIdentity, type ExecutionScope } from "@daoyin/harness-contracts";
 import type { AgentEvent, AgentEventType, PendingAgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
-import { CloudError, type BoundRunStores, type CloudRepository, type CloudRun, type CloudSession } from "./repository.js";
+import { CloudError, type BoundRunStores, type CloudRepository, type CloudRun, type CloudSession, type SessionAction } from "./repository.js";
+import { applySessionAction, sessionState } from "./session-management.js";
 
 type Row = Record<string, unknown>;
 const now = (): string => new Date().toISOString();
@@ -13,8 +14,10 @@ const digest = (value: string): string => createHash("sha256").update(value).dig
 const notFound = (): CloudError => new CloudError(404, "RESOURCE_NOT_FOUND", "资源不存在或当前身份无权访问。");
 
 function session(row: Row): CloudSession {
+  const state = sessionState(row);
   return { id: String(row.id), title: String(row.title), profileId: String(row.profile_id),
-    profileVersion: String(row.profile_version), createdAt: String(row.created_at) };
+    profileVersion: String(row.profile_version), createdAt: String(row.created_at),
+    pinnedAt: state.pinnedAt, archivedAt: state.archivedAt };
 }
 
 function run(row: Row): CloudRun {
@@ -88,6 +91,10 @@ export class SqliteCloudRepository implements CloudRepository {
         body TEXT NOT NULL, PRIMARY KEY(session_id, source_end_seq)
       ) STRICT;
     `);
+    const columns = new Set(this.#db.prepare("PRAGMA table_info(cloud_sessions)").all().map((row) => String(row.name)));
+    for (const column of ["pinned_at", "archived_at", "deleted_at"]) {
+      if (!columns.has(column)) this.#db.exec(`ALTER TABLE cloud_sessions ADD COLUMN ${column} TEXT`);
+    }
     this.memory = new SqliteMemoryRepository(this.#db, (operation) => this.#transaction(operation));
   }
 
@@ -167,7 +174,7 @@ export class SqliteCloudRepository implements CloudRepository {
       const count = this.#db.prepare("SELECT COUNT(*) AS n FROM cloud_sessions WHERE scope_key=?").get(key);
       if (Number(count?.n) >= 500) throw new CloudError(429, "SESSION_LIMIT", "当前空间的试运行会话数量已达上限。");
       const result: CloudSession = { ...input, id: id("ses"), createdAt: now() };
-      this.#db.prepare("INSERT INTO cloud_sessions VALUES (?,?,?,?,?,?,?,?)").run(
+      this.#db.prepare("INSERT INTO cloud_sessions(id,scope_key,actor_id,scope_id,title,profile_id,profile_version,created_at) VALUES (?,?,?,?,?,?,?,?)").run(
         result.id, key, scope.actorUserId, `cloud_${digest(key)}`, input.title.trim(),
         input.profileId, input.profileVersion, result.createdAt,
       );
@@ -176,12 +183,29 @@ export class SqliteCloudRepository implements CloudRepository {
   }
 
   public async listSessions(scope: ExecutionScope): Promise<CloudSession[]> {
-    return this.#db.prepare("SELECT * FROM cloud_sessions WHERE scope_key=? ORDER BY created_at DESC, id DESC LIMIT 100")
+    return this.#db.prepare(`SELECT * FROM cloud_sessions WHERE scope_key=? AND deleted_at IS NULL
+      ORDER BY (pinned_at IS NOT NULL) DESC,pinned_at DESC,created_at DESC,id DESC LIMIT 500`)
       .all(executionScopeKey(scope)).map(session);
   }
 
   public async getSession(scope: ExecutionScope, sessionId: string): Promise<CloudSession> {
     return session(this.#session(executionScopeKey(scope), sessionId));
+  }
+
+  public async manageSession(scope: ExecutionScope, sessionId: string, action: SessionAction): Promise<CloudSession | null> {
+    const key = executionScopeKey(scope);
+    return this.#transaction(() => {
+      const current = this.#session(key, sessionId, action === "delete");
+      const next = applySessionAction(sessionState(current), action);
+      if (action === "archive" || action === "delete") {
+        const active = this.#db.prepare("SELECT id FROM cloud_runs WHERE session_id=? AND status='running'").get(sessionId);
+        if (active) throw new CloudError(409, "SESSION_BUSY", "会话正在生成，请先停止生成后再操作。");
+      }
+      this.#db.prepare("UPDATE cloud_sessions SET pinned_at=?,archived_at=?,deleted_at=? WHERE id=? AND scope_key=?")
+        .run(next.pinnedAt, next.archivedAt, next.deletedAt, sessionId, key);
+      this.#changedSessions.add(sessionId);
+      return next.deletedAt ? null : session(this.#session(key, sessionId));
+    });
   }
 
   public async acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string): Promise<{ run: CloudRun; created: boolean }> {
@@ -191,7 +215,7 @@ export class SqliteCloudRepository implements CloudRepository {
     }
     const key = executionScopeKey(identity);
     return this.#transaction(() => {
-      this.#session(key, sessionId);
+      const selectedSession = this.#session(key, sessionId);
       const hash = digest(userMessage);
       const existing = this.#db.prepare("SELECT * FROM cloud_runs WHERE session_id=? AND request_id=? AND scope_key=?")
         .get(sessionId, requestId, key);
@@ -199,6 +223,7 @@ export class SqliteCloudRepository implements CloudRepository {
         if (existing.input_hash !== hash) throw new CloudError(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同消息。");
         return { run: run(existing), created: false };
       }
+      if (selectedSession.archived_at) throw new CloudError(409, "SESSION_ARCHIVED", "请先恢复已归档的会话。");
       const active = this.#db.prepare("SELECT id FROM cloud_runs WHERE session_id=? AND status='running'").get(sessionId);
       if (active !== undefined) throw new CloudError(409, "SESSION_BUSY", "当前会话已有任务，请等待完成或取消。");
       const usage = this.#db.prepare(`SELECT COUNT(*) AS events, COALESCE(SUM(length(CAST(body AS BLOB))),0) AS bytes,
@@ -299,14 +324,15 @@ export class SqliteCloudRepository implements CloudRepository {
     });
   }
 
-  #session(key: string, sessionId: string): Row {
-    const row = this.#db.prepare("SELECT * FROM cloud_sessions WHERE id=? AND scope_key=?").get(sessionId, key);
+  #session(key: string, sessionId: string, includeDeleted = false): Row {
+    const row = this.#db.prepare(`SELECT * FROM cloud_sessions WHERE id=? AND scope_key=?${includeDeleted ? "" : " AND deleted_at IS NULL"}`).get(sessionId, key);
     if (row === undefined) throw notFound();
     return row;
   }
 
   #run(key: string, runId: string): Row {
-    const row = this.#db.prepare("SELECT * FROM cloud_runs WHERE id=? AND scope_key=?").get(runId, key);
+    const row = this.#db.prepare(`SELECT r.* FROM cloud_runs r JOIN cloud_sessions s ON s.id=r.session_id
+      WHERE r.id=? AND r.scope_key=? AND s.scope_key=? AND s.deleted_at IS NULL`).get(runId, key, key);
     if (row === undefined) throw notFound();
     return row;
   }

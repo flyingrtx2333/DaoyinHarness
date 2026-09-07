@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import { MarkdownMessage } from "../MarkdownMessage.js";
-import { WorkbenchClient, WorkbenchError, type AccountProfile, type CloudRun, type CloudSession } from "./client.js";
+import { WorkbenchClient, WorkbenchError, type AccountProfile, type CloudRun, type CloudSession, type SessionAction } from "./client.js";
+import { SessionHistory } from "./SessionHistory.js";
 import { projectTurns } from "./projection.js";
 import { watchCloudSession } from "./event-feed.js";
 import { PluginPicker } from "./PluginBrowser.js";
@@ -43,10 +44,13 @@ export function App(): React.JSX.Element {
   const [preferenceError, setPreferenceError] = useState("");
   const [sessions, setSessions] = useState<CloudSession[]>([]);
   const [selected, setSelected] = useState("");
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const [managing, setManaging] = useState("");
+  const sessionMutation = useRef(false);
   const [runs, setRuns] = useState<CloudRun[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [draft, setDraft] = useState("");
-  const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [loginUrl, setLoginUrl] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
@@ -108,7 +112,7 @@ export function App(): React.JSX.Element {
       try { saved = storage.getItem(SELECTED) ?? ""; } catch { /* Submission provides a storage error if necessary. */ }
       setExpiresAt(expiry); setAccount(client.account); setSessions(list);
       if (APPLICATION === "saishi" && previousScope && previousScope === client.accountScope) setDraft(savedDraft);
-      setSelected(list.some((item) => item.id === saved) ? saved : list[0]?.id ?? "");
+      setSelected(list.some((item) => item.id === saved && !item.archivedAt) ? saved : list.find((item) => !item.archivedAt)?.id ?? "");
       setPhase("ready"); setRevision((value) => value + 1);
     } catch (cause) {
       if (!loggingOut.current) {
@@ -134,6 +138,7 @@ export function App(): React.JSX.Element {
     if (phase !== "ready") return;
     return scheduleExpiry(expiresAt, () => {
       if (APPLICATION === "saishi") { void connect(); return; }
+      accountEpoch.current++;
       setPhase("expired"); setRuns([]); setEvents([]); setSessions([]);
       setSelected(""); setDraft("");
       setError("访客授权已到期。重新进入将创建新的访客空间，旧空间的会话不会转入。");
@@ -196,6 +201,24 @@ export function App(): React.JSX.Element {
     setSelected(id); setDraft(""); setError(""); setSidebar(false); setView("chat");
     if (!id) try { storage.removeItem(SELECTED); } catch { /* Optional selection history. */ }
   }
+  function isSessionProtected(id: string): boolean {
+    return !!client.pending(id) || (id === selected && (loading || submitting || !!active));
+  }
+  async function manageSession(id: string, action: SessionAction, confirm = false): Promise<void> {
+    if (sessionMutation.current || submitting || phase !== "ready") throw new WorkbenchError("请等待当前操作完成。");
+    if ((action === "archive" || action === "delete") && isSessionProtected(id)) throw new WorkbenchError("请先停止生成或确认原提交结果。");
+    const epoch = accountEpoch.current;
+    sessionMutation.current = true; setManaging(id); setError("");
+    try {
+      const updated = await client.manageSession(id, action, confirm);
+      if (epoch !== accountEpoch.current || loggingOut.current) throw new WorkbenchError("账号已变化，请在当前账号中重新查看会话。");
+      setSessions((list) => updated ? list.map((item) => item.id === id ? updated : item) : list.filter((item) => item.id !== id));
+      if (selectedRef.current === id && (action === "archive" || action === "delete")) choose("");
+    } catch (cause) {
+      if (epoch === accountEpoch.current) fail(cause);
+      throw cause;
+    } finally { sessionMutation.current = false; setManaging(""); }
+  }
   function browsePlugins(): void {
     setView("plugins"); setSidebar(false);
     window.requestAnimationFrame(() => document.getElementById("conversation")?.focus());
@@ -221,7 +244,8 @@ export function App(): React.JSX.Element {
     if (focusComposer) window.requestAnimationFrame(() => document.getElementById("message")?.focus());
   }
   async function send(message = draft.trim()): Promise<void> {
-    if (!message || submission.current || active || phase !== "ready" || loading) return;
+    if (!message || submission.current || sessionMutation.current || active || phase !== "ready" || loading) return;
+    if (session?.archivedAt) { setError("请先恢复已归档的会话，或新建会话。"); return; }
     if (!plugin?.profileId) { setError("当前会话的插件尚未支持，请新建会话并选择可用插件。"); return; }
     setSubmitting(true); setSendingMessage(message); setError(""); nearBottom.current = true;
     const epoch = accountEpoch.current;
@@ -255,23 +279,14 @@ export function App(): React.JSX.Element {
     finally { setCancelling(false); }
   }
 
-  const visibleSessions = sessions.filter((item) => item.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
-
   return <div className="workbench">
     <a className="skip-link" href="#conversation">跳到对话</a>
     <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航" onKeyDown={(event) => { if (event.key === "Escape" && sidebar) { event.preventDefault(); closeSidebar(); } }}>
       <button type="button" className="sidebar-close" aria-label="关闭会话导航" onClick={closeSidebar}>×</button>
       <a className="brand" href="/harness/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
       <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button></nav>
-      <section className="sidebar-history" aria-labelledby="history-heading">
-        <div className="sidebar-label"><h2 id="history-heading">最近会话</h2><button className="new-session" disabled={phase !== "ready" || submitting} onClick={() => choose("")}><WorkbenchIcon name="plus" />新建会话</button></div>
-        <label className="search"><span>搜索会话</span><WorkbenchIcon name="search" /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索会话" /></label>
-        <nav aria-label="最近会话" className="session-list">
-          {visibleSessions.map((item) =>
-            <button key={item.id} aria-current={view === "chat" && selected === item.id ? "page" : undefined} disabled={submitting} onClick={() => choose(item.id)} title={item.title}><WorkbenchIcon name="chat" /><span>{item.title || "未命名会话"}</span></button>)}
-          {visibleSessions.length === 0 && <p className="muted" role="status">{sessions.length === 0 ? "暂无会话" : "没有匹配的会话"}</p>}
-        </nav>
-      </section>
+      <SessionHistory key={`${APPLICATION}:${client.accountScope}:${accountEpoch.current}:${phase}`} sessions={sessions} selected={selected} chatActive={view === "chat"}
+        disabled={phase !== "ready" || submitting || !!managing} isProtected={isSessionProtected} onChoose={choose} onManage={manageSession} />
       {APPLICATION === "company" && <footer className="sidebar-footer"><div className="account-actions" aria-label="道引账号入口"><a className="account-login" href={ACCOUNT_LOGIN_PATH}>登录道引账号</a><a href={ACCOUNT_REGISTER_PATH}>注册账号</a></div></footer>}
       {APPLICATION === "saishi" && phase === "ready" && account && <footer className="sidebar-footer"><AccountIdentity key={client.accountScope} account={account} onSettings={() => setSettingsOpen(true)} onLogout={logout} /></footer>}
     </aside>
@@ -304,10 +319,11 @@ export function App(): React.JSX.Element {
         {APPLICATION === "company" && phase !== "ready" && phase !== "connecting" && <button className="primary reconnect" onClick={() => { void connect(); }}>重新进入工作台</button>}
         {APPLICATION === "saishi" && !loginUrl && phase !== "connecting" && (phase !== "ready" || error) && <button className="primary reconnect" onClick={() => { void connect(); }}>重新连接工作台</button>}
         {pending && phase === "ready" && !submitting && <div className="recovery"><span>上次提交结果尚未确认。</span><button disabled={loading || !!active} onClick={() => { void send(pending.message); }}>恢复原提交</button></div>}
+        {session?.archivedAt && <div className="archived-notice" role="status"><span>会话已归档，恢复后可继续发送。</span><button type="button" disabled={!!managing || phase !== "ready"} onClick={() => { void manageSession(session.id, "restore").catch(() => undefined); }}>恢复会话</button></div>}
         <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
           <label htmlFor="message" className="sr-only">发送给 Harness 的问题</label>
-          <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={2} disabled={phase !== "ready" || submitting || !!pending} placeholder="描述你的问题…" onKeyDown={(event) => { if (isSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing }, preferences)) { event.preventDefault(); void send(); } }} />
-          <div className="composer-controls"><div className="composer-plugins"><PluginPicker selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id, false)} onBrowse={browsePlugins} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /><button type="button" className="selected-plugin" onClick={browsePlugins} aria-label={`查看${plugin?.name ?? "会话插件"}详情`}>{plugin?.name ?? "选择插件"}{plugin && <span className="plugin-check" aria-hidden="true">✓</span>}</button>{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={!draft.trim() || phase !== "ready" || loading || !!pending || !plugin}><WorkbenchIcon name="arrow" /></button>}</div>
+          <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={2} disabled={phase !== "ready" || submitting || !!pending || !!managing || !!session?.archivedAt} placeholder="描述你的问题…" onKeyDown={(event) => { if (isSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing }, preferences)) { event.preventDefault(); void send(); } }} />
+          <div className="composer-controls"><div className="composer-plugins"><PluginPicker selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id, false)} onBrowse={browsePlugins} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /><button type="button" className="selected-plugin" onClick={browsePlugins} aria-label={`查看${plugin?.name ?? "会话插件"}详情`}>{plugin?.name ?? "选择插件"}{plugin && <span className="plugin-check" aria-hidden="true">✓</span>}</button>{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={!draft.trim() || phase !== "ready" || loading || !!pending || !!managing || !!session?.archivedAt || !plugin}><WorkbenchIcon name="arrow" /></button>}</div>
         </form>
         <p className="composer-note">{APPLICATION === "saishi" ? "使用当前账号的赛事数据；摄像机观察不等于正式打卡成绩" : "依据公开资料回答，请核对引用"}</p>
         <div className="sr-only" role="status">{submitting ? "正在提交问题" : active ? "任务进行中" : turns.length ? "回答已更新" : ""}</div>
