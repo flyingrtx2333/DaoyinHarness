@@ -87,9 +87,12 @@ export class EvaluationStore {
     if (!row) throw new EvaluationError(404, "EVAL_NOT_FOUND", "评估不存在。");
     return { actorId: String(row.actor_id), sessionId: String(row.session_id) };
   }
-  public list(offset = 0): Experiment[] {
+  public list(offset = 0, actorId?: string): Experiment[] {
     this.assertOwner();
-    return this.#db.prepare("SELECT body FROM evaluation_runs ORDER BY created_at DESC,id DESC LIMIT 20 OFFSET ?").all(offset).map(r => JSON.parse(String(r.body)) as Experiment);
+    const rows = actorId === undefined
+      ? this.#db.prepare("SELECT body FROM evaluation_runs ORDER BY created_at DESC,id DESC LIMIT 20 OFFSET ?").all(offset)
+      : this.#db.prepare("SELECT body FROM evaluation_runs WHERE actor_id=? ORDER BY created_at DESC,id DESC LIMIT 20 OFFSET ?").all(actorId, offset);
+    return rows.map(row => JSON.parse(String(row.body)) as Experiment);
   }
   public reserveCall(id: string, kind: "agent" | "judge"): void {
     this.#transaction(() => {
@@ -102,6 +105,17 @@ export class EvaluationStore {
   public counts(id: string): { agent: number; judge: number } {
     const rows = this.#db.prepare("SELECT kind,COUNT(*) AS n FROM evaluation_calls WHERE run_id=? GROUP BY kind").all(id);
     return { agent: Number(rows.find(r => r.kind === "agent")?.n ?? 0), judge: Number(rows.find(r => r.kind === "judge")?.n ?? 0) };
+  }
+  public recordRuntimeHandle(id: string, handle: import("./contracts.js").RuntimeHandle): void {
+    this.#transaction(() => {
+      const run = this.get(id);
+      if (!["running", "cancelling"].includes(run.status)) throw new EvaluationError(409, "EVAL_FINISHED", "实验已经结束。");
+      const handles = run.runtimeHandles ?? [];
+      const index = handles.findIndex(value => value.caseId === handle.caseId && value.repetition === handle.repetition);
+      if (index < 0) handles.push(handle); else handles[index] = handle;
+      run.runtimeHandles = handles;
+      this.#db.prepare("UPDATE evaluation_runs SET body=? WHERE id=?").run(JSON.stringify(run), id);
+    });
   }
   public append(id: string, trial: Trial): void {
     this.#transaction(() => {

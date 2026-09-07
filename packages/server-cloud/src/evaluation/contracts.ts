@@ -1,5 +1,5 @@
 // Browser-safe contracts. No server credentials or executable user-supplied expressions.
-export const EVALUATOR_VERSION = "harness-evaluation-v1";
+export const EVALUATOR_VERSION = "harness-evaluation-v2-live-runtime";
 export type TemplateId = "saishi-materials" | "memory-current" | "explore";
 export type EvaluationMode = "replay" | "live";
 export type Verdict = "passed" | "failed" | "review" | "judge_error" | "cancelled";
@@ -15,12 +15,16 @@ export interface Trial {
   modelCalls: number; judgeCalls: number; durationMs: number; firstTextMs: number | null;
   inputTokens: number | null; outputTokens: number | null; recall: number | null;
   retrievedMemoryIds: string[]; errorCode: string | null;
+  sessionId?: string; runId?: string; requestId?: string; runtimeRevision?: string | null;
+  modelName?: string | null; modelCallsKnown?: boolean; evidenceKind?: string;
 }
+export interface RuntimeHandle { caseId: string; repetition: number; sessionId: string; requestId: string; runId?: string }
+
 export interface Experiment {
   id: string; actorId: string; createdAt: string; finishedAt: string | null;
   status: "running" | "cancelling" | "completed" | "cancelled" | "interrupted" | "failed";
   spec: EvaluationSpec; configurationHash: string; version: string; model: string | null;
-  revision: string | null; trials: Trial[]; planned: number; completed: number;
+  revision: string | null; trials: Trial[]; planned: number; completed: number; runtimeHandles?: RuntimeHandle[];
 }
 export const TEMPLATES: ReadonlyArray<{ id: TemplateId; name: string; fixture: string; facts: string[] }> = [
   { id: "saishi-materials", name: "赛事素材状态", fixture: "隔离账号可查一场赛事；40 条素材分两页，其中 30 条完成、7 条处理中、3 条失败。只读，不接生产赛事。",
@@ -87,11 +91,13 @@ export function metrics(run: Experiment) {
   return { passed, failed: run.trials.filter(t => t.verdict === "failed").length,
     review: run.trials.filter(t => t.verdict === "review" || t.verdict === "judge_error").length,
     notRun: run.planned - run.trials.length,
-    verifiedSuccessRate: run.spec.mode === "live" && run.planned ? passed / run.planned : null,
+    verifiedSuccessRate: run.version !== EVALUATOR_VERSION && run.spec.mode === "live" && run.planned ? passed / run.planned : null,
     protocolPassRate: run.spec.mode === "replay" && run.planned ? passed / run.planned : null,
-    repeatAllPassRate: run.spec.cases.length ? repeatedPass / run.spec.cases.length : 0,
+    repeatAllPassRate: run.version === EVALUATOR_VERSION ? null : run.spec.cases.length ? repeatedPass / run.spec.cases.length : 0,
     meanRecall: recalls.length ? recalls.reduce((a, b) => a + b, 0) / recalls.length : null,
     recallSamples: recalls.length, modelCalls: run.trials.reduce((n, t) => n + t.modelCalls, 0),
     judgeCalls: run.trials.reduce((n, t) => n + t.judgeCalls, 0),
-    financialCost: null, evidenceKind: run.spec.mode === "live" ? "real-model-isolated-fixtures" : "scripted-replay-not-model-quality" };
+    executionCompletionRate: run.planned ? run.trials.filter(trial => trial.runStatus === "completed").length / run.planned : null,
+    financialCost: null, evidenceKind: run.version === EVALUATOR_VERSION ? "real-platform-account-runtime"
+      : run.spec.mode === "live" ? "real-model-isolated-fixtures" : "scripted-replay-not-model-quality" };
 }

@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { loadRuntimeBuild } from "../runtime-health.js";
 import { createEvaluationService } from "./service.js";
 import { EvaluationStore } from "./store.js";
-import { modelConfig } from "./provider.js";
+import { PlatformEvaluationRuntime } from "./live-runner.js";
 import { record } from "./contracts.js";
 
 // This entry is never imported by the production Agent server. Use a separate OS user/env.
@@ -17,12 +17,12 @@ if (!isAbsolute(database) || resolve(database) === resolve(process.env.DAOYIN_CL
     !(platform.protocol === "https:" || platform.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(platform.hostname))) {
   throw new Error("Configure a separate evaluation database, service identity, platform origin and port; do not reuse the production runtime environment.");
 }
-const model = modelConfig(process.env);
+const runtime = new PlatformEvaluationRuntime(platform, serviceToken);
 const build = await loadRuntimeBuild(new URL("./release.json", import.meta.url));
 await mkdir(dirname(database), { recursive: true, mode: 0o700 });
 const store = new EvaluationStore(database);
 const app = createEvaluationService({ store, serviceToken, revision: build.revision,
-  ...(model ? { model } : {}),
+  runtime,
   authorize: async (authority, parent) => {
     const signal = AbortSignal.any([parent, AbortSignal.timeout(5000)]);
     try {

@@ -246,7 +246,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     run: await options.repository.getRun(identityFor(request), request.params.runId),
   }));
 
-  function startRun(identity: ExecutionIdentity, profile: CloudProfile, run: CloudRun): void {
+  function startRun(identity: ExecutionIdentity, profile: CloudProfile, run: CloudRun, maxModelCalls = 12): void {
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort("runtime"), runTimeoutMs);
     deadline.unref();
@@ -284,12 +284,15 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         });
         await ensureActive(identity, controller.signal);
         const baseModel = await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
+        let modelCalls = 0;
         const model: ModelClient = {
           complete: (request) => measurements.measure(run.id, "model_inclusive", async () => {
             // Preserve the core's per-model deadline as well as the whole-run cancellation.
             const modelSignal = AbortSignal.any([request.signal, controller.signal]);
             try {
               await ensureActive(identity, modelSignal);
+              if (modelCalls >= maxModelCalls) throw new CloudError(409, "MODEL_CALL_LIMIT", "本轮达到模型调用上限。");
+              modelCalls++;
               let validatedAt = Date.now();
               const reply = await abortable(() => baseModel.complete({ ...request, signal: modelSignal,
                 ...(request.onTextDelta ? { onTextDelta: async (delta: string) => {
@@ -311,7 +314,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           model, tools, events: stores.events, compactionStore: stores.compactions,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
           systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}`,
-          maxSteps: 12, maxToolCalls: 24,
+          maxSteps: maxModelCalls, maxToolCalls: 24,
         });
         await engine.runTurn({
           accountId: stores.accountId, scopeId: stores.scopeId, sessionId: run.sessionId, turnId: run.id,
@@ -341,9 +344,9 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     active.set(run.id, { controller, done });
   }
 
-  app.post<{ Params: { sessionId: string }; Body: { requestId: string; message: string } }>("/api/v1/cloud/sessions/:sessionId/runs", {
+  app.post<{ Params: { sessionId: string }; Body: { requestId: string; message: string; maxModelCalls?: number } }>("/api/v1/cloud/sessions/:sessionId/runs", {
     schema: { params: sessionParams, body: { type: "object", required: ["requestId", "message"], additionalProperties: false,
-      properties: { requestId: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" }, message: { type: "string", minLength: 1, maxLength: 10_000 } } } },
+      properties: { requestId: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" }, message: { type: "string", minLength: 1, maxLength: 10_000 }, maxModelCalls: { type: "integer", minimum: 2, maximum: 12 } } } },
   }, async (request, reply) => {
     const identity = identityFor(request);
     const selectedSession = await options.repository.getSession(identity, request.params.sessionId);
@@ -361,7 +364,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     admissions += 1;
     try {
       const accepted = await options.repository.acceptRun(identity, selectedSession.id, request.body.requestId, request.body.message);
-      if (accepted.created) startRun(identity, profile, accepted.run);
+      if (accepted.created) startRun(identity, profile, accepted.run, request.body.maxModelCalls);
       return reply.code(accepted.created ? 202 : 200).send({ run: accepted.run, reused: !accepted.created });
     } finally { admissions -= 1; }
   });
