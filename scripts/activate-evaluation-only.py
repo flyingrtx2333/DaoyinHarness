@@ -96,8 +96,14 @@ def main():
             time.sleep(1)
         if not healthy: raise RuntimeError('New evaluation service did not become healthy')
         command([NGINX, '-s', 'reload'])
-        status, _ = http_status('https://www.daoyintech.com/api/internal/harness-evaluation-runner/catalog')
-        if status != 401: raise RuntimeError('Runner ingress did not enforce service authentication')
+        status = 0
+        for _ in range(12):
+            # Nginx reload is graceful: old workers may briefly serve the former route.
+            try: status, _ = http_status('https://www.daoyintech.com/api/internal/harness-evaluation-runner/catalog')
+            except Exception: status = 0
+            if status == 401: break
+            time.sleep(1)
+        if status != 401: raise RuntimeError(f'Runner ingress did not enforce service authentication (HTTP {status})')
         print(json.dumps({'deployed': True, 'revision': revision, 'evaluationHealth': 200, 'anonymousRunner': status,
                           'chatRestarted': False, 'businessDataMigrated': False, 'backup': str(backup)}))
     except Exception:
