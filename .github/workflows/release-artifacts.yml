@@ -47,7 +47,7 @@ jobs:
           $files = Get-ChildItem release -File -Recurse | ForEach-Object {
             [ordered]@{ path = $_.FullName.Substring((Resolve-Path release).Path.Length + 1).Replace('\', '/'); sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() }
           }
-          [ordered]@{ revision = $revision; files = @($files) } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 release/artifact-manifest.json
+          [ordered]@{ revision = $revision; validation = 'packaging-only'; realModelValidation = 'not-run'; files = @($files) } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 release/artifact-manifest.json
       - uses: actions/upload-artifact@v4
         with:
           name: harness-release-${{ inputs.revision }}

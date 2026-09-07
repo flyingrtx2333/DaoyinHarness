@@ -1,10 +1,12 @@
-name: Validate and package Harness evaluation release
+name: Static checks and package Harness evaluation release
 
+# Owner mandate (2026-09-07): no simulated tests. This workflow only builds/packages.
+# Real-model acceptance is a separate, explicitly budgeted small-sample operation.
 on:
   workflow_dispatch:
     inputs:
       revision:
-        description: Exact committed Harness SHA to validate and package
+        description: Exact committed Harness SHA to check and package (not model acceptance)
         required: true
         type: string
 
@@ -12,7 +14,7 @@ permissions:
   contents: read
 
 jobs:
-  windows-validation:
+  windows-package:
     runs-on: windows-2025
     timeout-minutes: 35
     defaults:
@@ -41,37 +43,13 @@ jobs:
         run: |
           npm run build
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-      - name: Strict typecheck and lint
+      - name: Static typecheck and lint (not behavior tests)
         run: |
           npm run typecheck
           if ($LASTEXITCODE -ne 0) { throw 'Typecheck failed' }
           npm run lint
           if ($LASTEXITCODE -ne 0) { throw 'Lint failed' }
-      - name: Start isolated Windows PostgreSQL
-        run: |
-          $bin = $env:PGBIN
-          if (!(Test-Path "$bin\initdb.exe")) { throw 'Runner PostgreSQL binaries missing' }
-          $data = Join-Path $env:RUNNER_TEMP 'harness-eval-pg'
-          & "$bin\initdb.exe" -D $data -U postgres -A trust --no-locale
-          if ($LASTEXITCODE -ne 0) { throw 'Isolated initdb failed' }
-          & "$bin\pg_ctl.exe" -D $data -l "$env:RUNNER_TEMP\harness-eval-pg.log" -o '-h 127.0.0.1 -p 15432' -w start
-          if ($LASTEXITCODE -ne 0) { throw 'Isolated PostgreSQL start failed' }
-          & "$bin\createdb.exe" -h 127.0.0.1 -p 15432 -U postgres harness_evaluation_test
-          if ($LASTEXITCODE -ne 0) { throw 'Isolated database creation failed' }
-          'DAOYIN_TEST_POSTGRES_URL=postgresql://postgres@127.0.0.1:15432/harness_evaluation_test' >> $env:GITHUB_ENV
-      - name: Unit, protocol, security and real PostgreSQL tests
-        run: |
-          npm test
-          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
-      - name: Compiled workbench browser checks (mocked API, no paid calls)
-        run: |
-          node scripts/verify-evaluation-workbench.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Evaluation browser verification failed' }
-          node scripts/verify-cloud-websocket.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'WebSocket regression failed' }
-          node scripts/verify-account-access.mjs --harness-only
-          if ($LASTEXITCODE -ne 0) { throw 'Account regression failed' }
-      - name: Package the validated commit
+      - name: Package the committed source (real-model validation not run)
         run: |
           node scripts/build-cloud-release.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Runtime packaging failed' }
@@ -81,15 +59,10 @@ jobs:
           New-Item -ItemType Directory -Path release -Force | Out-Null
           Copy-Item -Recurse ".cache/cloud-release/$revision" release/runtime
           Copy-Item -Recurse ".cache/workbench-release/$revision" release/workbench
-          [ordered]@{ revision=$revision; validation='windows-2025'; database='isolated-postgresql'; browser='compiled-ui-mocked-api'; paidCalls=0; deploymentPerformed=$false } | ConvertTo-Json | Set-Content -Encoding utf8 release/validation.json
+          [ordered]@{ revision=$revision; environment='windows-2025'; validation='static-and-build-only'; simulatedTests='disabled-by-owner-policy'; realModelValidation='not-run'; paidCalls=0; deploymentPerformed=$false } | ConvertTo-Json | Set-Content -Encoding utf8 release/validation.json
       - uses: actions/upload-artifact@v4
         with:
           name: harness-evaluation-${{ inputs.revision }}
           path: release/
           retention-days: 7
           if-no-files-found: error
-      - name: Stop only this job's PostgreSQL
-        if: always()
-        run: |
-          $data = Join-Path $env:RUNNER_TEMP 'harness-eval-pg'
-          if (Test-Path "$data\postmaster.pid") { & "$env:PGBIN\pg_ctl.exe" -D $data -m fast -w stop }

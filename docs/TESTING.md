@@ -1,178 +1,55 @@
-# DaoyinHarness Testing and Reliability
+# 测试规范：仅小样本真实模型
 
-> Current Windows verification for the unified platform is recorded in [UNIFIED-AGENT.md](UNIFIED-AGENT.md#验证记录). Earlier WSL notes in [UPDATES-20260905.md](UPDATES-20260905.md) describe the original editing session; they are not the current automated test status. Visual workbench acceptance remains separate.
+生效日期：2026-09-07。项目所有者明确要求：
 
-> Passing one layer never implies a higher layer passed. Platform-adapter tests use the real AgentEngine and SQLite with simulated HTTP/provider responses. Backend bridge tests run from Windows Docker Compose against isolated MySQL and FastAPI, with fixture memberships, provider and corpus; no production data or billable model calls.
+> 不要再浪费时间做模拟的测试了！以后都不要！测试的话就用小样本真实模型测！
 
-## Validation environment ownership
+这是后续开发的长期约束，不限于本次记忆系统任务。本规范与根目录 [AGENTS.md](../AGENTS.md) 优先于旧 ADR、发布清单和历史验证记录中的测试要求。
 
-This shared checkout is validated exclusively from Windows PowerShell. Windows owns `node_modules`, dependency installation, typecheck, lint, unit/integration tests, builds, package verification, runtime smoke tests and acceptance evidence.
+## 1. 不再做的事情
 
-WSL contributors may edit source and documentation, but do not install dependencies or run validation commands in this checkout. In particular, do not run `npm install`, `npm ci`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, package verification or runtime acceptance from WSL. npm optional native packages are platform-specific; sharing one `node_modules` between Linux and Windows makes results host-dependent. WSL output is therefore not accepted as project test evidence.
+不新增、不扩充、不执行 mock、stub、假模型、预制模型回答、模拟业务 API、模拟浏览器接口或会话回放测试。不再运行全量 Vitest、批量单元/集成回归，也不为这些测试安装依赖、起临时数据库或搭建新测试框架。不得绕到脚本、CI 或 Git hooks 间接运行。
 
-Windows validation uses the Node.js version pinned by `.nvmrc` / `.node-version`. Every reported result names the command and evidence level; another platform's successful run cannot substitute for Windows acceptance in this checkout.
+已有测试代码和历史报告暂时保留，用于追溯之前做过什么；不删除、不伪造历史，也不把过去的通过数量当作当前真实模型效果。旧文档中“必须跑全量测试”“模拟通过即可完成”的要求已被本规范取代。
 
-## 1. Evidence levels
+## 2. 需要测试时怎么做
 
-Every report labels its evidence level:
+仅挑与本次改动直接相关的小样本，通过真实账号、真实 AI 网关和真实模型走实际 Agent、工具与持久化链路。通常 3–5 个场景足够作为首轮检查，这是建议规模，不是每次必须调用模型。不得在真实模型后面接假的业务结果，再宣称端到端验证成功。
 
-| Level | Meaning | May claim |
+先确定本次调用数量、推理步数、token/费用上限，使用已授权的测试空间和专用数据。测试账号不等于可以删除生产数据、付款、发布或触发额外付费业务，相关操作仍遵守用户授权。模型访问或安全测试资源不可用时，直接写明阻塞点与“尚未真实验证”，不改用模拟测试凑通过率。
+
+运行过程中核对实际工具调用和数据库/业务结果，而不是只看模型回复“成功”。遇到失败，保留具体证据并停止无意义重复；修复后只复测受影响场景，不扩大为整仓回归。
+
+## 3. 记忆系统的小样本方案
+
+后续需要验收记忆时，可从以下真实交互中选取最相关的场景；此处是方案，不代表已经执行：
+
+| 场景 | 真实输入示例 | 需要核对的结果 |
 | --- | --- | --- |
-| `static` | Type, lint, schema or source inspection | The checked contract/source condition holds |
-| `unit` | Deterministic isolated code | The tested function or state transition holds |
-| `replay` | Recorded model/tool fixtures | The orchestration handles known event sequences |
-| `integration` | Real local stores/processes with isolated cloud fixtures | Local components interoperate |
-| `real-model` | Billable request through the Daoyin AI Gateway | The selected model handled the exact scenario |
-| `browser` | Real local server and browser | Visible local UI/preview behavior works |
-| `production` | Deployed service and real account | The named production path works at the recorded time |
+| 自主写入与跨会话读取 | “以后回答简洁一点”，新会话再问无关技术问题 | 实际记忆写入成功，新会话上下文带入该偏好 |
+| 长期更正与临时例外 | “以后改为详细解释”，随后“这一次简短回答” | 正确更正旧版本，临时要求不覆盖长期默认值 |
+| 忘记后继续任务 | “忘记我的回答风格，然后继续查询项目” | 版本链退出召回，Agent 继续原任务，不重复已完成操作 |
+| 主动补查 | “按我们之前确定的方案继续” | 必要时真实调用 memory_search，并基于可访问结果行动 |
+| 身份隔离 | 用另一个已授权测试账号询问前一账号的专用事实 | 不读取或泄露其他账号记忆 |
 
-Mock or replay success is never described as real-model quality, a local preview is never described as a public deployment, and a successful build is not proof that required routes or interactions work.
+测试输入和专用记忆由真实消息进入系统，不能预先填好模型输出或替换权限检查。只报告本次小样本的逐项结果，不把少量通过案例外推成整体准确率或召回率保证。
 
-## 2. Test suites
+## 4. 证据记录
 
-### Unit tests
+简短报告即可，至少记录：代码 revision、实际环境、模型与配置、样本输入、实际工具和 Run/请求标识、观测到的持久化或业务结果、通过/失败/未验证、耗时、可获得的 token 与费用。密钥和完整私人资料不得写入 Git 或普通日志。
 
-Cover pure reducers, state machines, path policies, event ordering, memory scoring, context budgeting, checkpoint promotion, redaction and error classification. Side-effect dependencies are injected rather than globally mocked.
+没有获得费用、召回内容或存储证据时，标为未知，不填推测数字。历史模拟测试、类型检查、构建成功、真实模型小样本通过、生产部署成功是不同状态，分别说明。
 
-### Protocol contract tests
+## 5. 静态检查与环境
 
-Validate REST schemas, WebSocket envelopes, monotonic `eventSeq`, unknown-field compatibility, idempotency, error codes and sanitized tool display. Shared protocol fixtures are consumed by both server and UI tests.
+代码阅读、差异检查以及必要的局部类型/lint/构建属于静态或打包检查，不是模型测试。不为凑流程反复全量检查。只改文档或提交推送时，无需模型调用，本轮仅检查改动和 Git 状态即可。
 
-### Deterministic Agent replay
+Windows/WSL 共用工作区继续由 Windows 管理依赖，不能混用不同平台的 node_modules；独立 Linux 服务器副本独立管理并明确标注环境。任何环境都不能绕过禁止模拟测试的要求。
 
-Replay normalized model streams and tool results through the real Agent loop. Required fixtures include:
+## 6. 默认入口与发布
 
-- assistant text without tools;
-- one tool and final answer;
-- multiple sequential tools;
-- tool failure followed by an accurate summary;
-- malformed or oversized tool result;
-- cancellation during model streaming and during a child process;
-- interruption after a tool completed but before the model saw its result;
-- context compaction followed by continued work;
-- additional user requirement arriving at a model boundary.
+根目录 `npm test` 改为策略提示并以非零状态退出，不执行遗留测试，也不伪装成测试通过。不要通过直接调用 Vitest 或旧 smoke/verify 脚本绕过限制。现有脚本名称不能证明其使用真实模型，执行前需核对调用链。
 
-Replay tests prove orchestration and persistence, not model intelligence.
+发布工作流仅保留必要静态检查和打包；不自动执行模拟/回放/隔离数据库套件，不在 push 时偷偷发起付费模型测试。产物元数据必须注明 `realModelValidation=not-run`，不能称为通过功能验收。
 
-### Integration tests
-
-Use temporary data directories, real JSONL transcripts, real SQLite and controlled child processes. Verify restart recovery, index rebuild, project serialization, preview lifecycle and OS-specific path protections.
-
-### Real-model gates
-
-Real-model suites are opt-in, budgeted and tagged. Each case records prompt, selected context, model identifier, tool schemas, threshold, output tokens, latency, cost/audit ID, verdict and redacted evidence.
-
-Required quality gates include:
-
-- recalls explicitly required project memory without importing unrelated memory;
-- continues from existing files rather than starting a duplicate project;
-- reports the actual failing stage after a tool or storage error;
-- does not claim preview or file evidence that does not exist;
-- produces a terminal user-facing response after terminal failure;
-- handles a one-page application within the configured turn/tool budget.
-
-### Browser E2E
-
-Run the packaged local server with Playwright. Verify visible interaction, WebSocket reconnect, loading indicators, message preservation, project switching, preview isolation, responsive layout and absence of uncaught console errors.
-
-## 3. Mandatory scenarios
-
-| Scenario | Required evidence |
-| --- | --- |
-| First login | PKCE integration plus browser redirect |
-| Invalid/expired token | Auth integration; project files remain intact |
-| Default port occupied | CLI integration selects next port |
-| Explicit port occupied | CLI returns stable error and does not scan |
-| Page refresh during tool | Browser reconnect replays every persisted event once logically |
-| User cancellation | Replay and child-process integration |
-| User correction/addition | Replay shows original and added messages preserved |
-| Network interruption | Agent pauses or summarizes accurately; no fake logout |
-| Process crash | Restart reconstructs session and incomplete turn state |
-| Failed build | Last usable checkpoint and preview remain selected |
-| Workspace isolation | Cross-project traversal, symlink and junction tests |
-| Tool error | Raw payload hidden; Agent final summary present |
-| Memory recall | Required fact retrieved, forbidden/unrelated facts absent |
-
-## 4. Memory evaluation
-
-Memory tests define a dataset containing:
-
-- conversation and project histories;
-- query at the future turn;
-- `must_recall` memory IDs;
-- `must_not_recall` memory IDs;
-- acceptable answer facts;
-- leakage and contradiction labels.
-
-Metrics:
-
-- required-memory recall;
-- retrieval precision;
-- forbidden-memory leakage rate;
-- stale/superseded-memory usage;
-- answer faithfulness to retrieved evidence;
-- token cost and latency.
-
-The evaluator first scores deterministic retrieval IDs, then uses structured answer assertions. A model judge may help triage semantic answers, but release failures must retain human-reviewable source memory and output evidence.
-
-Initial gate defaults:
-
-- required-memory recall: `100%` for critical explicit facts;
-- forbidden-memory leakage: `0`;
-- superseded-memory usage: `0` when a replacement record is available;
-- all failures include retrieved IDs and rank scores.
-
-## 5. Reliability invariants
-
-- Persist before broadcast.
-- Never drop a user message after acknowledging it.
-- Never promote a rejected checkpoint.
-- Never retry a non-idempotent tool without explicit recovery policy.
-- Never turn an unknown outcome into success.
-- Never expose raw secrets or stack traces to the user or model.
-- Never count an optional enhancement as a blocking failure unless the user made it required.
-- Always emit one terminal turn event and one user-facing final message.
-
-Property and fault-injection tests should exercise event duplication, delayed writes, abrupt process exit, truncated JSONL tail, SQLite lock, model disconnect, preview port collision and tool timeout.
-
-## 6. Test reports
-
-Every automated run produces a machine-readable report containing:
-
-```ts
-type EvaluationResult = {
-  runId: string;
-  evidenceLevel: "static" | "unit" | "replay" | "integration" | "real-model" | "browser" | "production";
-  scenarioId: string;
-  inputHash: string;
-  model?: string;
-  thresholds: Record<string, number | string | boolean>;
-  metrics: Record<string, number | string | boolean>;
-  verdict: "passed" | "failed" | "needs_review";
-  failureCategory?: string;
-  evidence: Array<{ kind: string; ref: string }>;
-  startedAt: string;
-  durationMs: number;
-};
-```
-
-Human UI summaries derive from this report. They must state what was tested and must not replace the scenario name with internal fixture terminology.
-
-## 7. Release gates
-
-Before an internal npm beta:
-
-- typecheck, lint, unit, replay and contract suites pass on Node.js 22;
-- integration and browser suites pass on Windows, macOS and Linux CI;
-- security scenarios pass on Windows and one Unix platform;
-- the minimum real-model suite passes within its frozen model/config budget;
-- packaged-content audit contains no reference source, credentials or local data;
-- a fresh-machine install reaches login and local health without global build tools.
-
-Production OAuth or AI Gateway claims additionally require production evidence and are never inferred from local mocks.
-
-## 8. Canvas UI browser verification
-
-From Windows PowerShell, with the built Harness running at `127.0.0.1:4677`, the Daoyin development backend at `127.0.0.1:6087`, and Microsoft Edge installed, run `node scripts/verify-canvas-ui.mjs`.
-
-The script checks responsive layouts and visible interactions, then exercises conversation, permissions, cancellation and replay through explicitly mocked API/WebSocket fixtures. It does not submit real credentials or call a model. Results and screenshots are written under `evidence/ui-concepts/`; see [C implementation acceptance](../evidence/ui-concepts/IMPLEMENTATION.md) for evidence boundaries and visual comparison results.
+本次文档和 Git 操作不启动测试、不部署、不修改生产数据。以后确需功能测试时，再在已有真实网关能力上做小样本验证，而不是先开发另一套大规模测试系统。

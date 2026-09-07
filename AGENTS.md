@@ -72,6 +72,18 @@ The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harn
 
 ## Validation
 
+### Owner mandate: small-sample real-model tests only (2026-09-07)
+
+The project owner explicitly instructed: “不要再浪费时间做模拟的测试了！以后都不要！测试的话就用小样本真实模型测！” This is a persistent project rule, not a one-task exception. It supersedes older testing requirements in ADRs, release checklists, scripts and historical validation reports. See [docs/TESTING.md](docs/TESTING.md).
+
+- Do not create, expand or execute mock/stub/fake-model tests, canned-response tests, simulated API/browser tests, transcript-replay suites or large deterministic/unit/integration regression runs. Do not run the legacy Vitest suite, directly or indirectly through release scripts, CI or Git hooks.
+- When a task needs testing, use only a small set of real user scenarios with actual model calls through the authenticated AI Gateway and the actual Agent/tool/storage path. Prefer 3–5 focused cases; this is a planning default, not an obligation to test every change. Do not add a large test framework or broad sweep.
+- Use authorized test accounts/resources, bounded calls, steps, tokens and costs. A real model must not be combined with fabricated business responses and reported as end-to-end evidence. Do not perform destructive or paid business operations beyond the user's authorization.
+- If actual model access, credentials or safe test resources are unavailable, report the exact blocker and mark real-model validation as not performed. Never fall back to mock tests or claim success based on old test counts.
+- Keep existing tests and historical results for provenance; their existence is not permission to run them. They are not current acceptance gates. Default `npm test` is deliberately blocked, not a successful test run.
+- Source review, `git diff --check` and narrowly necessary type/lint/build checks are static or packaging checks, not model tests. Do not repeatedly run full builds/checks as a ritual, or present them as proof of Agent behavior. Documentation/commit-only work does not require model calls.
+- A real-model report records the exact revision and environment, model, input, actual tool actions, observed persisted state, outcome, latency and available usage/cost. A small passing sample does not establish broad recall/accuracy guarantees.
+
 ### Site-wide UI consistency (mandatory)
 
 - Read and follow [docs/UI-STYLE-RULES.md](docs/UI-STYLE-RULES.md) before any UI change, including `concept-to-ui` concept generation and implementation.
@@ -79,39 +91,19 @@ The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harn
 - Keep the workbench compact: 14px body text, 13px controls, 16px section headings, 16px card padding and 20px desktop page padding. Use the documented shared scale; do not enlarge fonts or whitespace with viewport width.
 - Concept prompts must include the existing design-system constraints. Changing the site-wide visual language requires an explicit user request and coordinated updates to affected pages and documentation.
 - Change canonical style definitions instead of piling on overrides or creating page-private copies of shared rules. Preserve readable text, keyboard focus and mobile touch targets.
-- Validate neighboring pages and shared overlays at desktop and narrow viewports, not only the modified page. Report local-browser, mocked-API and production evidence separately.
-
-Every implementation change must include validation proportional to its risk:
-
-- Unit tests for pure state and policy logic.
-- Protocol contract tests for API and event shapes.
-- Recovery tests for transcript replay, cancellation, crash, and checkpoint preservation.
-- Security tests for authentication, CSRF, origin, path, secret, and process boundaries.
-- Browser E2E tests for visible UI behavior and reconnect replay.
-- Gated real-model tests for claims about actual Agent quality.
+- When UI verification is needed, inspect the actual application at desktop and narrow viewports, including neighboring shared components. Do not build or run mocked-API browser verification.
 
 ### Shared-checkout platform ownership
 
-- Windows PowerShell is the only dependency-installation, test, build, runtime-smoke and acceptance environment for this shared checkout.
-- WSL contributors may edit source and documentation only. They must not run `npm install`, `npm ci`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, package verification or runtime acceptance commands in this checkout.
-- `node_modules` contains platform-specific optional native packages and must be installed from Windows using the Node.js version pinned by `.nvmrc` / `.node-version`.
-- WSL observations are development notes only and never count as validation evidence for this repository. All completion claims must cite fresh Windows results.
-
-Before completing an implementation task, run the repository's eventual commands:
-
-```text
-npm run typecheck
-npm run lint
-npm test
-npm run build
-```
-
-Until those scripts exist, do not pretend they were run. Documentation-only changes require link validation, terminology consistency checks, and `git diff --check`.
+- In the Windows/WSL shared checkout, Windows PowerShell owns dependency installation and any necessary static/build checks. WSL contributors may edit source and documentation only; do not install dependencies or run validation there.
+- `node_modules` contains platform-specific optional native packages; never share it between Windows and Linux. Windows uses the Node.js version pinned by `.nvmrc` / `.node-version`.
+- An independent Linux server clone is not the Windows/WSL shared checkout. Label its observations with its actual environment; do not describe server results as Windows acceptance or production deployment.
+- No platform exception overrides the real-model-only testing rule above.
 
 ## Definition of done
 
-- Behavior is implemented, not merely described.
-- Tests identify whether evidence is mocked, replayed, real-model, local-browser, or production.
+- Behavior is implemented, not merely described; implementation, real-model validation, commit/push and deployment statuses are reported separately.
+- Agent behavior claims require actual small-sample real-model evidence; absent evidence is explicitly marked, not replaced with mock or historical suite results.
 - Failure messages preserve the user's problem and the actual failing stage.
-- Documentation and ADRs match the public interfaces.
+- Documentation and ADRs match the public interfaces and the current testing mandate.
 - Git contains no reference source, secrets, local runtime state, or unrelated files.

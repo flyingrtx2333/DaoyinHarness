@@ -40,6 +40,11 @@ export async function memoryOperation<T>(operation: (signal: AbortSignal) => Pro
 /** Bound by the trusted runtime to the current namespace; the model cannot choose a tenant. */
 export interface AgentMemoryProvider {
   load(request: MemoryContextRequest): Promise<MemoryContextSnapshot>;
+  /** A trusted adapter returns a new snapshot ONLY after its own committed mutation.
+   * The engine must then discard in-turn influenced payloads and replan the remaining batch.
+   * Never infer this authority from a model-provided tool result or tool name.
+   */
+  afterTool?(request: MemoryContextRequest): Promise<MemoryContextSnapshot | undefined>;
 }
 
 export function memoryContextView(snapshot: MemoryContextSnapshot, events: readonly AgentEvent[]): AgentEvent[] {

@@ -4,16 +4,20 @@ import { executionScopeKey, type ExecutionIdentity } from "@daoyin/harness-contr
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import { CloudError, type MaybePromise } from "./repository.js";
 import {
-  memoryDomain, memoryId, memoryOwner, memoryPermission, memoryRelevance, normalizeMemoryProposal,
+  memoryDomain, memoryId, memoryOwner, memoryPermission, normalizeMemoryProposal,
   type DurableMemory, type MemoryAuditAction, type MemoryAuditEntry, type MemoryProposal, type MemoryReference,
   type MemorySource, type RecalledMemory,
 } from "./memory-policy.js";
 
 import { prepareMemoryContext, readMemoryUses, type MemoryPreparation, type MemoryUse } from "./memory-runtime.js";
 import type { MemoryContextSnapshot } from "@daoyin/harness-agent-core";
+import { agentSourceShape, verifyAgentSource, recallRelevance, rankMemoryHits, type MemoryMutation, type MemoryInvalidation } from "./memory-agent-policy.js";
 
 /** Implementations may be synchronous (local SQLite) or asynchronous (cloud PostgreSQL). */
 export interface CloudMemoryRepository {
+  /** Trusted runtime entrypoints; not human confirmation routes. */
+  remember(identity: ExecutionIdentity, raw: MemoryProposal, source: MemorySource): MaybePromise<MemoryMutation>;
+  forgetByAgent(identity: ExecutionIdentity, id: string, revision: number, source: MemorySource): MaybePromise<MemoryMutation>;
   propose(identity: ExecutionIdentity, raw: MemoryProposal, source?: MemorySource): MaybePromise<DurableMemory>;
   confirm(identity: ExecutionIdentity, id: string, revision: number): MaybePromise<DurableMemory>;
   reject(identity: ExecutionIdentity, id: string, revision: number): MaybePromise<DurableMemory>;
@@ -110,38 +114,67 @@ export class SqliteMemoryRepository {
     return { kind: "conversation", requestId, sessionId: source.sessionId, turnId: source.turnId, eventId: source.eventId };
   }
 
+  #agentSource(identity: ExecutionIdentity, source: MemorySource, operation: "remember" | "forget"): MemorySource {
+    if (!agentSourceShape(source)) throw new CloudError(403, "MEMORY_SOURCE_DENIED", "自主记忆缺少真实来源。");
+    const readEvent = (id: string): AgentEvent | undefined => {
+      const row = this.db.prepare(`SELECT e.body FROM cloud_events e JOIN cloud_runs r ON r.id=e.turn_id AND r.session_id=e.session_id
+        WHERE e.event_id=? AND e.session_id=? AND e.turn_id=? AND r.scope_key=? AND r.status='running'`)
+        .get(id, source.sessionId, source.turnId, executionScopeKey(identity));
+      return row === undefined ? undefined : JSON.parse(String(row.body)) as AgentEvent;
+    };
+    return verifyAgentSource(source, readEvent(source.eventId), readEvent(source.toolEventId), operation);
+  }
+
   public propose(identity: ExecutionIdentity, raw: MemoryProposal, source?: MemorySource): DurableMemory {
+    return this.#save(identity, raw, source, false).memory;
+  }
+
+  public remember(identity: ExecutionIdentity, raw: MemoryProposal, source: MemorySource): MemoryMutation {
+    return this.#save(identity, raw, source, true);
+  }
+
+  #save(identity: ExecutionIdentity, raw: MemoryProposal, source: MemorySource | undefined, automatic: boolean): MemoryMutation {
     memoryPermission(identity, "memory.write");
     const input = normalizeMemoryProposal(raw);
     const domain = memoryDomain(identity);
     const owner = memoryOwner(identity, input.scope);
     if (input.scope === "organization") memoryPermission(identity, "memory.organization.write");
     return this.transaction(() => {
-      const provenance = this.#source(identity, input.requestId, source);
+      if (automatic && (source === undefined || source.requestId !== input.requestId)) throw conflict();
+      const provenance = automatic ? this.#agentSource(identity, source!, "remember") : this.#source(identity, input.requestId, source);
       const requestKey = hash([executionScopeKey(identity), input.requestId]);
       const fingerprint = hash([input.key, input.scope, input.kind, input.content, input.keywords,
         input.expiresAt ?? null, input.replaces?.id ?? null, input.replaces?.revision ?? null, provenance]);
       const previous = this.db.prepare("SELECT * FROM memory_requests WHERE request_key=?").get(requestKey);
       if (previous !== undefined) {
         if (previous.input_hash !== fingerprint) throw conflict();
-        return view(this.#managed(identity, String(previous.memory_id)));
+        return { memory: view(this.#managed(identity, String(previous.memory_id))), invalidations: [] };
       }
       const rootKey = hash([domain, owner, identity.appInstallationId, input.scope, input.key]);
       let supersedes: string | null = null;
+      const invalidations: MemoryInvalidation[] = [];
       if (input.replaces !== undefined) {
         const old = this.#managed(identity, input.replaces.id);
         if (old.state !== "active" || old.revision !== input.replaces.revision || old.root_key !== rootKey) throw conflict();
         supersedes = input.replaces.id;
+        if (automatic) {
+          this.db.prepare("UPDATE durable_memories SET state='superseded',revision=revision+1 WHERE id=?").run(supersedes);
+          this.db.prepare("UPDATE memory_shares SET revoked=1 WHERE memory_id=?").run(supersedes);
+          invalidations.push({ id: supersedes, throughRevision: Number(old.revision), revision: Number(old.revision) + 1, state: "superseded" });
+          this.#audit(identity, view(this.#row(supersedes, domain)), "superseded");
+        }
       } else {
         const existing = this.db.prepare(`SELECT * FROM durable_memories WHERE root_key=? AND state<>'rejected'
           ORDER BY CASE state WHEN 'active' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,created_at DESC,id DESC LIMIT 1`).get(rootKey);
-        // A NEW user request may propose remembering a forgotten key again, but starts pending.
-        // Retrying the original request above still returns its forgotten record, never resurrects it.
+        if (existing !== undefined && existing.state === "forgotten" && automatic) {
+          // Only a NEW human proposal may restore a forgotten stable key. Never resurrect by automatic extraction.
+          throw new CloudError(409, "MEMORY_FORGOTTEN", "该记忆已被忘记；自动写入不会恢复，请由用户明确重新保存。");
+        }
         if (existing !== undefined && existing.state !== "forgotten") {
-          if (["active", "pending"].includes(String(existing.state)) && existing.content === input.content && existing.kind === input.kind &&
+          if ((existing.state === "active" || (!automatic && existing.state === "pending")) && existing.content === input.content && existing.kind === input.kind &&
               existing.keywords === JSON.stringify(input.keywords) && existing.expires_at === (input.expiresAt ?? null)) {
             this.db.prepare("INSERT INTO memory_requests VALUES (?,?,?)").run(requestKey, fingerprint, String(existing.id));
-            return view(existing);
+            return { memory: view(existing), invalidations: [] };
           }
           throw conflict();
         }
@@ -151,14 +184,38 @@ export class SqliteMemoryRepository {
       const id = uid("mem");
       this.db.prepare(`INSERT INTO durable_memories
         (id,domain_key,owner_key,origin_app,created_by,root_key,fact_key,memory_scope,kind,content,keywords,source,
-        revision,state,supersedes,replaces_revision,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?)`)
+        revision,state,supersedes,replaces_revision,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)`)
         .run(id, domain, owner, identity.appInstallationId, identity.actorUserId, rootKey, input.key, input.scope,
-          input.kind, input.content, JSON.stringify(input.keywords), JSON.stringify(provenance), supersedes,
+          input.kind, input.content, JSON.stringify(input.keywords), JSON.stringify(provenance), automatic ? "active" : "pending", supersedes,
           input.replaces?.revision ?? null, Date.now(), input.expiresAt ?? null);
       this.db.prepare("INSERT INTO memory_requests VALUES (?,?,?)").run(requestKey, fingerprint, id);
       const result = view(this.#row(id, domain));
-      this.#audit(identity, result, "proposed");
-      return result;
+      this.#audit(identity, result, automatic ? (supersedes === null ? "agent_saved" : "agent_updated") : "proposed");
+      return { memory: result, invalidations };
+    });
+  }
+
+  public forgetByAgent(identity: ExecutionIdentity, id: string, revision: number, source: MemorySource): MemoryMutation {
+    memoryPermission(identity, "memory.write");
+    return this.transaction(() => {
+      const provenance = this.#agentSource(identity, source, "forget");
+      const requestKey = hash([executionScopeKey(identity), source.requestId]);
+      const fingerprint = hash(["agent_forget", id, revision, provenance]);
+      const previous = this.db.prepare("SELECT * FROM memory_requests WHERE request_key=?").get(requestKey);
+      if (previous !== undefined) {
+        if (previous.input_hash !== fingerprint) throw conflict();
+        return { memory: view(this.#managed(identity, String(previous.memory_id))), invalidations: [] };
+      }
+      const row = this.#managed(identity, id);
+      if (row.state !== "active" || row.revision !== revision) throw conflict();
+      const chain = this.db.prepare("SELECT id,revision FROM durable_memories WHERE root_key=? AND state<>'forgotten'").all(String(row.root_key));
+      this.db.prepare("UPDATE durable_memories SET state='forgotten',content='',keywords='[]',revision=revision+1 WHERE root_key=? AND state<>'forgotten'").run(String(row.root_key));
+      for (const item of chain) this.db.prepare("UPDATE memory_shares SET revoked=1 WHERE memory_id=?").run(String(item.id));
+      this.db.prepare("INSERT INTO memory_requests VALUES (?,?,?)").run(requestKey, fingerprint, id);
+      const memory = view(this.#row(id, memoryDomain(identity)));
+      this.#audit(identity, memory, "agent_forgotten");
+      return { memory, invalidations: chain.map((item) => ({ id: String(item.id), throughRevision: Number(item.revision),
+        revision: Number(item.revision) + 1, state: "forgotten" as const })) };
     });
   }
 
@@ -327,7 +384,7 @@ export class SqliteMemoryRepository {
       .get(ref.grantId, ref.id, ref.revision, identity.appInstallationId, Date.now()) !== undefined;
   }
 
-  public search(identity: ExecutionIdentity, query: string, limit = 6): RecalledMemory[] {
+  public search(identity: ExecutionIdentity, query: string, limit = 6, includeDefaults = false): RecalledMemory[] {
     memoryPermission(identity, "memory.read");
     if (typeof query !== "string" || query.length > 500 || !Number.isSafeInteger(limit) || limit < 1 || limit > 12) {
       throw new CloudError(400, "MEMORY_QUERY_INVALID", "记忆查询过长或条数无效。");
@@ -337,9 +394,9 @@ export class SqliteMemoryRepository {
     const hits: RecalledMemory[] = [];
     for (const row of rows) {
       const memory = view(row);
-      const relevance = memoryRelevance(memory, query);
+      const relevance = recallRelevance(memory, query, includeDefaults);
       if (relevance !== null) hits.push({ memory, reference: this.#reference(identity, row), ...relevance });
     }
-    return hits.sort((a, b) => b.score - a.score || b.memory.createdAt - a.memory.createdAt || a.memory.id.localeCompare(b.memory.id)).slice(0, limit);
+    return rankMemoryHits(hits, limit);
   }
 }

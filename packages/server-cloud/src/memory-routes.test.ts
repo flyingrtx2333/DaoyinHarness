@@ -72,7 +72,7 @@ describe("authenticated memory management and engine integration", () => {
       expect(confirmed.statusCode).toBe(200);
       f.complete.mockImplementation(async (request) => {
         expect(request.systemPrompt.dynamicText).toContain(body.content);
-        expect(request.systemPrompt.dynamicText).toContain("UNTRUSTED_CONFIRMED_MEMORIES");
+        expect(request.systemPrompt.dynamicText).toContain("UNTRUSTED_REFERENCE_MEMORIES");
         expect(request.tools).toEqual([]); // No model-facing confirmation, sharing or forgetting tool.
         return { kind: "assistant", content: "已按你的偏好准备。" };
       });

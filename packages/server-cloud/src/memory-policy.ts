@@ -4,9 +4,15 @@ import { CloudError } from "./repository.js";
 export type DurableMemoryScope = "application" | "personal" | "organization";
 export type DurableMemoryKind = "preference" | "fact" | "goal" | "decision" | "note";
 export type DurableMemoryState = "pending" | "active" | "superseded" | "forgotten" | "rejected";
-export type MemoryAuditAction = "proposed" | "confirmed" | "superseded" | "candidate_rejected" | "forgotten_chain" | "shared" | "share_revoked";
+export type MemoryAuditAction = "proposed" | "confirmed" | "superseded" | "candidate_rejected" | "forgotten_chain" | "shared" | "share_revoked" | "agent_saved" | "agent_updated" | "agent_forgotten";
 export interface MemorySource {
-  kind: "user_edit" | "conversation";
+  kind: "user_edit" | "conversation" | "agent";
+  /** Agent provenance is not a claim of human confirmation or semantic truth. */
+  basis?: "user_statement" | "tool_observation";
+  /** Input-only excerpt; persisted provenance retains only its digest. */
+  excerpt?: string;
+  excerptHash?: string;
+  toolEventId?: string;
   requestId: string;
   sessionId?: string;
   turnId?: string;
@@ -87,8 +93,9 @@ export function normalizeMemoryProposal(value: MemoryProposal, now = Date.now())
       (value.replaces !== undefined && (!value.replaces || !memoryId(value.replaces.id) || !Number.isSafeInteger(value.replaces.revision) || value.replaces.revision < 1))) {
     throw new CloudError(400, "MEMORY_INPUT_INVALID", "记忆内容、类型、有效期或版本无效。");
   }
-  // Deterministic defense-in-depth only. User review and source authorization remain mandatory.
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b|(?:api[_ -]?key|access[_ -]?token|password|密码|密钥)\s*[:=：]\s*\S{6,}/iu.test(value.content)) {
+  // Deterministic defense-in-depth only; provenance and scope checks remain mandatory.
+  // Ordinary Agent writes are not falsely labeled as human-reviewed.
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b|(?:api[_ -]?key|access[_ -]?token|password|密码|密钥)\s*[:=：]\s*\S{6,}/iu.test([value.content, value.key, ...(value.keywords ?? [])].join("\n"))) {
     throw new CloudError(400, "MEMORY_SENSITIVE_CONTENT", "凭据和密码不能保存为长期记忆。");
   }
   return { ...value, key: value.key.normalize("NFKC").trim().toLocaleLowerCase(), content: value.content.trim(),

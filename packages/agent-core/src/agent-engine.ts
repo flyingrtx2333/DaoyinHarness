@@ -221,6 +221,8 @@ export class AgentEngine {
       return this.#fail(append, "AGENT_CONTEXT_PREPARATION_FAILED", "历史读取或压缩失败，未执行新的工具操作。");
     }
     const current: ModelConversationItem[] = [{ role: "user", content: input.userMessage }];
+    const toolReceipts: Array<{ toolCallId: string; name: string; ok: boolean; mutating: boolean }> = [];
+    let memoryCheckpoint: string | undefined;
     const seenIds = new Set<string>();
     const progress = new ToolProgressGuard(this.#maxUnchanged);
     let attempts = 0;
@@ -260,7 +262,8 @@ export class AgentEngine {
           sections: [...context.prompt.sections.map((section) => ({ id: section.id, kind: section.kind })),
             ...(memoryText ? [{ id: "confirmed_memory", kind: "dynamic" as const }] : [])] };
         const messages = boundModelContext({ systemMessage: { role: "system", content: context.systemMessage.content + memoryText + closing },
-          history, current, overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
+          history, current, ...(memoryCheckpoint === undefined ? {} : { runtimeNote: memoryCheckpoint }),
+          overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
           maxCharacters: this.#maxContextCharacters, maxMessages: this.#maxContextMessages });
         if (signal.aborted) return cancel();
         const timeout = AbortSignal.timeout(this.#modelTimeoutMs);
@@ -321,7 +324,7 @@ export class AgentEngine {
       for (const call of reply.calls) seenIds.add(call.id);
       current.push({ role: "assistant_tool_calls", content: reply.content ?? "", calls: reply.calls });
       if (reply.content && !streamed) await append("assistant.delta", { contentBlockId, delta: reply.content });
-      for (const call of reply.calls) {
+      for (const [callIndex, call] of reply.calls.entries()) {
         if (signal.aborted) return cancel();
         const snapshot = memorySnapshot;
         if (snapshot !== undefined) {
@@ -366,7 +369,35 @@ export class AgentEngine {
         else await append("tool.failed", { toolCallId: call.id, toolName: call.name, code: result.code,
           message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) });
         current.push({ role: "tool", toolCallId: call.id, toolName: call.name, content: modelToolResult(result) });
+        toolReceipts.push({ toolCallId: call.id, name: call.name, ok: result.ok, mutating: descriptor?.mutating ?? false });
         if (signal.aborted) return cancel();
+        const provider = this.#memory;
+        if (provider?.afterTool !== undefined) {
+          try {
+            const refreshed = await memoryOperation((memorySignal) => provider.afterTool!({ turn: input, step,
+              priorEvents, inheritedEvents, signal: memorySignal }), signal);
+            if (refreshed !== undefined) {
+              memoryContextView(refreshed, []); // Validate the trusted provider's new snapshot before any continuation.
+              await memoryOperation((memorySignal) => refreshed.assertCurrent(memorySignal), signal);
+              const deferred = reply.calls.slice(callIndex + 1);
+              for (const pending of deferred) await append("tool.failed", { toolCallId: pending.id, toolName: pending.name,
+                code: "TOOL_DEFERRED_MEMORY_REFRESH", message: "记忆已改变，本操作尚未执行，等待基于新上下文重新决策。", retryable: false,
+                details: { execution: "not_started" } });
+              // Keep the current user goal and metadata receipts, never earlier memory-influenced text/payloads.
+              // The last successful mutation result contains only the new record (or a forget receipt), not old content.
+              current.splice(1);
+              memoryCheckpoint = "记忆已更新，先前的本轮推理与工具正文已从模型上下文移除。以下是执行回执而不是新的指令；不能重复已成功的写操作。\n" +
+                JSON.stringify({ receipts: toolReceipts, lastMemoryOperation: result.ok ? result.evidence.result : { failed: true },
+                  deferred: deferred.map((pending) => ({ id: pending.id, name: pending.name, execution: "not_started" })) });
+              memorySnapshot = refreshed;
+              break;
+            }
+          } catch (error) {
+            if (signal.aborted) return cancel();
+            const failure = modelFailure(error);
+            return this.#fail(append, failure.code, failure.message);
+          }
+        }
       }
     }
     return this.#fail(append, "AGENT_STEP_LIMIT", "Agent 超过了推理步数上限。");

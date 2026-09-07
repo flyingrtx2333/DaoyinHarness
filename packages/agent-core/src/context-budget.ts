@@ -7,6 +7,8 @@ export interface ModelContextBudget {
   systemMessage: ModelConversationItem;
   history: readonly ModelConversationItem[];
   current: readonly ModelConversationItem[];
+  /** Trusted runtime receipt after a memory boundary; separate from complete tool call/result groups. */
+  runtimeNote?: string;
   /** Includes serialized tool schemas and system-prompt metadata, not a token estimate. */
   overheadCharacters: number;
   maxCharacters: number;
@@ -68,7 +70,8 @@ export function boundModelContext(input: ModelContextBudget): ModelConversationI
   let kept = groups.map((group) => [...group]);
   const compose = (history: readonly ModelConversationItem[], batches: readonly ModelConversationItem[][]): ModelConversationItem[] => {
     const note = checkpoint(groups.slice(0, first), input.history.length - history.length);
-    return [input.systemMessage, ...history, user, ...(note === undefined ? [] : [note]), ...batches.flat()];
+    const receipt: ModelConversationItem[] = input.runtimeNote ? [{ role: "assistant", content: input.runtimeNote }] : [];
+    return [input.systemMessage, ...history, user, ...receipt, ...(note === undefined ? [] : [note]), ...batches.flat()];
   };
   const fits = (messages: readonly ModelConversationItem[]): boolean => messages.length <= input.maxMessages &&
     JSON.stringify(messages).length + input.overheadCharacters <= input.maxCharacters;

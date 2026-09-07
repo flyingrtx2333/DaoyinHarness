@@ -7,6 +7,8 @@ import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { executionScopeKey, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import { PostgresCloudRepository } from "./postgres-repository.js";
+import { MEMORY_TOOL_NAMES, memoryOperationId } from "./memory-agent-policy.js";
+import type { MemorySource } from "./memory-policy.js";
 
 const baseUrl = process.env.DAOYIN_TEST_POSTGRES_URL;
 let databaseUrl = baseUrl;
@@ -101,6 +103,53 @@ integration("cloud PostgreSQL persistence (real isolated database; no model or p
     const forgotten = await db.memory.forget(actor, active.id, active.revision);
     expect(forgotten.state).toBe("forgotten");
     expect(await db.memory.search(actor, "视频")).toEqual([]);
+  });
+
+  it("atomically maintains autonomous memory with idempotency and in-turn revision refresh", async () => {
+    const db = repository!;
+    const actor = { ...identity(), allowedTools: [...MEMORY_TOOL_NAMES] };
+    const session = await db.createSession(actor, { title: "autonomous memory", profileId: "test", profileVersion: "1" });
+    const accepted = await db.acceptRun(actor, session.id, "autonomous", "以后回答简洁一点，改为详细说明，然后忘记回答风格");
+    const stores = await db.bindRun(actor, session.id, accepted.run.id);
+    const base = { accountId: stores.accountId, scopeId: stores.scopeId, sessionId: session.id, turnId: accepted.run.id };
+    const user = await stores.events.append({ ...base, type: "turn.started", payload: { status: "running", userMessageId: "source-user", userMessage: accepted.run.userMessage } });
+    const source = async (name: string, toolCallId: string, excerpt: string): Promise<MemorySource> => {
+      const invocation = await stores.events.append({ ...base, type: "tool.started", payload: { toolCallId, toolName: name,
+        displayText: name, input: { memoryOperation: name } } });
+      return { kind: "agent", basis: "user_statement", sessionId: session.id, turnId: accepted.run.id, eventId: user.id,
+        toolEventId: invocation.id, requestId: memoryOperationId(accepted.run.id, toolCallId), excerpt };
+    };
+    const originalSource = await source("memory_remember", "save", "以后回答简洁一点");
+    const proposal = { requestId: originalSource.requestId, key: "profile.response.style", scope: "application" as const,
+      kind: "preference" as const, content: "以后回答简洁一点" };
+    const saved = await db.memory.remember(actor, proposal, originalSource);
+    expect(saved.memory).toMatchObject({ state: "active", revision: 1, source: { kind: "agent" } });
+    expect((await db.memory.remember(actor, proposal, originalSource)).memory.id).toBe(saved.memory.id);
+    expect((await db.memory.list(actor)).items).toHaveLength(1);
+    await expect(db.memory.remember(actor, { ...proposal, content: "different" }, originalSource)).rejects.toMatchObject({ code: "MEMORY_VERSION_CONFLICT" });
+    const oldContext = await db.memory.prepare(actor, { sessionId: session.id, turnId: accepted.run.id, step: 0, query: "数据库索引", events: [] });
+    expect(oldContext.text).toContain(saved.memory.content);
+    const replacementSource = await source("memory_update", "update", "详细说明");
+    const updated = await db.memory.remember(actor, { ...proposal, requestId: replacementSource.requestId, content: "详细说明",
+      replaces: { id: saved.memory.id, revision: saved.memory.revision } }, replacementSource);
+    expect(updated.invalidations).toHaveLength(1);
+    await expect(oldContext.assertCurrent(new AbortController().signal)).rejects.toMatchObject({ code: "MEMORY_CONTEXT_CHANGED" });
+    const current = await db.memory.prepare(actor, { sessionId: session.id, turnId: accepted.run.id, step: 1, query: "数据库索引", events: [], ownInvalidations: updated.invalidations });
+    expect(current.text).toContain("详细说明");
+    expect(current.text).not.toContain("以后回答简洁一点");
+    await current.assertCurrent(new AbortController().signal);
+    const forgottenSource = await source("memory_forget", "forget", "忘记回答风格");
+    const forgotten = await db.memory.forgetByAgent(actor, updated.memory.id, updated.memory.revision, forgottenSource);
+    expect(forgotten.memory).toMatchObject({ state: "forgotten", content: "", keywords: [] });
+    expect((await db.memory.forgetByAgent(actor, updated.memory.id, updated.memory.revision, forgottenSource)).memory.state).toBe("forgotten");
+    const cleared = await db.memory.prepare(actor, { sessionId: session.id, turnId: accepted.run.id, step: 2, query: "数据库索引", events: [], ownInvalidations: forgotten.invalidations });
+    expect(cleared.text).not.toContain("详细说明");
+    await cleared.assertCurrent(new AbortController().signal);
+    const audit = await db.memory.audit(actor, updated.memory.id);
+    expect(audit.items.map((item) => item.action)).toEqual(expect.arrayContaining(["agent_updated", "agent_forgotten"]));
+    expect(audit.items.map((item) => item.action)).not.toContain("confirmed");
+    expect((await db.memory.remember(actor, proposal, originalSource)).memory.state).toBe("forgotten");
+    await expect(db.memory.remember(identity("bob"), proposal, originalSource)).rejects.toMatchObject({ code: "MEMORY_SOURCE_DENIED" });
   });
 
   it("fences a second runtime until the current lease is released", async () => {

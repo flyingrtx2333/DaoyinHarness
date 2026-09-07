@@ -1,6 +1,8 @@
 import { assertExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import type { JsonValue } from "@daoyin/harness-protocol";
 import type { CloudProfile, CloudToolBinding } from "./app.js";
+import { isMemoryToolName } from "./memory-agent-policy.js";
+import { createMemoryProfileBindings, memoryToolAllowed } from "./memory-tools.js";
 
 export const SAISHI_PROFILE = "saishi-readonly";
 const scopes: Readonly<Record<string, string>> = Object.freeze({
@@ -22,7 +24,8 @@ export function isSaishiIdentity(identity: ExecutionIdentity): boolean {
     identity.billingAccountId === `saishi:${identity.space.tenantId}:${identity.actorUserId}` &&
     identity.permissions.includes("agent.use") && identity.permissions.includes("saishi.events.read") &&
     identity.allowedTools.length > 0 && new Set(identity.allowedTools).size === identity.allowedTools.length &&
-    identity.allowedTools.every((name) => Object.hasOwn(scopes, name) && identity.permissions.includes(scopes[name]!));
+    identity.allowedTools.every((name) => isMemoryToolName(name) ? memoryToolAllowed(identity, name)
+      : Object.hasOwn(scopes, name) && identity.permissions.includes(scopes[name]!));
 }
 
 interface Rule { type: "integer" | "string"; minimum?: number; maximum?: number; exclusiveMinimum?: number; minLength?: number; maxLength?: number; pattern?: string }
@@ -130,6 +133,7 @@ export function createSaishiProfile(catalog: unknown, identity: ExecutionIdentit
       },
     };
   });
-  if (seen.size !== identity.allowedTools.length || seen.size === 0) throw new Error("Incomplete Saishi catalog.");
-  return { id: SAISHI_PROFILE, version: "1", instructions: catalog.instructions, tools };
+  if (seen.size !== identity.allowedTools.filter((name) => !isMemoryToolName(name)).length || seen.size === 0) throw new Error("Incomplete Saishi catalog.");
+  // The metered model adapter validates calls against this catalog; memory execution stays in Harness.
+  return { id: SAISHI_PROFILE, version: "1", instructions: catalog.instructions, tools: [...tools, ...createMemoryProfileBindings(identity)] };
 }
