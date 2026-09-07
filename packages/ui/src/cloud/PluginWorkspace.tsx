@@ -13,7 +13,8 @@ export function PluginWorkspace(props: React.ComponentProps<typeof PluginCatalog
     let stopped = false; let controller: AbortController | undefined;
     async function check(): Promise<void> {
       controller?.abort(); controller = new AbortController(); const current = controller;
-      setChecking(true);
+      // A routine role recheck must not hide the page or disturb an active form/dialog.
+      if (!client.scope) setChecking(true);
       try { await client.bootstrap(current.signal); if (!stopped && !current.signal.aborted) setScope(client.scope); }
       catch { if (!stopped && !current.signal.aborted) { client.reset(); setScope(""); } }
       finally { if (!stopped && !current.signal.aborted) setChecking(false); }

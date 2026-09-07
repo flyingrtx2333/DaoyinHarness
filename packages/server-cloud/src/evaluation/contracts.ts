@@ -78,7 +78,7 @@ export function parseSpec(value: unknown): EvaluationSpec {
   const repetitions = integer(raw.repetitions, 1, 5);
   const maxModelCalls = integer(raw.maxModelCalls, 2, 12);
   const maxTotalCalls = integer(raw.maxTotalCalls, 1, 3250);
-  if (mode === "live" && maxTotalCalls < cases.length * repetitions * (maxModelCalls + 1)) throw new EvaluationError(400, "BUDGET_TOO_SMALL", "总调用上限须覆盖每题模型上限及一次独立判分。");
+  if (mode === "live" && maxTotalCalls < cases.length * repetitions * maxModelCalls) throw new EvaluationError(400, "BUDGET_TOO_SMALL", "总调用上限须覆盖本批实际模型调用上限。");
   const requestId = text(raw.requestId, 128);
   if (!/^[A-Za-z0-9_-]+$/u.test(requestId)) throw new EvaluationError(400, "REQUEST_ID", "提交编号无效。");
   return { requestId, title: text(raw.title, 100), mode, repetitions, maxModelCalls, maxTotalCalls, confirmPaid: raw.confirmPaid, cases };
