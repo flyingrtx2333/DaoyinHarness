@@ -4,7 +4,7 @@
 
 当前线上使用 PostgreSQL 和专用 `daoyin-harness-cloud.service`，不是下文早期试运行的 SQLite。`/etc/daoyin-harness/cloud.env` 保持原样，服务运行于 `/opt/daoyin-harness/current/main.mjs`，Node 为 `/opt/daoyin-harness/node/bin/node`。工作台地址为 `https://www.daoyintech.com/harness/`。
 
-独立 Linux 服务器副本可显式使用 `--server-linux` 构建已提交的 HEAD；Windows/WSL 共用目录仍遵守根目录限制。无需运行模拟测试、全量回归或数据库迁移：
+独立 Linux 服务器副本可显式使用 `--server-linux` 构建已提交的 HEAD；Windows/WSL 共用目录仍遵守根目录限制。不运行模拟测试或全量回归。下述脚本不自动迁移数据库；会话管理发布已先显式完成 PostgreSQL 迁移，证据见 [会话管理](../docs/SESSION-MANAGEMENT.md)。当前开发位置是 `root@42.194.159.81:/root/DaoyinHarness`，分支 `main`：
 
 ```text
 /opt/daoyin-harness/node/bin/node scripts/inspect-live-deployment.mjs
