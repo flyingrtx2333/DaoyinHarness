@@ -1,0 +1,108 @@
+{
+  "acceptance": "cloud-orchestration-real-model",
+  "revision": "6eefa5170a1ce685cfd1e0a1e85467b85ebe94e7",
+  "runtimeBuild": {
+    "revision": "6eefa5170a1ce685cfd1e0a1e85467b85ebe94e7",
+    "builtAt": "2026-09-08T10:24:31.894Z",
+    "protocolVersion": 1,
+    "eventStreamVersion": 1,
+    "expectedSchema": "cloud-v1"
+  },
+  "model": "doubao-seed-2-1-pro-260628",
+  "authority": "existing-valid-single-admin-actor",
+  "browserCookieFlow": "not-tested",
+  "fakeModels": false,
+  "cases": [
+    {
+      "case": "cancel",
+      "sessionId": "ses_ffef2f75-1901-471b-a0af-94d74c7c056b",
+      "requestId": "ma_6b84a1657d6e4d7284e3a8cedc029758",
+      "input": "必须使用 delegate_parallel 启动两个子 Agent。各自只读查询当前账号可访问的赛事，实际调用 saishi_list_events，然后分别写一段500字的数据完整性检查说明。不要修改业务数据，不读写记忆。",
+      "runId": "run_de1a873e-6df0-4b66-9779-4f43835f8c0b",
+      "status": "cancelled",
+      "answer": "任务已停止。",
+      "durationMs": 30013,
+      "modelCalls": 3,
+      "usageSource": "platform_gateway_operations",
+      "checks": {
+        "rootTerminal": true,
+        "childrenSettled": true,
+        "separateSessions": true,
+        "rootGatewayBudget": true,
+        "toolActuallyDispatched": true,
+        "cancellationRequestedAfterChildAdmission": true,
+        "rootCancelled": true,
+        "hasChild": true
+      },
+      "passed": true,
+      "children": [
+        {
+          "parentRunId": "run_de1a873e-6df0-4b66-9779-4f43835f8c0b",
+          "toolCallId": "call_xmyg7khc2e3y1iqaambs79tt",
+          "nodeId": "step_2",
+          "runId": "run_91d37c85-3945-4db3-93ed-e21a2fecba65",
+          "sessionId": "ses_69d7cf2b-4b2d-4527-88e4-8045b380c3c9",
+          "status": "cancelled",
+          "lastEventSeq": 3,
+          "finalText": "任务已停止。",
+          "createdAt": "2026-09-08T10:43:59.991Z",
+          "startedAt": "2026-09-08T10:43:59.999Z",
+          "endedAt": "2026-09-08T10:44:01.102Z",
+          "input": "请你独立完成只读数据校验：1. 调用 saishi_list_events 工具（参数 after_id=0，limit=20）获取当前可访问的全量第一页赛事数据；2. 围绕赛事数据的完整性、一致性、合理性撰写约500字的检查报告，重点核查：赛事基础信息字段是否完整无空值、赛事类型枚举值是否在合法范围内、不同赛事的时间区间是否存在不合理重叠、已结束/进行中/未开始状态的赛事时间是否匹配对应状态、分页返回的next_after_id逻辑是否正常、是否存在ID为0或负数的异常赛事条目；3. 严格保持只读操作，不修改任何业务资源，不访问或写入记忆内容，所有结论必须有工具返回数据作为支撑。",
+          "completedTools": []
+        },
+        {
+          "parentRunId": "run_de1a873e-6df0-4b66-9779-4f43835f8c0b",
+          "toolCallId": "call_xmyg7khc2e3y1iqaambs79tt",
+          "nodeId": "step_1",
+          "runId": "run_9af656a1-af3a-4a88-bbf8-cc1062516e76",
+          "sessionId": "ses_8407f4c1-5124-463d-9806-0da6c7df635e",
+          "status": "cancelled",
+          "lastEventSeq": 3,
+          "finalText": "任务已停止。",
+          "createdAt": "2026-09-08T10:43:59.997Z",
+          "startedAt": "2026-09-08T10:44:00.004Z",
+          "endedAt": "2026-09-08T10:44:01.103Z",
+          "input": "请你以只读方式执行以下操作：1. 调用 saishi_list_events 工具（使用默认参数 after_id=0，limit=20）查询当前账号授权可访问的赛事列表；2. 基于返回的赛事数据，撰写一份约500字的数据完整性检查说明，检查维度需包含：分页接口返回是否符合预期、赛事核心字段（event_id、名称、类型、状态、赛程时间）是否存在缺失或异常值、赛事状态分布是否合理、返回条目数量是否与limit参数匹配、是否存在重复或无效的赛事ID、赛事时间逻辑是否存在冲突（如结束时间早于开始时间）等；3. 全程不得修改任何业务数据，不得读写记忆，仅基于工具返回结果撰写说明。",
+          "completedTools": []
+        }
+      ],
+      "parentToolFailures": [
+        {
+          "toolCallId": "call_xmyg7khc2e3y1iqaambs79tt",
+          "toolName": "delegate_parallel",
+          "code": "CHILD_AGENT_FAILED",
+          "message": "子任务组未全部完成（0/2），未自动重试。",
+          "retryable": false,
+          "details": {
+            "untrusted": true,
+            "results": [
+              {
+                "nodeId": "step_1",
+                "runId": "run_9af656a1-af3a-4a88-bbf8-cc1062516e76",
+                "sessionId": "ses_8407f4c1-5124-463d-9806-0da6c7df635e",
+                "parentRunId": "run_de1a873e-6df0-4b66-9779-4f43835f8c0b",
+                "status": "cancelled",
+                "finalText": "任务已停止。",
+                "truncated": false,
+                "lastEventSeq": 3
+              },
+              {
+                "nodeId": "step_2",
+                "runId": "run_91d37c85-3945-4db3-93ed-e21a2fecba65",
+                "sessionId": "ses_69d7cf2b-4b2d-4527-88e4-8045b380c3c9",
+                "parentRunId": "run_de1a873e-6df0-4b66-9779-4f43835f8c0b",
+                "status": "cancelled",
+                "finalText": "任务已停止。",
+                "truncated": false,
+                "lastEventSeq": 3
+              }
+            ],
+            "concurrencyLimit": 2
+          }
+        }
+      ]
+    }
+  ],
+  "passed": true
+}

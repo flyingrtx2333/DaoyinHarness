@@ -21,7 +21,9 @@ with get_db() as conn, conn.cursor() as cur:
                 details = json.loads(details)
             details = details or {}
             usage.append({**row, 'durationMs': details.get('duration_ms'), 'operationId': details.get('operationId')})
-        report.append({'runId': run, 'operations': operations, 'usage': usage})
+        cur.execute("SELECT g.max_model_calls,(SELECT COUNT(*) FROM agent_app_model_operations x WHERE x.grant_id=g.id) AS used FROM agent_app_model_operations o JOIN agent_app_grants g ON g.id=o.grant_id WHERE o.run_id=%s LIMIT 1", (run,))
+        budget = cur.fetchone()
+        report.append({'runId': run, 'operations': operations, 'usage': usage, 'grantBudget': budget})
 print(json.dumps({'diagnostic': 'orchestration-usage', 'runs': report}, ensure_ascii=False))
 '''
 

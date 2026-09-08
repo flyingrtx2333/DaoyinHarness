@@ -1,0 +1,66 @@
+{
+  "acceptance": "cloud-orchestration-real-model",
+  "revision": "6eefa5170a1ce685cfd1e0a1e85467b85ebe94e7",
+  "runtimeBuild": {
+    "revision": "6eefa5170a1ce685cfd1e0a1e85467b85ebe94e7",
+    "builtAt": "2026-09-08T10:24:31.894Z",
+    "protocolVersion": 1,
+    "eventStreamVersion": 1,
+    "expectedSchema": "cloud-v1"
+  },
+  "model": "doubao-seed-2-1-pro-260628",
+  "authority": "existing-valid-single-admin-actor",
+  "browserCookieFlow": "not-tested",
+  "fakeModels": false,
+  "cases": [
+    {
+      "case": "delegate_read",
+      "sessionId": "ses_2a89dd30-8ce9-4bb7-94bc-1316b30df899",
+      "requestId": "ma_70dda3cd72ba4945a881985bb0a6be1f",
+      "input": "必须先调用 delegate_agent，委派一个子 Agent 只读查询当前账号可访问的赛事，最多两个名称；子 Agent 必须实际调用 saishi_list_events，不创建、修改、删除数据，不读写记忆。父 Agent 必须根据子 Agent 返回的真实查询结果回复。",
+      "runId": "run_581e5dbd-687f-4ba1-a512-31788e2ec7d6",
+      "status": "completed",
+      "answer": "当前账号可访问的前2个赛事如下：\n1. event_id：2，赛事名称：2026定向越野\n2. event_id：4，赛事名称：定向越野2025",
+      "durationMs": 51119,
+      "modelCalls": 4,
+      "usageSource": "platform_gateway_operations",
+      "checks": {
+        "rootTerminal": true,
+        "childrenSettled": true,
+        "separateSessions": true,
+        "rootGatewayBudget": true,
+        "toolActuallyDispatched": true,
+        "rootCompleted": true,
+        "childCount": true,
+        "childrenCompleted": true,
+        "toolCompleted": true,
+        "realBusinessTool": true
+      },
+      "passed": true,
+      "children": [
+        {
+          "parentRunId": "run_581e5dbd-687f-4ba1-a512-31788e2ec7d6",
+          "toolCallId": "call_sgzyr5z13zbsmmxve2ekx4eh",
+          "nodeId": "task_1",
+          "runId": "run_48955fd5-38fb-4353-a3cd-cad3e8102bd2",
+          "sessionId": "ses_fb0ef30e-6f50-42c8-a3e7-1bde15328161",
+          "status": "completed",
+          "lastEventSeq": 7,
+          "finalText": "1. event_id: 2，赛事名称：2026定向越野\n2. event_id: 4，赛事名称：定向越野2025",
+          "createdAt": "2026-09-08T10:38:26.365Z",
+          "startedAt": "2026-09-08T10:38:26.377Z",
+          "endedAt": "2026-09-08T10:38:57.667Z",
+          "input": "你是只读查询子Agent，仅可调用saishi_list_events工具查询当前授权可访问的赛事，不允许创建、修改、删除任何数据，不允许读写记忆，不执行其他操作。请调用saishi_list_events（使用默认limit即可，取前最多2个赛事），返回查询到的赛事的event_id和对应名称，不需要额外信息。",
+          "completedTools": [
+            {
+              "name": "saishi_list_events",
+              "eventId": "evt_b8b6ab8c-f4c2-41d7-8cd1-b3c88b0067f2"
+            }
+          ]
+        }
+      ],
+      "parentToolFailures": []
+    }
+  ],
+  "passed": true
+}

@@ -1,0 +1,45 @@
+{
+  "acceptance": "cloud-orchestration-real-model",
+  "revision": "6eefa5170a1ce685cfd1e0a1e85467b85ebe94e7",
+  "runtimeBuild": {
+    "revision": "6eefa5170a1ce685cfd1e0a1e85467b85ebe94e7",
+    "builtAt": "2026-09-08T10:24:31.894Z",
+    "protocolVersion": 1,
+    "eventStreamVersion": 1,
+    "expectedSchema": "cloud-v1"
+  },
+  "model": "doubao-seed-2-1-pro-260628",
+  "authority": "existing-valid-single-admin-actor",
+  "browserCookieFlow": "not-tested",
+  "fakeModels": false,
+  "cases": [
+    {
+      "case": "delegate_read",
+      "sessionId": "ses_0ea7b850-e32a-4abb-aa09-631c1b63916a",
+      "requestId": "ma_fab73485c2f04edea4f934ec09d8caf9",
+      "input": "必须先调用 delegate_agent，委派一个子 Agent 只读查询当前账号可访问的赛事，最多两个名称；子 Agent 必须实际调用 saishi_list_events，不创建、修改、删除数据，不读写记忆。父 Agent 必须根据子 Agent 返回的真实查询结果回复。",
+      "runId": "run_59391cde-f3ac-43e8-8aa0-c953e5b5dfb2",
+      "status": "failed",
+      "answer": "任务未完成：模型或执行授权不可用，本轮未继续执行。",
+      "durationMs": 4156,
+      "modelCalls": 1,
+      "usageSource": "platform_gateway_operations",
+      "checks": {
+        "rootTerminal": true,
+        "childrenSettled": true,
+        "separateSessions": true,
+        "rootGatewayBudget": true,
+        "toolActuallyDispatched": false,
+        "rootCompleted": false,
+        "childCount": false,
+        "childrenCompleted": true,
+        "toolCompleted": false,
+        "realBusinessTool": false
+      },
+      "passed": false,
+      "children": [],
+      "parentToolFailures": []
+    }
+  ],
+  "passed": false
+}

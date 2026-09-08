@@ -19,7 +19,10 @@ from services import saishi_agent_bridge as bridge
 from routes.agent_public import cloud_request
 from routes.harness_evaluation_live import gateway_usage
 
+TEST_GRANT = None
+
 async def main(revision, selected):
+    global TEST_GRANT
     with get_db() as conn, conn.cursor() as cur:
         cur.execute("""SELECT DISTINCT s.* FROM first_party_account_sessions s
             JOIN users u ON u.id=s.actor_user_id AND u.status=1
@@ -42,7 +45,16 @@ async def main(revision, selected):
             except Exception:
                 continue
         if session is None: raise RuntimeError('No valid existing administrator session')
-    bearer, grant = access.for_account(session)
+    if sys.argv[3] == 'isolated':
+        event_ids = [int(value) for value in sys.argv[4].split(',')]
+        issued = access.issue(int(session['actor_user_id']), tenant_id=int(session['tenant_id']),
+            label='Harness multi-agent acceptance '+uuid.uuid4().hex[:8], event_ids=event_ids,
+            scopes=[access.TOOL_SCOPES['saishi_list_events']], ttl_hours=1, model_enabled=True, max_model_calls=12)
+        TEST_GRANT = (int(session['actor_user_id']), issued['grant']['id'])
+        bearer = issued['token']
+        grant = access.resolve(bearer=bearer)
+    else:
+        bearer, grant = access.for_account(session)
     config = access.configured()
     async def call(method, path, body=None):
         return await cloud_request(config, bearer, method, path, body)
@@ -139,17 +151,26 @@ async def main(revision, selected):
             'modelCalls': usage['modelCalls'], 'usageSource': usage['source'], 'checks': checks, 'passed': all(checks.values()), 'children': evidence,
             'parentToolFailures': [event['payload'] for event in parent_events if event['type']=='tool.failed']})
     return {'acceptance': 'cloud-orchestration-real-model', 'revision': revision, 'runtimeBuild': build, 'model': model,
-        'authority': 'existing-valid-single-admin-actor', 'browserCookieFlow': 'not-tested', 'fakeModels': False,
+        'authority': 'scoped-readonly-test-grant' if TEST_GRANT else 'existing-valid-single-admin-actor',
+        'testGrantLimit': 12 if TEST_GRANT else None, 'testGrantLifetimeHours': 1 if TEST_GRANT else None,
+        'browserCookieFlow': 'not-tested', 'fakeModels': False,
         'cases': reports, 'passed': all(item.get('passed',False) for item in reports)}
 
+result = {}
 try:
     result = asyncio.run(main(sys.argv[1], sys.argv[2].split(',')))
-    print(json.dumps(result, ensure_ascii=False))
-    raise SystemExit(0 if result['passed'] else 1)
 except Exception as error:
-    print(json.dumps({'acceptance': 'cloud-orchestration-real-model', 'passed': False, 'blocked': type(error).__name__,
-        'reason': str(error) if isinstance(error, RuntimeError) else 'Actual service/authorization request failed; no resubmission'}, ensure_ascii=False))
-    raise SystemExit(1)
+    result = {'acceptance': 'cloud-orchestration-real-model', 'passed': False, 'blocked': type(error).__name__,
+        'reason': str(error) if isinstance(error, RuntimeError) else 'Actual service/authorization request failed; no resubmission'}
+finally:
+    if TEST_GRANT:
+        try:
+            access.revoke(TEST_GRANT[0], TEST_GRANT[1])
+            result['testGrantRevoked'] = True
+        except Exception:
+            result.update({'passed': False, 'testGrantRevoked': False, 'cleanup': 'grant-expires-within-one-hour; inspect-revocation'})
+print(json.dumps(result, ensure_ascii=False))
+raise SystemExit(0 if result.get('passed') else 1)
 '''
 
 if __name__ == '__main__':
@@ -158,6 +179,8 @@ if __name__ == '__main__':
     parser.add_argument('--expected-revision', required=True)
     parser.add_argument('--cases', default='delegate_read,handoff_business,parallel')
     parser.add_argument('--output', required=True)
+    parser.add_argument('--isolated-test-grant', action='store_true')
+    parser.add_argument('--test-event-ids', default='')
     args = parser.parse_args()
     allowed = {'delegate_read', 'handoff', 'handoff_business', 'parallel', 'dag', 'cancel'}
     cases = args.cases.split(',')
@@ -165,7 +188,12 @@ if __name__ == '__main__':
         parser.error('choose 1-5 distinct actual cases')
     if len(args.expected_revision) != 40 or any(char not in '0123456789abcdef' for char in args.expected_revision):
         parser.error('expected-revision must be a full Git revision')
-    result = subprocess.run(['docker', 'exec', '-i', '-w', '/app', 'daoyintech-backend', 'python', '-', args.expected_revision, args.cases],
+    if args.isolated_test_grant:
+        ids = args.test_event_ids.split(',')
+        if len(cases) > 2 or not 1 <= len(ids) <= 2 or any(not value.isdigit() or len(value) > 10 or int(value) < 1 for value in ids):
+            parser.error('isolated acceptance requires 1-2 already-authorized event IDs and at most two cases')
+    result = subprocess.run(['docker', 'exec', '-i', '-w', '/app', 'daoyintech-backend', 'python', '-', args.expected_revision, args.cases,
+        'isolated' if args.isolated_test_grant else 'account', args.test_event_ids],
         input=PROGRAM, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=580)
     reports = []
     for line in result.stdout.splitlines():
