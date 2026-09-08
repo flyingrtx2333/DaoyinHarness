@@ -60,6 +60,7 @@ const sessionParams = { type: "object", required: ["sessionId"], additionalPrope
 const runParams = { type: "object", required: ["runId"], additionalProperties: false, properties: { runId: idSchema } };
 const forbiddenIdentityKeys = new Set(["tenant_id", "tenantId", "user_id", "actorUserId", "accountId", "executionIdentity", "billingAccountId", "authorizationId"]);
 const ORCHESTRATION_TOOLS = new Set(["delegate_agent", "delegate_parallel", "workflow_run_inline"]);
+export function isCloudOrchestrationToolName(name: string): boolean { return ORCHESTRATION_TOOLS.has(name); }
 
 function orchestrationRequestId(parentRunId: string, toolCallId: string, index: number): string {
   return `orch_${createHash("sha256").update(JSON.stringify([parentRunId, toolCallId, index])).digest("hex").slice(0, 48)}`;
@@ -88,9 +89,9 @@ async function abortable<T>(operation: () => Promise<T>, signal: AbortSignal): P
 
 function checkedProfile(profile: CloudProfile): CloudProfile {
   // Catalog memory entries are descriptors only. Ignore their executors and install trusted, run-bound tools later.
-  const businessTools = profile.tools.filter((binding) => !isMemoryToolName(binding.definition.name));
+  const businessTools = profile.tools.filter((binding) => !isMemoryToolName(binding.definition.name) && !ORCHESTRATION_TOOLS.has(binding.definition.name));
   if (!/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.id) || !/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.version) ||
-      !profile.instructions.trim() || profile.instructions.length > 10_000 || businessTools.length > 32 || profile.tools.length > 36) {
+      !profile.instructions.trim() || profile.instructions.length > 10_000 || businessTools.length > 32 || profile.tools.length > 39) {
     throw new CloudError(503, "PROFILE_INVALID", "应用配置不可用。");
   }
   const names = new Set<string>();

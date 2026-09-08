@@ -91,6 +91,33 @@ export interface SaishiClient {
   call(name: string, input: Record<string, unknown>, identity: ExecutionIdentity, runId: string, operationId: string, signal: AbortSignal): Promise<unknown>;
 }
 
+function orchestrationPolicyBindings(): CloudToolBinding[] {
+  const fail = async () => ({ ok: false as const, code: "ORCHESTRATION_RUNTIME_ONLY", message: "编排工具仅由云端运行时安装。", retryable: false });
+  const boundedStrings = (value: unknown, min: number, max: number): value is string[] => Array.isArray(value) && value.length >= min && value.length <= max &&
+    value.every((item) => typeof item === "string" && item.trim().length >= 1 && item.length <= 6000);
+  const bindings: Array<{ name: string; description: string; schema: JsonValue; validate(input: Record<string, unknown>): boolean }> = [
+    {
+      name: "delegate_agent", description: "云端受限子 Agent 委派策略描述符。",
+      schema: { type: "object", additionalProperties: false, required: ["instruction"], properties: { instruction: { type: "string", minLength: 1, maxLength: 6000 } } },
+      validate: (input) => Object.keys(input).length === 1 && typeof input.instruction === "string" && input.instruction.trim().length >= 1 && input.instruction.length <= 6000,
+    },
+    {
+      name: "delegate_parallel", description: "云端并行子 Agent 策略描述符。",
+      schema: { type: "object", additionalProperties: false, required: ["tasks"], properties: { tasks: { type: "array", minItems: 1, maxItems: 3, items: { type: "string", minLength: 1, maxLength: 6000 } } } },
+      validate: (input) => Object.keys(input).length === 1 && boundedStrings(input.tasks, 1, 3),
+    },
+    {
+      name: "workflow_run_inline", description: "云端顺序子 Agent 工作流策略描述符。",
+      schema: { type: "object", additionalProperties: false, required: ["steps"], properties: { steps: { type: "array", minItems: 1, maxItems: 5, items: { type: "string", minLength: 1, maxLength: 6000 } } } },
+      validate: (input) => Object.keys(input).length === 1 && boundedStrings(input.steps, 1, 5),
+    },
+  ];
+  return bindings.map((item) => ({
+    requiredPermissions: ["agent.use"], validateInput: item.validate, authorizeResource: async () => false,
+    definition: { name: item.name, description: item.description, category: "system", mutating: true, inputSchema: item.schema, execute: fail },
+  }));
+}
+
 export function createSaishiProfile(catalog: unknown, identity: ExecutionIdentity, client: SaishiClient): CloudProfile {
   if (!isSaishiIdentity(identity) || !isRecord(catalog) || catalog.id !== SAISHI_PROFILE || catalog.version !== "1" ||
       typeof catalog.instructions !== "string" || catalog.instructions.length > 10000 || !catalog.instructions.trim() || !Array.isArray(catalog.tools)) throw new Error("Invalid Saishi profile.");
@@ -135,5 +162,6 @@ export function createSaishiProfile(catalog: unknown, identity: ExecutionIdentit
   });
   if (seen.size !== identity.allowedTools.filter((name) => !isMemoryToolName(name)).length || seen.size === 0) throw new Error("Incomplete Saishi catalog.");
   // The metered model adapter validates calls against this catalog; memory execution stays in Harness.
-  return { id: SAISHI_PROFILE, version: "1", instructions: catalog.instructions, tools: [...tools, ...createMemoryProfileBindings(identity)] };
+  // Orchestration policy bindings are validation-only descriptors: checkedProfile removes them and the cloud runtime installs the trusted executors.
+  return { id: SAISHI_PROFILE, version: "1", instructions: catalog.instructions, tools: [...tools, ...createMemoryProfileBindings(identity), ...orchestrationPolicyBindings()] };
 }
