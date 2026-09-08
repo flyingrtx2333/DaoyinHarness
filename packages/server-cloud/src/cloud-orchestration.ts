@@ -188,7 +188,7 @@ export function createCloudOrchestrationTools(options: Options): ToolDefinition[
           parentRunId: parentRun.id, status: "blocked", finalText: "前置任务未完成或执行已停止，本节点未启动。", truncated: false, lastEventSeq: 0 });
         const complete = ordered.every((result) => result.status === "completed");
         const result: JsonValue = { untrusted: true, results: ordered.map((item) => ({ ...item })), concurrencyLimit: 2 };
-        if (!complete || storageFailure) return { ok: false, code: groupSignal.aborted && !stop.signal.aborted ? "TOOL_CANCELLED" : "CHILD_AGENT_FAILED",
+        if (!complete || storageFailure) return { ok: false, code: signal.aborted || options.signal.aborted ? "TOOL_CANCELLED" : "CHILD_AGENT_FAILED",
           message: `子任务组未全部完成（${ordered.filter((item) => item.status === "completed").length}/${nodes.length}），未自动重试。`, retryable: false, details: result };
         return { ok: true, summary: `已完成 ${nodes.length} 个子 Agent，结果按输入顺序返回。`,
           evidence: { schemaVersion: 1, toolName: descriptor.name, result, artifacts: [], diagnostics: [] } };

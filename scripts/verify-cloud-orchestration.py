@@ -52,6 +52,7 @@ async def main(revision, selected):
     model = bridge.require_model_runtime().get('model_name')
     nonce = 'accept_' + uuid.uuid4().hex[:12]
     cases = {
+      'handoff_business': ('必须只调用一次 workflow_run_inline，使用两个字符串步骤。第一步必须调用 saishi_list_events，只读查询当前账号能访问的前两个赛事，返回赛事ID和名称。第二步不得调用业务工具，只读取系统传入的第一步结果，整理成两行“赛事ID：名称”。父Agent根据第二步返回最终结果。全程不修改业务数据、不读写记忆。', 'workflow_run_inline', 2),
       'delegate_read': ('必须先调用 delegate_agent，委派一个子 Agent 只读查询当前账号可访问的赛事，最多两个名称；子 Agent 必须实际调用 saishi_list_events，不创建、修改、删除数据，不读写记忆。父 Agent 必须根据子 Agent 返回的真实查询结果回复。', 'delegate_agent', 1),
       'handoff': ('必须只调用一次 workflow_run_inline，用两个字符串步骤。第一步只返回验证码 '+nonce+'；第二步只读取系统传入的上一步验证码，并把验证码逐字符反转后返回。子 Agent 不调用业务工具，不读写记忆。父 Agent 汇总第二步结果。', 'workflow_run_inline', 2),
       'parallel': ('必须只调用一次 delegate_parallel，任务A仅计算6*7，任务B仅计算9*9；各子 Agent 不调用业务工具或记忆。父 Agent 按A、B输入顺序给出两个结果。', 'delegate_parallel', 2),
@@ -106,13 +107,21 @@ async def main(revision, selected):
             'rootGatewayBudget': 0 < usage['modelCalls'] <= 8,
             'toolActuallyDispatched': any(event['type']=='tool.started' and event['payload']['toolName']==tool for event in parent_events)}
         if case_id == 'cancel':
-            checks.update({'cancellationRequestedAfterChildAdmission': cancelled, 'rootCancelled': run['status']=='cancelled', 'hasChild': len(children)>0})
+            checks.update({'cancellationRequestedAfterChildAdmission': cancelled, 'rootCancelled': run['status']=='cancelled', 'hasChild': len(children)>0,
+                'cancelNotMisclassifiedAsFailure': any(event['type']=='tool.failed' and event['payload']['toolName']==tool and event['payload']['code']=='TOOL_CANCELLED' for event in parent_events)})
         else:
             checks.update({'rootCompleted': run['status']=='completed', 'childCount': len(children)==expected_children,
                 'childrenCompleted': all(child['status']=='completed' for child in children),
                 'toolCompleted': any(event['type']=='tool.completed' and event['payload']['toolName']==tool for event in parent_events)})
         if case_id == 'delegate_read':
             checks['realBusinessTool'] = any(t['name']=='saishi_list_events' for child in evidence for t in child['completedTools'])
+        if case_id == 'handoff_business':
+            first = next((child for child in evidence if child['nodeId']=='step_1'), {})
+            second = next((child for child in evidence if child['nodeId']=='step_2'), {})
+            checks['realBusinessSource'] = any(tool['name']=='saishi_list_events' for tool in first.get('completedTools', []))
+            checks['persistedHandoff'] = bool(first.get('runId')) and first['runId'] in second.get('input','') and 'UNTRUSTED_UPSTREAM_RESULTS' in second.get('input','')
+            checks['sequentialOrder'] = bool(first.get('endedAt')) and bool(second.get('startedAt')) and first['endedAt'] <= second['startedAt']
+            checks['downstreamDoesNotRequery'] = not second.get('completedTools')
         if case_id == 'handoff':
             second = next((child for child in evidence if child['nodeId']=='step_2'), {})
             first = next((child for child in evidence if child['nodeId']=='step_1'), {})
@@ -147,10 +156,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--run-sample', action='store_true', required=True)
     parser.add_argument('--expected-revision', required=True)
-    parser.add_argument('--cases', default='delegate_read,handoff,parallel')
+    parser.add_argument('--cases', default='delegate_read,handoff_business,parallel')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-    allowed = {'delegate_read', 'handoff', 'parallel', 'dag', 'cancel'}
+    allowed = {'delegate_read', 'handoff', 'handoff_business', 'parallel', 'dag', 'cancel'}
     cases = args.cases.split(',')
     if not 1 <= len(cases) <= 5 or len(set(cases)) != len(cases) or not set(cases) <= allowed:
         parser.error('choose 1-5 distinct actual cases')
