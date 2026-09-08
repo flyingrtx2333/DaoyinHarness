@@ -36,6 +36,22 @@ export interface CloudRun {
   createdAt: string;
 }
 
+export interface CloudChildInput {
+  operationId: string;
+  toolCallId: string;
+  nodeId: string;
+  instruction: string;
+}
+
+export interface CloudChildRun {
+  parentRunId: string;
+  parentSessionId: string;
+  toolCallId: string;
+  nodeId: string;
+  operationId: string;
+  run: CloudRun;
+}
+
 export interface BoundRunStores {
   events: SessionEventStore;
   compactions: SessionCompactionStore;
@@ -49,6 +65,9 @@ export type MaybePromise<T> = T | Promise<T>;
 /** Every user-facing lookup is scoped. Implementations must atomically claim requests. */
 export interface CloudRepository {
   readonly memory?: CloudMemoryRepository;
+  /** Atomic child session/run/link admission; absent adapters cannot expose orchestration. */
+  acceptChildRun?(identity: ExecutionIdentity, parentRunId: string, input: CloudChildInput): Promise<{ child: CloudChildRun; created: boolean }>;
+  listChildRuns?(scope: ExecutionScope, parentRunId: string): Promise<CloudChildRun[]>;
   /** Read-only database/schema/lease probe. Never claims a write transaction was tested. */
   checkReadiness?(): MaybePromise<void>;
   /** Optional for isolated stores; production adapters fence stale executors before external work. */

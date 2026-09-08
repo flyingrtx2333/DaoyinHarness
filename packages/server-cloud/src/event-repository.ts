@@ -17,6 +17,14 @@ export function withCommittedSessionEvents(base: CloudRepository): CloudReposito
   };
   return {
     ...(base.memory === undefined ? {} : { memory: base.memory }),
+    ...(base.acceptChildRun === undefined ? {} : {
+      async acceptChildRun(identity: import("@daoyin/harness-contracts").ExecutionIdentity, parentRunId: string, input: import("./repository.js").CloudChildInput) {
+        const result = await base.acceptChildRun!(identity, parentRunId, input);
+        if (result.created) notify(identity, result.child.parentSessionId);
+        return result;
+      },
+    }),
+    ...(base.listChildRuns === undefined ? {} : { listChildRuns: (scope: ExecutionScope, parentRunId: string) => base.listChildRuns!(scope, parentRunId) }),
     ...(base.checkReadiness === undefined ? {} : { checkReadiness: () => base.checkReadiness!() }),
     assertExecutionOwner: () => base.assertExecutionOwner?.(),
     // The WS route checks getSession before subscription; keys also include scope.

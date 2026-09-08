@@ -4,7 +4,7 @@ import { assertHistoryAdmission, readCompleteHistory } from "./history-policy.js
 import { assertExecutionIdentity, executionScopeKey, type AppendCompactionInput, type ExecutionIdentity, type ExecutionScope } from "@daoyin/harness-contracts";
 import type { AgentEvent, AgentEventType, PendingAgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
 import { PostgresMemoryRepository, migratePostgresMemory } from "./postgres-memory-repository.js";
-import { CloudError, type BoundRunStores, type CloudRepository, type CloudRun, type CloudSession, type SessionAction } from "./repository.js";
+import { CloudError, type BoundRunStores, type CloudChildInput, type CloudChildRun, type CloudRepository, type CloudRun, type CloudSession, type SessionAction } from "./repository.js";
 import { applySessionAction, sessionState } from "./session-management.js";
 
 type Row = Record<string, unknown>;
@@ -52,6 +52,15 @@ const cloudSchema = [
   )`,
   "CREATE UNIQUE INDEX IF NOT EXISTS cloud_one_active_run ON cloud_runs(session_id) WHERE status='running'",
   "CREATE INDEX IF NOT EXISTS cloud_runs_scope ON cloud_runs(scope_key, session_id)",
+  `CREATE TABLE IF NOT EXISTS cloud_child_runs (
+    parent_run_id TEXT NOT NULL REFERENCES cloud_runs(id),
+    parent_session_id TEXT NOT NULL REFERENCES cloud_sessions(id),
+    operation_id TEXT NOT NULL, tool_call_id TEXT NOT NULL, node_id TEXT NOT NULL,
+    child_run_id TEXT NOT NULL UNIQUE REFERENCES cloud_runs(id),
+    child_session_id TEXT NOT NULL UNIQUE REFERENCES cloud_sessions(id),
+    scope_key TEXT NOT NULL, created_at TEXT NOT NULL,
+    PRIMARY KEY(parent_run_id, operation_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS cloud_events (
     session_id TEXT NOT NULL REFERENCES cloud_sessions(id), event_seq INTEGER NOT NULL,
     turn_id TEXT NOT NULL REFERENCES cloud_runs(id), event_id TEXT NOT NULL UNIQUE,
@@ -129,6 +138,7 @@ export class PostgresCloudRepository implements CloudRepository {
     }
     // Fail readiness before serving the new API against an unmigrated database.
     await this.pool.query("SELECT pinned_at,archived_at,deleted_at FROM cloud_sessions WHERE FALSE");
+    await this.pool.query("SELECT parent_run_id,parent_session_id,operation_id,tool_call_id,node_id,child_run_id,child_session_id,scope_key,created_at FROM cloud_child_runs WHERE FALSE");
   }
 
   public async acquireRuntimeLease(options: { durationMs?: number; recoverInterrupted?: boolean } = {}): Promise<{ recoveredRuns: number }> {
@@ -190,7 +200,8 @@ export class PostgresCloudRepository implements CloudRepository {
       throw new CloudError(400, "SESSION_INPUT_INVALID", "会话配置无效。");
     }
     return this.#transaction(async (client) => {
-      const count = await client.query<{ n: string }>("SELECT COUNT(*) AS n FROM cloud_sessions WHERE scope_key=$1", [key]);
+      const count = await client.query<{ n: string }>(`SELECT COUNT(*) AS n FROM cloud_sessions s WHERE scope_key=$1
+        AND NOT EXISTS (SELECT 1 FROM cloud_child_runs c WHERE c.child_session_id=s.id)`, [key]);
       if (asNumber(count.rows[0]?.n) >= 500) throw new CloudError(429, "SESSION_LIMIT", "当前空间的试运行会话数量已达上限。");
       const result: CloudSession = { ...input, id: id("ses"), createdAt: now() };
       await client.query(`INSERT INTO cloud_sessions(id,scope_key,actor_id,scope_id,title,profile_id,profile_version,created_at)
@@ -201,7 +212,8 @@ export class PostgresCloudRepository implements CloudRepository {
   }
 
   public async listSessions(scope: ExecutionScope): Promise<CloudSession[]> {
-    const result = await this.pool.query<Row>(`SELECT * FROM cloud_sessions WHERE scope_key=$1 AND deleted_at IS NULL
+    const result = await this.pool.query<Row>(`SELECT * FROM cloud_sessions s WHERE scope_key=$1 AND deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM cloud_child_runs c WHERE c.child_session_id=s.id)
       ORDER BY (pinned_at IS NOT NULL) DESC,pinned_at DESC,created_at DESC,id DESC LIMIT 500`, [executionScopeKey(scope)]);
     return result.rows.map(session);
   }
@@ -215,6 +227,8 @@ export class PostgresCloudRepository implements CloudRepository {
     return this.#transaction(async (client) => {
       // The same session lock fences new Run admission, including other tabs.
       const current = await this.#session(client, key, sessionId, true, action === "delete");
+      const child = await client.query("SELECT 1 FROM cloud_child_runs WHERE child_session_id=$1", [sessionId]);
+      if (child.rows.length) throw new CloudError(409, "CHILD_SESSION_READ_ONLY", "请管理父会话；子会话保留为执行证据。");
       const next = applySessionAction(sessionState(current), action);
       if (action === "archive" || action === "delete") {
         const active = await client.query("SELECT id FROM cloud_runs WHERE session_id=$1 AND status='running'", [sessionId]);
@@ -234,6 +248,8 @@ export class PostgresCloudRepository implements CloudRepository {
     const key = executionScopeKey(identity);
     return this.#transaction(async (client) => {
       const selectedSession = await this.#session(client, key, sessionId, true);
+      const childSession = await client.query("SELECT 1 FROM cloud_child_runs WHERE child_session_id=$1", [sessionId]);
+      if (childSession.rows.length) throw new CloudError(409, "CHILD_SESSION_READ_ONLY", "子会话仅用于委派审计，请在父会话继续任务。");
       const inputHash = digest(userMessage);
       const previous = await client.query<Row>("SELECT * FROM cloud_runs WHERE session_id=$1 AND request_id=$2 AND scope_key=$3 FOR UPDATE", [sessionId, requestId, key]);
       if (previous.rows[0] !== undefined) {
@@ -253,6 +269,56 @@ export class PostgresCloudRepository implements CloudRepository {
         identity.authorizationId, identity.billingAccountId, now()]);
       return { run: run(await this.#run(client, key, runId)), created: true };
     });
+  }
+
+  public async acceptChildRun(identity: ExecutionIdentity, parentRunId: string, input: CloudChildInput): Promise<{ child: CloudChildRun; created: boolean }> {
+    assertExecutionIdentity(identity);
+    if (identity.space.kind === "public" || !identity.permissions.includes("agent.use")) throw notFound();
+    if (![input.operationId, input.toolCallId, input.nodeId].every((value) => /^[A-Za-z0-9_-]{1,128}$/u.test(value)) ||
+        !input.instruction.trim() || input.instruction.length > 10_000) throw new CloudError(400, "CHILD_INPUT_INVALID", "子任务参数无效。");
+    const key = executionScopeKey(identity);
+    return this.#transaction(async (client) => {
+      // Serialize child admission against parent cancellation/termination and other siblings.
+      const parent = await this.#run(client, key, parentRunId, true);
+      if (parent.status !== "running" || asBoolean(parent.cancel_requested) || parent.authorization_id !== identity.authorizationId ||
+          parent.billing_account_id !== identity.billingAccountId) throw new CloudError(409, "PARENT_NOT_ACTIVE", "父任务已结束、取消或授权不匹配。");
+      const nested = await client.query("SELECT 1 FROM cloud_child_runs WHERE child_run_id=$1", [parentRunId]);
+      if (nested.rows.length) throw new CloudError(409, "CHILD_RECURSION_DENIED", "子 Agent 不能继续委派。");
+      const existing = await client.query<Row>(`SELECT r.*,c.tool_call_id,c.node_id FROM cloud_child_runs c JOIN cloud_runs r ON r.id=c.child_run_id
+        WHERE c.parent_run_id=$1 AND c.operation_id=$2 AND c.scope_key=$3`, [parentRunId, input.operationId, key]);
+      const parentSessionId = String(parent.session_id);
+      const previous = existing.rows[0];
+      if (previous !== undefined) {
+        if (previous.input_hash !== digest(input.instruction) || previous.tool_call_id !== input.toolCallId || previous.node_id !== input.nodeId) {
+          throw new CloudError(409, "IDEMPOTENCY_CONFLICT", "同一子任务标识不能用于不同输入。");
+        }
+        return { child: { parentRunId, parentSessionId, operationId: input.operationId, toolCallId: input.toolCallId, nodeId: input.nodeId, run: run(previous) }, created: false };
+      }
+      const count = await client.query<{ n: string }>("SELECT COUNT(*) AS n FROM cloud_child_runs WHERE parent_run_id=$1", [parentRunId]);
+      if (Number(count.rows[0]?.n) >= 8) throw new CloudError(429, "CHILD_RUN_LIMIT", "本轮子 Agent 数量已达上限。");
+      const parentSession = await this.#session(client, key, parentSessionId);
+      const sessionId = id("ses"); const runId = id("run"); const createdAt = now();
+      await client.query(`INSERT INTO cloud_sessions(id,scope_key,actor_id,scope_id,title,profile_id,profile_version,created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [sessionId, key, identity.actorUserId, parentSession.scope_id,
+        `子任务 · ${input.nodeId}`, parentSession.profile_id, parentSession.profile_version, createdAt]);
+      await client.query(`INSERT INTO cloud_runs(id,scope_key,session_id,request_id,input_hash,user_message,status,authorization_id,billing_account_id,created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$9)`, [runId, key, sessionId, input.operationId, digest(input.instruction), input.instruction,
+        identity.authorizationId, identity.billingAccountId, createdAt]);
+      await client.query(`INSERT INTO cloud_child_runs(parent_run_id,parent_session_id,operation_id,tool_call_id,node_id,child_run_id,child_session_id,scope_key,created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [parentRunId, parentSessionId, input.operationId, input.toolCallId, input.nodeId, runId, sessionId, key, createdAt]);
+      return { child: { parentRunId, parentSessionId, operationId: input.operationId, toolCallId: input.toolCallId, nodeId: input.nodeId,
+        run: run(await this.#run(client, key, runId)) }, created: true };
+    });
+  }
+
+  public async listChildRuns(scope: ExecutionScope, parentRunId: string): Promise<CloudChildRun[]> {
+    const key = executionScopeKey(scope);
+    await this.#run(this.pool, key, parentRunId);
+    const result = await this.pool.query<Row>(`SELECT r.*,c.parent_run_id,c.parent_session_id,c.operation_id,c.tool_call_id,c.node_id
+      FROM cloud_child_runs c JOIN cloud_runs r ON r.id=c.child_run_id AND r.scope_key=c.scope_key
+      WHERE c.parent_run_id=$1 AND c.scope_key=$2 ORDER BY c.created_at,c.node_id LIMIT 8`, [parentRunId, key]);
+    return result.rows.map((row) => ({ parentRunId: String(row.parent_run_id), parentSessionId: String(row.parent_session_id),
+      toolCallId: String(row.tool_call_id), nodeId: String(row.node_id), operationId: String(row.operation_id), run: run(row) }));
   }
 
   public async getRun(scope: ExecutionScope, runId: string): Promise<CloudRun> { return run(await this.#run(this.pool, executionScopeKey(scope), runId)); }
@@ -316,6 +382,8 @@ export class PostgresCloudRepository implements CloudRepository {
     const key = executionScopeKey(scope);
     return this.#transaction(async (client) => {
       await this.#run(client, key, runId, true);
+      const child = await client.query("SELECT 1 FROM cloud_child_runs WHERE child_run_id=$1", [runId]);
+      if (child.rows.length) throw new CloudError(409, "CANCEL_PARENT_RUN", "请取消父任务，系统会一并停止其子 Agent。");
       await client.query("UPDATE cloud_runs SET cancel_requested=TRUE WHERE id=$1 AND scope_key=$2 AND status='running'", [runId, key]);
       return run(await this.#run(client, key, runId));
     });
@@ -353,6 +421,9 @@ export class PostgresCloudRepository implements CloudRepository {
   async #session(client: Pool | TransactionClient, key: string, sessionId: string, lock = false, includeDeleted = false): Promise<Row> {
     const result = await client.query<Row>(`SELECT * FROM cloud_sessions WHERE id=$1 AND scope_key=$2${includeDeleted ? "" : " AND deleted_at IS NULL"}${lock ? " FOR UPDATE" : ""}`, [sessionId, key]);
     if (result.rows[0] === undefined) throw notFound();
+    const parent = await client.query(`SELECT 1 FROM cloud_child_runs c JOIN cloud_sessions p ON p.id=c.parent_session_id
+      WHERE c.child_session_id=$1 AND p.deleted_at IS NOT NULL`, [String(result.rows[0].session_id ?? result.rows[0].id)]);
+    if (parent.rows.length) throw notFound();
     return result.rows[0];
   }
 
@@ -360,6 +431,9 @@ export class PostgresCloudRepository implements CloudRepository {
     const result = await client.query<Row>(`SELECT r.* FROM cloud_runs r JOIN cloud_sessions s ON s.id=r.session_id
       WHERE r.id=$1 AND r.scope_key=$2 AND s.scope_key=$2 AND s.deleted_at IS NULL${lock ? " FOR UPDATE OF r" : ""}`, [runId, key]);
     if (result.rows[0] === undefined) throw notFound();
+    const parent = await client.query(`SELECT 1 FROM cloud_child_runs c JOIN cloud_sessions p ON p.id=c.parent_session_id
+      WHERE c.child_session_id=$1 AND p.deleted_at IS NOT NULL`, [String(result.rows[0].session_id ?? result.rows[0].id)]);
+    if (parent.rows.length) throw notFound();
     return result.rows[0];
   }
 

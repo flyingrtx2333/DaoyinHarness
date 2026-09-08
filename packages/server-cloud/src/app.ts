@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createCloudOrchestrationTools, validateCloudOrchestrationInput } from "./cloud-orchestration.js";
+export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { AgentEngine, type ModelClient } from "@daoyin/harness-agent-core";
 import { createCloudMemoryRuntime } from "./memory-tools.js";
@@ -59,19 +60,7 @@ const idSchema = { type: "string", minLength: 1, maxLength: 160, pattern: "^[A-Z
 const sessionParams = { type: "object", required: ["sessionId"], additionalProperties: false, properties: { sessionId: idSchema } };
 const runParams = { type: "object", required: ["runId"], additionalProperties: false, properties: { runId: idSchema } };
 const forbiddenIdentityKeys = new Set(["tenant_id", "tenantId", "user_id", "actorUserId", "accountId", "executionIdentity", "billingAccountId", "authorizationId"]);
-const ORCHESTRATION_TOOLS = new Set(["delegate_agent", "delegate_parallel", "workflow_run_inline"]);
-export function isCloudOrchestrationToolName(name: string): boolean { return ORCHESTRATION_TOOLS.has(name); }
-
-function orchestrationRequestId(parentRunId: string, toolCallId: string, index: number): string {
-  return `orch_${createHash("sha256").update(JSON.stringify([parentRunId, toolCallId, index])).digest("hex").slice(0, 48)}`;
-}
-
-function orchestrationInstruction(value: unknown): string {
-  if (typeof value !== "string") throw new Error("Orchestration instruction must be a string.");
-  const result = value.trim();
-  if (!result || result.length > 6_000) throw new Error("Orchestration instruction is out of bounds.");
-  return result;
-}
+const ORCHESTRATION_TOOLS = new Set<string>(CLOUD_ORCHESTRATION_NAMES);
 
 /** Observes cancellation even if an external read/model implementation ignores its signal. */
 async function abortable<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
@@ -212,8 +201,15 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     const run = await options.repository.getRun(identity, request.params.runId);
     const stores = await options.repository.bindRun(identity, run.sessionId, run.id);
     const events = await stores.events.read(run.sessionId);
+    const children = await options.repository.listChildRuns?.(identity, run.id) ?? [];
     await ensureActive(identity);
-    return describeRun(run, events, measurements);
+    return { ...describeRun(run, events, measurements), orchestration: {
+      available: identity.space.kind !== "public" && options.repository.acceptChildRun !== undefined,
+      concurrencyLimit: 2, maxChildRuns: 8, modelAccounting: "root-run-shared",
+      children: children.map((child) => ({ parentRunId: child.parentRunId, toolCallId: child.toolCallId, nodeId: child.nodeId,
+        runId: child.run.id, sessionId: child.run.sessionId, status: child.run.status, lastEventSeq: child.run.lastEventSeq,
+        finalText: child.run.finalText.slice(0, 2400), createdAt: child.run.createdAt })),
+    } };
   });
   app.get("/health", async () => {
     try { await assertOwner(); } catch { /* Report an unavailable executor without exposing internal errors. */ }
@@ -269,16 +265,29 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const bound = await options.repository.bindRun(identity, run.sessionId, run.id);
         const stores: BoundRunStores = { ...bound, events: {
           read: (sessionId, after) => bound.events.read(sessionId, after),
-          append: (pending) => measurements.measure(run.id, "event_persist", () => bound.events.append(pending)),
+          append: (pending) => measurements.measure(run.id, "event_persist", async () => {
+            if (["turn.completed", "turn.failed", "turn.cancelled"].includes(pending.type)) {
+              const children = await options.repository.listChildRuns?.(identity, run.id) ?? [];
+              if (children.some((child) => child.run.status === "running")) throw new CloudError(409, "CHILDREN_NOT_SETTLED", "子任务尚未全部收尾，父任务不能报告完成。");
+            }
+            return bound.events.append(pending);
+          }),
         } };
         const memoryRuntime = options.repository.memory === undefined || identity.space.kind === "public" ? undefined
           : createCloudMemoryRuntime({ memory: options.repository.memory, identity, run, events: stores.events, ensureActive });
+        let toolCalls = 0;
+        const chargeTool = (): void => {
+          if (toolCalls >= 24) throw new CloudError(409, "TOOL_TREE_LIMIT", "本轮及其子 Agent 已达到共享工具调用上限。");
+          toolCalls++;
+        };
+        const orchestrationAvailable = identity.space.kind !== "public" && options.repository.acceptChildRun !== undefined && options.repository.listChildRuns !== undefined;
         const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? [])];
         const bindings = new Map(runBindings.map((binding) => [binding.definition.name, binding]));
         const wrappedDefinitions = runBindings.map<ToolDefinition>((binding) => ({
           ...binding.definition,
           execute: (input, signal, context) => measurements.measure(run.id, "tool_inclusive", async () => {
             await ensureActive(identity, signal);
+            chargeTool();
             const result = await abortable(() => binding.definition.execute(input, signal, context), signal);
             await ensureActive(identity, signal);
             return result;
@@ -288,8 +297,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           const current = context.executionIdentity;
           if (current === undefined || !sameExecutionScope(identity, current) || current.authorizationId !== identity.authorizationId) return false;
           if (ORCHESTRATION_TOOLS.has(tool.name)) {
-            if (identity.space.kind === "public") return false;
-            if (request !== undefined && Object.keys(request.input).some((key) => forbiddenIdentityKeys.has(key))) return false;
+            if (!orchestrationAvailable || context.turnId !== run.id || context.sessionId !== run.sessionId || !current.permissions.includes("agent.use")) return false;
+            if (request !== undefined && !validateCloudOrchestrationInput(tool.name, request.input)) return false;
             await ensureActive(identity, controller.signal);
             return true;
           }
@@ -302,15 +311,17 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           return abortable(() => binding.authorizeResource(request, identity, controller.signal), controller.signal);
         };
         await ensureActive(identity, controller.signal);
+        // One gateway client and operation sequence for the complete tree: accounting stays on the root Run.
+        const baseModel = await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
         let modelCalls = 0;
         const createMeteredModel = async (targetRun: CloudRun, parentSignal: AbortSignal): Promise<ModelClient> => {
-          const baseModel = await abortable(() => options.createModel(identity, targetRun, parentSignal), parentSignal);
           return {
-            complete: (request) => measurements.measure(targetRun.id, "model_inclusive", async () => {
+            complete: (request) => measurements.measure(run.id, "model_inclusive", async () => {
               const modelSignal = AbortSignal.any([request.signal, parentSignal, controller.signal]);
               try {
                 await ensureActive(identity, modelSignal);
-                if (modelCalls >= maxModelCalls) throw new CloudError(409, "MODEL_CALL_LIMIT", "本轮及其子 Agent 已达到共享模型调用上限。");
+                const limit = targetRun.id === run.id ? maxModelCalls : maxModelCalls - 1;
+                if (modelCalls >= limit) throw new CloudError(409, "MODEL_CALL_LIMIT", "本轮共享模型预算已达上限；子任务不能消耗父 Agent 的最后汇总额度。");
                 modelCalls++;
                 let validatedAt = Date.now();
                 const reply = await abortable(() => baseModel.complete({ ...request, signal: modelSignal,
@@ -323,89 +334,24 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                 await ensureActive(identity, modelSignal);
                 if (Buffer.byteLength(JSON.stringify(reply), "utf8") > 96_000) throw new Error("Model output exceeds limit.");
                 return reply;
-              } catch {
+              } catch (error) {
+                if (error instanceof CloudError && error.code === "MODEL_CALL_LIMIT") throw error;
                 throw Object.assign(new Error("模型或执行授权不可用，本轮未继续执行。"), { code: "MODEL_CLOUD_REQUEST_FAILED" });
               }
             }),
           };
         };
-        const runChild = async (instructionValue: unknown, toolCallId: string, index: number, signal: AbortSignal) => {
-          if (maxModelCalls - modelCalls < 3) throw Object.assign(new Error("模型调用预算不足，无法安全启动子 Agent 并保留父 Agent 汇总额度。"), { code: "ORCHESTRATION_BUDGET" });
-          const instruction = orchestrationInstruction(instructionValue);
-          const accepted = await options.repository.acceptRun(identity, run.sessionId, orchestrationRequestId(run.id, toolCallId, index), instruction);
-          const childRun = accepted.run;
-          if (!accepted.created) {
-            if (childRun.status === "completed") return { runId: childRun.id, status: childRun.status, finalText: childRun.finalText };
-            throw Object.assign(new Error("已有同一子任务记录但状态并非可安全重放的已完成状态。"), { code: "ORCHESTRATION_REPLAY_BLOCKED" });
-          }
-          const childBound = await options.repository.bindRun(identity, childRun.sessionId, childRun.id);
-          const childDefinitions = wrappedDefinitions.filter((definition) => !isMemoryToolName(definition.name));
-          const childTools = new ToolRegistry(childDefinitions, { authorize });
-          try {
-            const childModel = await createMeteredModel(childRun, signal);
-            const childEngine = new AgentEngine({
-              model: childModel, tools: childTools, events: childBound.events, compactionStore: childBound.compactions,
-              systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}\n\n你是父 Agent 委派的受限子 Agent。只完成当前委派，不扩大任务范围，不创建新的子 Agent，不输出隐藏推理。将结论和可核验工具证据简洁返回给父 Agent。`,
-              maxSteps: Math.min(2, Math.max(1, maxModelCalls - modelCalls - 1)), maxToolCalls: 4,
-            });
-            const result = await childEngine.runTurn({
-              accountId: childBound.accountId, scopeId: childBound.scopeId, sessionId: childRun.sessionId, turnId: childRun.id,
-              userMessage: instruction, executionIdentity: identity, signal,
-            });
-            return { runId: childRun.id, status: result.status, finalText: result.finalText.slice(0, 12_000) };
-          } catch (error) {
-            const current = await options.repository.getRun(identity, childRun.id).catch(() => undefined);
-            if (current?.status === "running") await options.repository.interruptRun(identity, childRun.id, "runtime_recovery").catch(() => undefined);
-            throw error;
-          }
-        };
-        const orchestrationDefinitions: ToolDefinition[] = identity.space.kind === "public" ? [] : [
-          {
-            name: "delegate_agent", category: "system", mutating: true,
-            description: "将一个边界明确的子任务委派给独立、可审计的云端子 Agent。子 Agent 使用独立 CloudRun，共享当前身份、取消信号和模型预算，不能继续递归委派。",
-            inputSchema: { type: "object", additionalProperties: false, required: ["instruction"], properties: { instruction: { type: "string", minLength: 1, maxLength: 6000 } } },
-            async execute(input, signal, context) {
-              const result = await runChild(input.instruction, context.toolCallId ?? "delegate", 0, signal);
-              return { ok: true, summary: `子 Agent ${result.runId} ${result.status}。`, evidence: { schemaVersion: 1, toolName: "delegate_agent", result, artifacts: [], diagnostics: [] } };
-            },
-          },
-          {
-            name: "delegate_parallel", category: "system", mutating: true,
-            description: "并行执行 1-3 个互相独立的子任务。结果按输入顺序确定性聚合；共享父任务模型预算和取消信号。仅用于确实互不依赖的工作。",
-            inputSchema: { type: "object", additionalProperties: false, required: ["tasks"], properties: { tasks: { type: "array", minItems: 1, maxItems: 3, items: { type: "string", minLength: 1, maxLength: 6000 } } } },
-            async execute(input, signal, context) {
-              if (!Array.isArray(input.tasks) || input.tasks.length < 1 || input.tasks.length > 3) throw new Error("tasks must contain 1-3 instructions.");
-              if (maxModelCalls - modelCalls < input.tasks.length * 2 + 1) throw Object.assign(new Error("共享模型预算不足，无法安全并行并保留父 Agent 汇总额度。"), { code: "ORCHESTRATION_BUDGET" });
-              const results = await Promise.all(input.tasks.map((task, index) => runChild(task, context.toolCallId ?? "parallel", index, signal)));
-              return { ok: true, summary: `已完成 ${results.length} 个并行子 Agent。`, evidence: { schemaVersion: 1, toolName: "delegate_parallel", result: { results }, artifacts: [], diagnostics: [] } };
-            },
-          },
-          {
-            name: "workflow_run_inline", category: "system", mutating: true,
-            description: "顺序执行 1-5 个子 Agent 步骤，并把每一步的可见结果显式交给下一步。适合调研→分析→汇总等有依赖的流程；不会传递隐藏推理。",
-            inputSchema: { type: "object", additionalProperties: false, required: ["steps"], properties: { steps: { type: "array", minItems: 1, maxItems: 5, items: { type: "string", minLength: 1, maxLength: 6000 } } } },
-            async execute(input, signal, context) {
-              if (!Array.isArray(input.steps) || input.steps.length < 1 || input.steps.length > 5) throw new Error("steps must contain 1-5 instructions.");
-              const results: Array<{ runId: string; status: string; finalText: string }> = [];
-              for (let index = 0; index < input.steps.length; index += 1) {
-                const prior = results.map((item, resultIndex) => `Step ${resultIndex + 1}: ${item.finalText}`).join("\n").slice(-3_500);
-                const base = orchestrationInstruction(input.steps[index]);
-                const instruction = prior ? `${base}\n\nPrevious completed step results (visible orchestration evidence, not hidden reasoning):\n${prior}`.slice(0, 6_000) : base;
-                const result = await runChild(instruction, context.toolCallId ?? "workflow", index, signal);
-                results.push(result);
-                if (result.status !== "completed") throw Object.assign(new Error(`Workflow stopped at step ${index + 1}.`), { code: "WORKFLOW_RUN_FAILED" });
-              }
-              return { ok: true, summary: `工作流完成 ${results.length} 个步骤。`, evidence: { schemaVersion: 1, toolName: "workflow_run_inline", result: { results }, artifacts: [], diagnostics: [] } };
-            },
-          },
-        ];
+        const childTools = new ToolRegistry(wrappedDefinitions.filter((definition) => definition.mutating === false && !isMemoryToolName(definition.name)), { authorize });
+        const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
+          tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}`, signal: controller.signal,
+          remainingModelCalls: () => maxModelCalls - modelCalls, chargeTool, createModel: createMeteredModel, ensureActive });
         const tools = new ToolRegistry([...wrappedDefinitions, ...orchestrationDefinitions], { authorize });
         const model = await createMeteredModel(run, controller.signal);
         // Keep the provider even without memory.read: revoked dependencies cannot re-enter through history.
         const engine = new AgentEngine({
           model, tools, events: stores.events, compactionStore: stores.compactions,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
-          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}`,
+          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: maxModelCalls, maxToolCalls: 24,
         });
         await engine.runTurn({
@@ -429,6 +375,18 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           }
         } catch { storageFault = true; }
       } finally {
+        // No admitted child is silently abandoned, even when initialization/storage fails before Engine starts.
+        controller.abort("runtime");
+        try {
+          const children = await options.repository.listChildRuns?.(identity, run.id) ?? [];
+          for (const child of children) {
+            if (child.run.status !== "running") continue;
+            const stores = await options.repository.bindRun(identity, child.run.sessionId, child.run.id);
+            await stores.events.append({ type: "turn.cancelled", accountId: stores.accountId, scopeId: stores.scopeId,
+              sessionId: child.run.sessionId, turnId: child.run.id,
+              payload: { status: "cancelled", source: controller.signal.reason === "user" ? "user" : "runtime", lastCompletedEventSeq: child.run.lastEventSeq } });
+          }
+        } catch { storageFault = true; }
         clearTimeout(deadline);
         active.delete(run.id);
       }

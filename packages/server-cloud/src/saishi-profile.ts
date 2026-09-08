@@ -3,6 +3,7 @@ import type { JsonValue } from "@daoyin/harness-protocol";
 import type { CloudProfile, CloudToolBinding } from "./app.js";
 import { isMemoryToolName } from "./memory-agent-policy.js";
 import { createMemoryProfileBindings, memoryToolAllowed } from "./memory-tools.js";
+import { cloudOrchestrationDescriptors, validateCloudOrchestrationInput } from "./cloud-orchestration.js";
 
 export const SAISHI_PROFILE = "saishi-readonly";
 const scopes: Readonly<Record<string, string>> = Object.freeze({
@@ -93,28 +94,11 @@ export interface SaishiClient {
 
 function orchestrationPolicyBindings(): CloudToolBinding[] {
   const fail = async () => ({ ok: false as const, code: "ORCHESTRATION_RUNTIME_ONLY", message: "编排工具仅由云端运行时安装。", retryable: false });
-  const boundedStrings = (value: unknown, min: number, max: number): value is string[] => Array.isArray(value) && value.length >= min && value.length <= max &&
-    value.every((item) => typeof item === "string" && item.trim().length >= 1 && item.length <= 6000);
-  const bindings: Array<{ name: string; description: string; schema: JsonValue; validate(input: Record<string, unknown>): boolean }> = [
-    {
-      name: "delegate_agent", description: "云端受限子 Agent 委派策略描述符。",
-      schema: { type: "object", additionalProperties: false, required: ["instruction"], properties: { instruction: { type: "string", minLength: 1, maxLength: 6000 } } },
-      validate: (input) => Object.keys(input).length === 1 && typeof input.instruction === "string" && input.instruction.trim().length >= 1 && input.instruction.length <= 6000,
-    },
-    {
-      name: "delegate_parallel", description: "云端并行子 Agent 策略描述符。",
-      schema: { type: "object", additionalProperties: false, required: ["tasks"], properties: { tasks: { type: "array", minItems: 1, maxItems: 3, items: { type: "string", minLength: 1, maxLength: 6000 } } } },
-      validate: (input) => Object.keys(input).length === 1 && boundedStrings(input.tasks, 1, 3),
-    },
-    {
-      name: "workflow_run_inline", description: "云端顺序子 Agent 工作流策略描述符。",
-      schema: { type: "object", additionalProperties: false, required: ["steps"], properties: { steps: { type: "array", minItems: 1, maxItems: 5, items: { type: "string", minLength: 1, maxLength: 6000 } } } },
-      validate: (input) => Object.keys(input).length === 1 && boundedStrings(input.steps, 1, 5),
-    },
-  ];
-  return bindings.map((item) => ({
-    requiredPermissions: ["agent.use"], validateInput: item.validate, authorizeResource: async () => false,
-    definition: { name: item.name, description: item.description, category: "system", mutating: true, inputSchema: item.schema, execute: fail },
+  return cloudOrchestrationDescriptors().map((descriptor) => ({
+    requiredPermissions: ["agent.use"],
+    validateInput: (input) => validateCloudOrchestrationInput(descriptor.name, input),
+    authorizeResource: async () => false,
+    definition: { ...descriptor, execute: fail },
   }));
 }
 
