@@ -4,9 +4,10 @@ import { WorkbenchIcon } from "./WorkbenchIcon.js";
 
 export type StoryReference = { id: string; mimeType: string; name: string; size: number };
 
-export function StoryUpload({ client, disabled, onUploaded, onBusy }: {
+export function StoryUpload({ client, disabled, remaining, onUploaded, onBusy }: {
   client: WorkbenchClient;
   disabled: boolean;
+  remaining: number;
   onUploaded: (reference: StoryReference) => void;
   onBusy: (value: boolean) => void;
 }): React.JSX.Element {
@@ -26,12 +27,12 @@ export function StoryUpload({ client, disabled, onUploaded, onBusy }: {
     return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", escape); };
   }, [open]);
 
-  async function upload(files: FileList | null): Promise<void> {
-    if (!files?.length) return;
+  async function upload(files: File[]): Promise<void> {
+    if (!files.length || remaining <= 0) return;
     const epoch = client.accountScope;
     setBusy(true); onBusy(true); setError(""); setOpen(false);
     try {
-      for (const file of Array.from(files).slice(0, 5)) {
+      for (const file of files.slice(0, remaining)) {
         const asset = await client.uploadStory(file);
         if (epoch !== client.accountScope) throw new Error("账号已变化，请在当前账号重新上传。");
         onUploaded({ id: asset.id, mimeType: asset.mime_type, name: file.name, size: file.size });
@@ -41,11 +42,11 @@ export function StoryUpload({ client, disabled, onUploaded, onBusy }: {
   }
 
   return <div className="composer-add" ref={root}>
-    <input ref={imageInput} className="composer-file-input" type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={disabled || busy}
-      aria-label="添加参考图片" onChange={event => { const files = event.target.files; event.target.value = ""; void upload(files); }} />
-    <input ref={videoInput} className="composer-file-input" type="file" multiple accept="video/mp4" disabled={disabled || busy}
-      aria-label="添加参考视频" onChange={event => { const files = event.target.files; event.target.value = ""; void upload(files); }} />
-    <button type="button" className="composer-add-button" disabled={disabled || busy} aria-label={busy ? "正在上传参考素材" : "添加内容"}
+    <input ref={imageInput} className="composer-file-input" type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={disabled || busy || remaining <= 0}
+      aria-label="添加参考图片" onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} />
+    <input ref={videoInput} className="composer-file-input" type="file" multiple accept="video/mp4" disabled={disabled || busy || remaining <= 0}
+      aria-label="添加参考视频" onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} />
+    <button type="button" className="composer-add-button" disabled={disabled || busy || remaining <= 0} aria-label={busy ? "正在上传参考素材" : remaining <= 0 ? "最多添加 5 个参考素材" : "添加内容"}
       aria-expanded={open} aria-controls="composer-add-menu" onClick={() => { setError(""); setOpen(value => !value); }}>
       {busy ? <span className="spinner" /> : <WorkbenchIcon name="plus" />}
     </button>
