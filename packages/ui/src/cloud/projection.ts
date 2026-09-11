@@ -11,6 +11,8 @@ const toolLabels: Record<string, string> = {
   saishi_list_cameras: "查询摄像机", saishi_list_materials: "查询素材", saishi_get_map: "查询赛事地图",
   saishi_find_participants: "查询参赛者", saishi_get_timeline: "查询赛事时间线", saishi_get_job: "查询任务进度",
   saishi_list_images: "查找赛事图片",
+  story_video_options: "查询视频模型", story_recent_videos: "查询历史视频", story_get_video: "查询视频状态",
+  story_estimate_video: "估算视频费用", story_create_video: "提交视频生成",
 };
 
 export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[] {

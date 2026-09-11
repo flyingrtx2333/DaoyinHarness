@@ -86,10 +86,11 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
   const names = new Set<string>();
   const tools = businessTools.map((binding) => {
     const definition = binding.definition;
-    if (definition.mutating !== false || definition.category !== "extension" || names.has(definition.name) || isMemoryToolName(definition.name) ||
+    const reviewedStoryWrite = profile.id === "story-quick" && definition.name === "story_create_video" && definition.mutating === true && binding.requiredPermissions.includes("story.generate");
+    if ((!reviewedStoryWrite && definition.mutating !== false) || definition.category !== "extension" || names.has(definition.name) || isMemoryToolName(definition.name) ||
         !/^[A-Za-z0-9_.-]{1,100}$/u.test(definition.name) || binding.requiredPermissions.length === 0 ||
         typeof binding.validateInput !== "function" || typeof binding.authorizeResource !== "function") {
-      throw new CloudError(503, "PROFILE_TOOL_INVALID", "云端试运行仅允许显式授权的只读业务工具。");
+      throw new CloudError(503, "PROFILE_TOOL_INVALID", "当前业务工具未通过执行策略检查。");
     }
     names.add(definition.name);
     return Object.freeze({ ...binding, requiredPermissions: Object.freeze([...binding.requiredPermissions]),

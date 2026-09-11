@@ -13,7 +13,7 @@ See [P0 implementation and remaining acceptance](P0-RUNTIME-STABILITY.md) and [r
 | Shared kernel and execution identity | Implemented contracts, tool checks and cloud session/run storage | Windows checks and isolation/recovery tests pass |
 | Public website bridge | Implemented platform grants, MySQL operation ledger, model/search adapters and browser proxy APIs | Real public corpus/model and website UI complete one replayable, cancellable session; explicitly configured sponsor |
 | Personal/organization applications | Saishi first-party account read adapter implemented; generic multi-application composition and private business acceptance remain | Explicit memberships, installations, entitlements and resource checks; no first-tenant fallback |
-| Story queries and paid jobs | Pending | One authorized job, durable job receipt, budget reservation and timeout reconciliation without repeated charges |
+| Story queries and paid jobs | Quick-mode source implemented; deployment and real validation pending | One authorized job, durable job receipt, budget reservation and timeout reconciliation without repeated charges |
 | Youji and shared memory | Pending | Automatic inheritance of full existing account permissions across apps, scoped retrieval, provenance, revocation and forgetting; no per-plugin consent (ADR-0012) |
 | Builder products and channels | Pending | Separate build/runtime identities, immutable app versions, installations, deployments and client isolation |
 

@@ -92,7 +92,7 @@ export interface SaishiClient {
   call(name: string, input: Record<string, unknown>, identity: ExecutionIdentity, runId: string, operationId: string, signal: AbortSignal): Promise<unknown>;
 }
 
-function orchestrationPolicyBindings(): CloudToolBinding[] {
+export function orchestrationPolicyBindings(): CloudToolBinding[] {
   const fail = async () => ({ ok: false as const, code: "ORCHESTRATION_RUNTIME_ONLY", message: "编排工具仅由云端运行时安装。", retryable: false });
   return cloudOrchestrationDescriptors().map((descriptor) => ({
     requiredPermissions: ["agent.use"],

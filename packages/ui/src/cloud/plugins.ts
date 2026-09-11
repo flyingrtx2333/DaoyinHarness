@@ -18,10 +18,10 @@ export const PLUGINS: readonly WorkbenchPlugin[] = [
     description: "查询当前账号的赛事、素材与任务",
     capabilities: ["赛事查询", "设备与素材", "地图与点位", "个人时间线", "任务进度"],
     note: "登录道引账号后直接使用已有赛事读取权限。" },
-  { id: "story", name: "短剧制作", mark: "剧", status: "pending",
-    description: "从剧本到视频成片",
-    capabilities: ["剧本生成", "角色与场景", "分镜编辑", "视频生成", "字幕与导出"],
-    note: "已有短剧业务能力，尚未接入此工作台。" },
+  { id: "story", name: "快速视频", mark: "剧", status: "account_required", profileId: "story-quick",
+    description: "通过对话生成视频与参考素材新版本",
+    capabilities: ["文生视频", "参考图生成", "参考视频生成", "历史作品", "生成进度"],
+    note: "登录后使用当前 Story 账号的生成能力。" },
   { id: "builder", name: "网站与应用", mark: "站", status: "pending",
     description: "对话创建网站与轻应用",
     capabilities: ["创建网站", "修改页面", "应用预览"], note: "已有产品工坊业务，尚未接入此工作台。" },
@@ -44,5 +44,5 @@ export function filterPlugins(query: string, authorizedProfiles: readonly string
   const needle = query.trim().toLocaleLowerCase();
   return PLUGINS.filter((plugin) => [plugin.name, plugin.description, ...plugin.capabilities].join(" ").toLocaleLowerCase().includes(needle))
     .map((plugin) => plugin.status === "account_required" && plugin.profileId && authorizedProfiles.includes(plugin.profileId)
-      ? { ...plugin, status: "available" as const, note: "使用当前账号的赛事读取权限。" } : plugin);
+      ? { ...plugin, status: "available" as const, note: "使用当前账号已有的业务权限。" } : plugin);
 }

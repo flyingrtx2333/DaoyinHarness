@@ -4,6 +4,7 @@ import { createCloudServer, type CloudServerOptions } from "./app.js";
 import { createCompanyPublicProfile, isCompanyPublicIdentity, COMPANY_KNOWLEDGE_TOOL, parseCompanyKnowledgeQuery } from "./company-profile.js";
 import { CloudError } from "./repository.js";
 import { createSaishiProfile, isSaishiIdentity } from "./saishi-profile.js";
+import { createStoryProfile, isStoryIdentity } from "./story-profile.js";
 import { readModelStream } from "./model-stream.js";
 
 export interface PlatformAdapterOptions {
@@ -57,7 +58,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
     const secret = privateApp ? options.appServiceToken : options.serviceToken;
     if (!secret) throw new CloudError(503, "APP_BRIDGE_DISABLED", "私有业务插件尚未配置。");
     if ((!privateApp && ["profile", "call", "authorize-tool"].includes(path)) || (privateApp && path === "search")) throw new Error("Invalid bridge path.");
-    const duration = ["model", "search"].includes(path) ? 90_000 : ["profile", "call", "authorize-tool"].includes(path) ? 30_000 : 5_000;
+    const duration = ["model", "search"].includes(path) ? 90_000 : ["profile", "call", "authorize-tool"].includes(path) ? (path === "call" ? 100_000 : 30_000) : 5_000;
     const signal = AbortSignal.any([parent, AbortSignal.timeout(duration)]);
     try {
       const response = await transport(new URL(`/api/internal/${privateApp ? "agent-apps" : "agent-public"}/v1/${path}`, base), {
@@ -65,9 +66,14 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
         headers: { "content-type": "application/json", "x-agent-service-token": secret, ...(onTextDelta ? { Accept: "application/x-ndjson" } : {}) }, body: JSON.stringify(input),
       });
       if (!response.ok) {
-        await response.body?.cancel();
-        const status = [400, 401, 403, 404, 409, 413, 429].includes(response.status) ? response.status : 503;
-        throw new CloudError(status, "PLATFORM_BRIDGE_REJECTED", "平台授权或业务调用未完成，请保留原请求标识。");
+        const status = [400, 401, 402, 403, 404, 409, 413, 429].includes(response.status) ? response.status : 503;
+        let message = "平台授权或业务调用未完成，请保留原请求标识。";
+        if (privateApp && path === "call") {
+          const detail: unknown = await response.json().catch(() => null);
+          if (record(detail) && record(detail.detail) && detail.detail.code === "STORY_OPERATION_FAILED" &&
+              typeof detail.detail.message === "string" && detail.detail.message.length <= 600) message = detail.detail.message;
+        } else await response.body?.cancel();
+        throw new CloudError(status, "PLATFORM_BRIDGE_REJECTED", message);
       }
       if (onTextDelta && response.headers.get("content-type")?.includes("application/x-ndjson")) return await readModelStream(response, onTextDelta, signal);
       const reader = response.body?.getReader();
@@ -98,7 +104,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   });
   async function privateProfile(identity: ExecutionIdentity, signal: AbortSignal) {
     const catalog = await post("profile", { authorizationId: identity.authorizationId }, signal, true);
-    return createSaishiProfile(catalog, identity, {
+    return (isStoryIdentity(identity) ? createStoryProfile : createSaishiProfile)(catalog, identity, {
       authorize: async (name, input, current, operationId, childSignal) => {
         const value = await post("authorize-tool", { authorizationId: current.authorizationId, name, arguments: input,
           runId: "resource_check", operationId }, childSignal, true);
@@ -117,27 +123,27 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       }
     },
     authenticate: async (bearer, signal) => {
-      const privateApp = bearer.startsWith("saishi_agent_");
-      if (privateApp && !/^saishi_agent_[A-Za-z0-9_-]{64}$/u.test(bearer)) return null;
+      const privateApp = /^(?:saishi|story)_agent_/u.test(bearer);
+      if (privateApp && !/^(?:saishi|story)_agent_[A-Za-z0-9_-]{64}$/u.test(bearer)) return null;
       const value = await post("introspect", { bearer }, signal, privateApp);
       if (!record(value)) return null;
       assertExecutionIdentity(value.identity);
-      if (privateApp ? !isSaishiIdentity(value.identity) : !isCompanyPublicIdentity(value.identity)) return null;
+      if (privateApp ? !(isSaishiIdentity(value.identity) || isStoryIdentity(value.identity)) : !isCompanyPublicIdentity(value.identity)) return null;
       return snapshotExecutionIdentity(value.identity);
     },
     isAuthorizationActive: async (identity: ExecutionIdentity, signal) => {
-      const privateApp = isSaishiIdentity(identity);
+      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity);
       if (!privateApp && !isCompanyPublicIdentity(identity)) return false;
       const value = await post("authorize", { identity }, signal, privateApp);
       return record(value) && value.active === true;
     },
     resolveProfile: async (identity, signal) => {
-      if (isSaishiIdentity(identity)) return privateProfile(identity, signal);
+      if (isSaishiIdentity(identity) || isStoryIdentity(identity)) return privateProfile(identity, signal);
       if (!isCompanyPublicIdentity(identity)) throw new CloudError(403, "APP_ACCESS_DENIED", "未开通当前应用。");
       return publicProfile;
     },
     createModel: async (identity, run, signal) => {
-      const privateApp = isSaishiIdentity(identity);
+      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity);
       if ((!privateApp && !isCompanyPublicIdentity(identity)) || run.authorizationId !== identity.authorizationId || run.billingAccountId !== identity.billingAccountId) {
         throw new CloudError(403, "RUN_IDENTITY_MISMATCH", "任务授权不匹配。");
       }

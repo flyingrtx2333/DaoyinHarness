@@ -36,9 +36,9 @@ export class WorkbenchClient {
   readonly #receipts = new Map<string, PendingRequest>();
   public get accountScope(): string { return this.#accountScope; }
   public get account(): AccountProfile | undefined { return this.#account; }
-  public constructor(private readonly storage: StoragePort, private readonly fetcher: typeof fetch = (input, init) => fetch(input, init), public readonly application: "company" | "saishi" = "company") {
-    this.#base = application === "saishi" ? "/api/agent-apps/saishi/workbench" : BASE;
-    this.#receiptKey = application === "saishi" ? `${RECEIPTS}:saishi` : RECEIPTS;
+  public constructor(private readonly storage: StoragePort, private readonly fetcher: typeof fetch = (input, init) => fetch(input, init), public readonly application: "company" | "saishi" | "story" = "company") {
+    this.#base = application !== "company" ? `/api/agent-apps/${application}/workbench` : BASE;
+    this.#receiptKey = application !== "company" ? `${RECEIPTS}:${application}` : RECEIPTS;
     if (application === "company") this.#restoreReceipts();
   }
 
@@ -68,19 +68,19 @@ export class WorkbenchClient {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: controller.signal,
       });
       if (!response.ok) {
-        if (response.status === 401 || (this.application === "saishi" && response.status === 403)) {
+        if (response.status === 401 || (this.application !== "company" && response.status === 403)) {
           this.#csrf = "";
           this.#accountScope = "";
           this.#account = undefined;
-          if (this.application === "saishi") {
+          if (this.application !== "company") {
             this.#receipts.clear();
             let loginUrl: string | undefined;
             if (response.status === 401) {
               const detail: unknown = await response.json().catch(() => null);
               if (typeof detail === "object" && detail !== null && "loginUrl" in detail && typeof detail.loginUrl === "string" &&
-                  /^\/api\/agent-apps\/saishi\/workbench\/login(?:\?[A-Za-z0-9%=&_.-]*)?$/u.test(detail.loginUrl)) loginUrl = detail.loginUrl;
+                  /^\/api\/agent-apps\/(?:saishi|story)\/workbench\/login(?:\?[A-Za-z0-9%=&_.-]*)?$/u.test(detail.loginUrl)) loginUrl = detail.loginUrl;
             }
-            throw new WorkbenchError(response.status === 401 ? "请登录道引账号，登录后即可使用该账号的赛事数据。" : "当前账号没有此赛事数据的访问权限。", response.status, loginUrl);
+            throw new WorkbenchError(response.status === 401 ? "请登录道引账号，登录后即可使用该账号的业务能力。" : "当前账号没有此业务空间的访问权限。", response.status, loginUrl);
           }
           throw new WorkbenchError("访客授权已过期，请重新进入工作台。", response.status);
         }
@@ -96,6 +96,26 @@ export class WorkbenchClient {
     } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
   }
 
+
+  public async storyVideo(id: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (this.application !== "story" || !identifier(id)) throw new WorkbenchError("视频标识无效。");
+    return this.#request("/videos/" + encodeURIComponent(id), undefined, signal);
+  }
+  public async uploadStory(file: File): Promise<{ id: string; mime_type: string }> {
+    if (this.application !== "story" || !this.#accountScope) throw new WorkbenchError("请先连接 Story。");
+    const video = file.type === "video/mp4";
+    if ((!video && !["image/jpeg", "image/png", "image/webp"].includes(file.type)) || file.size <= 0 ||
+        file.size > (video ? 250 : 10)*1024*1024) throw new WorkbenchError("请选择 10MB 内图片或 250MB 内 MP4 视频。");
+    const scope = this.#accountScope;
+    const body = new FormData(); body.append("file", file);
+    const response = await this.fetcher(this.#base + "/uploads", { method: "POST", body, credentials: "same-origin", redirect: "error",
+      headers: { "x-agent-account": scope, "x-agent-csrf": this.#csrf }, signal: AbortSignal.timeout(180_000) });
+    if (!response.ok || scope !== this.#accountScope) throw new WorkbenchError("素材上传未完成或账号已变化，请重新连接后查看。", response.status);
+    const result: unknown = await response.json();
+    if (typeof result !== "object" || result === null || !("id" in result) || !identifier(result.id) ||
+        !("mime_type" in result) || typeof result.mime_type !== "string") throw new WorkbenchError("素材结果无效。");
+    return { id: result.id, mime_type: result.mime_type };
+  }
   public async disconnectApplication(): Promise<void> {
     await this.#request("/logout", {});
     this.#csrf = "";
@@ -108,14 +128,14 @@ export class WorkbenchClient {
     if (!preserveAccount) this.#account = undefined;
     const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string; account?: unknown }>("/bootstrap", {});
     if (!result.csrfToken || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() ||
-        (this.application === "saishi" && (result.profileId !== "saishi-readonly" || result.authentication !== "account" || !identifier(result.accountScope)))) {
+        (this.application !== "company" && (result.profileId !== (this.application === "story" ? "story-quick" : "saishi-readonly") || result.authentication !== "account" || !identifier(result.accountScope)))) {
       this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#receipts.clear();
       throw new WorkbenchError("账号工作台尚未接通，请稍后重新连接。");
     }
-    if (this.application === "saishi") {
+    if (this.application !== "company") {
       this.#accountScope = result.accountScope!;
       this.#account = accountProfile(result.account);
-      this.#receiptKey = `${RECEIPTS}:saishi:${this.#accountScope}`;
+      this.#receiptKey = `${RECEIPTS}:${this.application}:${this.#accountScope}`;
       this.#restoreReceipts();
     }
     this.#csrf = result.csrfToken;
@@ -187,7 +207,7 @@ export class WorkbenchClient {
   public streamDenied(status: 401 | 403): WorkbenchError {
     this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#receipts.clear();
     return new WorkbenchError(status === 401 ? "登录或访客身份已失效，请重新连接。" : "当前账号已无法访问此会话。", status,
-      this.application === "saishi" && status === 401 ? "/api/agent-apps/saishi/workbench/login" : undefined);
+      this.application !== "company" && status === 401 ? "/api/agent-apps/saishi/workbench/login" : undefined);
   }
   public observeRun(run: CloudRun): void {
     const pending = this.pending(run.sessionId);
@@ -203,7 +223,7 @@ export class WorkbenchClient {
     try { this.#persist(); } catch { /* A stale durable receipt still reuses the same accepted request. */ }
   }
   public async submit(sessionId: string, message: string): Promise<CloudRun> {
-    if (this.application === "saishi" && !this.#accountScope) throw new WorkbenchError("请先连接当前道引账号。", 401);
+    if (this.application !== "company" && !this.#accountScope) throw new WorkbenchError("请先连接当前道引账号。", 401);
     if (/saishi_agent_[A-Za-z0-9_-]{64}/u.test(message)) throw new WorkbenchError("检测到访问凭证，请勿发送到聊天。业务数据使用当前登录账号访问。");
     const existing = this.pending(sessionId);
     if (existing && existing.message !== message) throw new WorkbenchError("上次提交结果尚未确认，请先恢复原提交。");
