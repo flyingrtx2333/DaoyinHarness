@@ -1,6 +1,6 @@
 # Story 快速视频插件
 
-本轮为源码接入，尚未部署或完成真实模型/视频验收。主平台与 Story 改动在 Windows 的 D:\AllProjects\DaoyinTechnology 主工作区；Harness 改动在此服务器主工作区，均保留其他进行中的工作。
+2026-09-11 已部署运行时及工作台 d592f07，并完成真实模型澄清及一次视频生成验收。主平台与 Story 改动在 Windows 的 D:\AllProjects\DaoyinTechnology 主工作区；Harness 改动在此服务器主工作区，均保留其他进行中的工作。
 
 ## 能力
 
@@ -18,10 +18,10 @@
 
 应用主平台 backend/db/migrations/20260911_story_harness.sql，再为 story-lab.agent_quick 配置并启用支持工具调用的模型。迁移默认禁用，不复制密钥或改变用户余额。视频上传代理需支持 250MB 加 multipart 开销。
 
-当前线上只读检查：不存在 agent_quick 绑定，Story 执行连接为 0。未作生产配置变更、数据库迁移、提交或发布。
+线上已启用 story-lab.agent_quick（doubao-seed-2-1-pro-260628）及 Story 连接，上传入口配置 256MB 限制。主平台镜像 story-a5242832，Story 镜像 harness-e2ea74bc；部署回退记录在 /opt/daoyin-harness/deployments/story-a5242832。
 
 ## 验证记录
 
 2026-09-11：独立 Linux 服务器云端/UI TypeScript 检查通过；工作台 --server-linux --preview 打包通过。Windows Story 开发 Docker 镜像构建和新路由加载通过，主平台既有开发镜像中新路由加载通过；主平台全新镜像遇到依赖下载超时。
 
-尚未验证真实模型澄清、真实视频生成/声音、浏览器上传与播放、账号隔离及重试计费。使用真实账号和 3–5 项小样本完成这些验收，不执行模拟套件。主平台完整接入说明在 backend-story/docs/harness-quick.md。
+真实账号验证：模糊换声请求澄清三类来源；只换音轨请求明确能力限制；一次 4 秒 480p Seedance Mini 样片成功并结算 121.376060 积分，媒体含 H.264 视频和 AAC 音轨；登录、bootstrap、参考 PNG 上传通过。浏览器页面连续超时，实际播放听辨、页面交互、参考生成效果及账号切换/重试计费仍未验收。当前账号未启用 MiniMax-H3，整段视频参考生成不可宣称可用。未运行模拟套件。主平台完整接入说明在 backend-story/docs/harness-quick.md。
