@@ -13,7 +13,7 @@ import { scheduleExpiry } from "./expiry.js";
 import { SettingsDialog } from "./SettingsDialog.js";
 import { ToolActivity } from "./ToolActivity.js";
 import { StoryVideos } from "./StoryVideos.js";
-import { StoryUpload } from "./StoryUpload.js";
+import { StoryUpload, type StoryReference } from "./StoryUpload.js";
 import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
 
@@ -30,6 +30,21 @@ const storage = {
   removeItem: (key: string): void => window.localStorage.removeItem(key),
 };
 const statusText = { queued: "等待中", running: "进行中", completed: "已完成", failed: "未完成", cancelled: "已停止", interrupted: "已中断" };
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function referenceLine(reference: StoryReference): string {
+  return `[已上传参考${reference.mimeType === "video/mp4" ? "视频" : "图片"}，文件名：${reference.name}，素材 ID：${reference.id}]`;
+}
+
+function visibleUserMessage(message: string): string {
+  return message.replace(/\[已上传参考(图片|视频)，文件名：([^，\]]+)，素材 ID：[^\]]+\]/gu, "参考$1：$2")
+    .replace(/\[已上传参考(图片|视频)，素材 ID：[^\]]+\]/gu, "已添加参考$1").trim();
+}
 
 function MessageTime({ value }: { value: string }): React.JSX.Element | null {
   const date = new Date(value);
@@ -59,6 +74,7 @@ export function App(): React.JSX.Element {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [references, setReferences] = useState<StoryReference[]>([]);
   const [sendingMessage, setSendingMessage] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -89,7 +105,7 @@ export function App(): React.JSX.Element {
     if (cause instanceof WorkbenchError && (cause.status === 401 || cause.status === 403)) {
       accountEpoch.current++;
       setAccount(undefined); setSettingsOpen(false); setSendingMessage("");
-      setPhase("expired"); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft("");
+      setPhase("expired"); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft(""); setReferences([]);
     }
   }
   async function connect(background = false): Promise<void> {
@@ -99,7 +115,7 @@ export function App(): React.JSX.Element {
     const savedDraft = currentDraft.current;
     connecting.current = true;
     if (!quiet) { setPhase("connecting"); setError(""); setLoginUrl(undefined); }
-    function resetAccount(): void { accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSendingMessage(""); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft(""); }
+    function resetAccount(): void { accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSendingMessage(""); setRuns([]); setEvents([]); setSessions([]); setSelected(""); setDraft(""); setReferences([]); }
     if (!quiet) resetAccount();
     try {
       const expiry = await client.bootstrap(quiet);
@@ -190,13 +206,13 @@ export function App(): React.JSX.Element {
       try { await client.disconnectApplication(); } catch (cause) { if (!(cause instanceof WorkbenchError && cause.status === 401)) throw cause; }
       // Match the platform's legacy user-store sign-out contract; never read the token.
       window.localStorage.removeItem("athletereel_token");
-      accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSessions([]); setRuns([]); setEvents([]); setSelected(""); setDraft(""); setPhase("expired");
+      accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSessions([]); setRuns([]); setEvents([]); setSelected(""); setDraft(""); setReferences([]); setPhase("expired");
       window.location.replace("/harness/");
     } catch (cause) { loggingOut.current = false; throw cause; }
   }
 
   function choose(id: string): void {
-    setSelected(id); setDraft(""); setError(""); setSidebar(false); setView("chat");
+    setSelected(id); setDraft(""); setReferences([]); setError(""); setSidebar(false); setView("chat");
     if (!id) try { storage.removeItem(SELECTED); } catch { /* Optional selection history. */ }
   }
   function isSessionProtected(id: string): boolean {
@@ -226,27 +242,30 @@ export function App(): React.JSX.Element {
     void id; setView("chat"); setSidebar(false); setError("");
     if (focusComposer) window.requestAnimationFrame(() => document.getElementById("message")?.focus());
   }
-  async function send(message = draft.trim()): Promise<void> {
-    if (uploading || !message || submission.current || sessionMutation.current || active || phase !== "ready" || loading) return;
+  async function send(message?: string): Promise<void> {
+    const visibleMessage = message === undefined ? draft.trim() : visibleUserMessage(message);
+    const submittedMessage = message === undefined && references.length
+      ? `${visibleMessage}\n\n${references.map(referenceLine).join("\n")}` : message ?? visibleMessage;
+    if (uploading || !visibleMessage || submission.current || sessionMutation.current || active || phase !== "ready" || loading) return;
     if (session?.archivedAt) { setError("请先恢复已归档的会话，或新建会话。"); return; }
     if (!plugin?.profileId) { setError("当前会话的插件尚未支持，请新建会话并选择可用插件。"); return; }
-    setSubmitting(true); setSendingMessage(message); setError(""); nearBottom.current = true;
+    setSubmitting(true); setSendingMessage(visibleMessage); setError(""); nearBottom.current = true;
     const epoch = accountEpoch.current;
     const operation = (async (): Promise<CloudRun> => {
       let id = selected;
       if (!id) {
-        const created = await client.createSession(message, plugin.profileId);
+        const created = await client.createSession(visibleMessage, plugin.profileId);
         if (epoch !== accountEpoch.current) throw new WorkbenchError("账号连接已变化，原问题未继续提交。");
         id = created.id; setSessions((list) => [created, ...list]); setSelected(id);
       }
-      return client.submit(id, message);
+      return client.submit(id, submittedMessage);
     })();
     submission.current = operation;
     try {
       const accepted = await operation;
       if (epoch === accountEpoch.current) {
         setRuns((current) => [accepted, ...current.filter((run) => run.id !== accepted.id)]);
-        setDraft(""); nearBottom.current = true;
+        setDraft(""); setReferences([]); nearBottom.current = true;
       }
     } catch (cause) { if (epoch === accountEpoch.current) fail(cause); }
     finally { submission.current = null; setSubmitting(false); setSendingMessage(""); if (epoch === accountEpoch.current) setRevision((value) => value + 1); }
@@ -281,7 +300,7 @@ export function App(): React.JSX.Element {
           {phase === "ready" && loading && !sendingMessage && <p className="connection-message" role="status">正在恢复会话…</p>}
           {phase === "ready" && !loading && !sendingMessage && turns.length === 0 && <section className="empty-state"><span className="empty-mark" aria-hidden="true"><HarnessLogo /></span><h2>今天，想完成什么？</h2><div className="suggestions">{[{ label: "生成口播视频", text: "我想新生成一段女声普通话口播视频", icon: "story" as const }, { label: "查看我的赛事", text: "列出我当前账号的赛事", icon: "pin" as const }, { label: "了解道引产品", text: "道引科技有哪些产品？", icon: "book" as const }].map(({ label, text, icon }) => <button key={text} onClick={() => { setDraft(text); document.getElementById("message")?.focus(); }}><WorkbenchIcon name={icon} />{label}<WorkbenchIcon name="chevron" /></button>)}</div></section>}
           {turns.map((turn) => <article className="turn" key={turn.run.id} aria-label="一轮对话">
-            <div className="user-message"><div className="message-meta"><span className="message-label">你</span><MessageTime value={turn.run.createdAt} /></div><p>{turn.run.userMessage}</p></div>
+            <div className="user-message"><div className="message-meta"><span className="message-label">你</span><MessageTime value={turn.run.createdAt} /></div><p>{visibleUserMessage(turn.run.userMessage)}</p></div>
             <div className="assistant-message"><div className="assistant-label"><span className="mini-mark" aria-hidden="true"><HarnessLogo /></span><span>Harness</span><span className="run-status">{statusText[turn.run.status]}</span><MessageTime value={turn.assistantOccurredAt} /></div>
               {turn.tools.length > 0 && <ToolActivity tools={turn.tools} />}
               <div className="markdown">{turn.text && <MarkdownMessage text={turn.text} />}</div>
@@ -302,11 +321,11 @@ export function App(): React.JSX.Element {
         {!loginUrl && phase !== "connecting" && (phase !== "ready" || error) && <button className="primary reconnect" onClick={() => { void connect(); }}>重新连接工作台</button>}
         {pending && phase === "ready" && !submitting && <div className="recovery"><span>上次提交结果尚未确认。</span><button disabled={loading || !!active} onClick={() => { void send(pending.message); }}>恢复原提交</button></div>}
         {session?.archivedAt && <div className="archived-notice" role="status"><span>会话已归档，恢复后可继续发送。</span><button type="button" disabled={!!managing || phase !== "ready"} onClick={() => { void manageSession(session.id, "restore").catch(() => undefined); }}>恢复会话</button></div>}
-        {phase === "ready" && <StoryUpload key={client.accountScope} client={client} disabled={pluginBusy || !!managing || !!session?.archivedAt} onBusy={setUploading} onUploaded={text => { if (selectedRef.current === selected) setDraft(current => (current + text).slice(0, 10000)); }} />}
         <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
           <label htmlFor="message" className="sr-only">发送给 Harness 的问题</label>
           <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={2} disabled={phase !== "ready" || submitting || !!pending || !!managing || !!session?.archivedAt} placeholder="描述你的问题…" onKeyDown={(event) => { if (isSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing }, preferences)) { event.preventDefault(); void send(); } }} />
-          <div className="composer-controls"><div className="composer-plugins"><button type="button" className="selected-plugin" onClick={browsePlugins} aria-label="查看已启用插件">全部插件<span className="plugin-check" aria-hidden="true">✓</span></button>{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={uploading || !draft.trim() || phase !== "ready" || loading || !!pending || !!managing || !!session?.archivedAt}><WorkbenchIcon name="arrow" /></button>}</div>
+          {references.length > 0 && <div className="composer-attachments" aria-label="待发送参考素材">{references.map(reference => <span key={reference.id}><WorkbenchIcon name={reference.mimeType === "video/mp4" ? "story" : "image"} /><b>{reference.name}</b><small>{formatFileSize(reference.size)}</small><button type="button" aria-label={`移除附件：${reference.name}`} onClick={() => setReferences(items => items.filter(item => item.id !== reference.id))}>×</button></span>)}</div>}
+          <div className="composer-controls"><div className="composer-plugins"><StoryUpload key={client.accountScope} client={client} disabled={pluginBusy || !!managing || !!session?.archivedAt} onBusy={setUploading} onUploaded={reference => { if (selectedRef.current === selected) setReferences(items => items.some(item => item.id === reference.id) ? items : [...items, reference].slice(0, 5)); }} /><button type="button" className="selected-plugin" onClick={browsePlugins} aria-label="查看已启用插件">全部插件<span className="plugin-check" aria-hidden="true">✓</span></button>{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={uploading || !draft.trim() || phase !== "ready" || loading || !!pending || !!managing || !!session?.archivedAt}><WorkbenchIcon name="arrow" /></button>}</div>
         </form>
         <p className="composer-note">已接入插件自动可用；付费生成使用当前账号额度</p>
         <div className="sr-only" role="status">{submitting ? "正在提交问题" : active ? "任务进行中" : turns.length ? "回答已更新" : ""}</div>
