@@ -18,6 +18,11 @@ import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
 
 const APPLICATION = "saishi" as const;
+const entryUrl = new URL(window.location.href);
+if (entryUrl.searchParams.has("app")) {
+  entryUrl.searchParams.delete("app");
+  window.history.replaceState(null, "", entryUrl.pathname + entryUrl.search + entryUrl.hash);
+}
 const SELECTED = "daoyin-harness-cloud-selected-v2";
 const storage = {
   getItem: (key: string): string | null => window.localStorage.getItem(key),
