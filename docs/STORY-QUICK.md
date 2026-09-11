@@ -4,7 +4,7 @@
 
 ## 能力
 
-入口 /harness/?app=story。复用道引账号 Cookie 和 Story 创作空间，自动解析权限与费用归属，不要求粘贴令牌或逐插件授权。
+入口 `/harness/`。复用道引账号 Cookie 和 Story 创作空间，与官网知识及赛事工具共用同一会话；Agent 自动判断何时使用 Story，不要求选择插件、粘贴令牌或逐插件授权。
 
 五项工具：story_video_options、story_recent_videos、story_get_video、story_estimate_video、story_create_video。上传图片/MP4 后向对话附加素材 ID，视频任务由 Story 持久化，工作台从同账号接口定期刷新状态并播放完成视频。
 
