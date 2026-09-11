@@ -86,7 +86,7 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
   const names = new Set<string>();
   const tools = businessTools.map((binding) => {
     const definition = binding.definition;
-    const reviewedStoryWrite = profile.id === "story-quick" && definition.name === "story_create_video" && definition.mutating === true && binding.requiredPermissions.includes("story.generate");
+    const reviewedStoryWrite = ["story-quick", "daoyin-workbench"].includes(profile.id) && definition.name === "story_create_video" && definition.mutating === true && binding.requiredPermissions.includes("story.generate");
     if ((!reviewedStoryWrite && definition.mutating !== false) || definition.category !== "extension" || names.has(definition.name) || isMemoryToolName(definition.name) ||
         !/^[A-Za-z0-9_.-]{1,100}$/u.test(definition.name) || binding.requiredPermissions.length === 0 ||
         typeof binding.validateInput !== "function" || typeof binding.authorizeResource !== "function") {

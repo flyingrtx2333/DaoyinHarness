@@ -98,11 +98,11 @@ export class WorkbenchClient {
 
 
   public async storyVideo(id: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    if (this.application !== "story" || !identifier(id)) throw new WorkbenchError("视频标识无效。");
+    if (!identifier(id)) throw new WorkbenchError("视频标识无效。");
     return this.#request("/videos/" + encodeURIComponent(id), undefined, signal);
   }
   public async uploadStory(file: File): Promise<{ id: string; mime_type: string }> {
-    if (this.application !== "story" || !this.#accountScope) throw new WorkbenchError("请先连接 Story。");
+    if (!this.#accountScope) throw new WorkbenchError("请先连接道引账号。");
     const video = file.type === "video/mp4";
     if ((!video && !["image/jpeg", "image/png", "image/webp"].includes(file.type)) || file.size <= 0 ||
         file.size > (video ? 250 : 10)*1024*1024) throw new WorkbenchError("请选择 10MB 内图片或 250MB 内 MP4 视频。");
@@ -128,7 +128,7 @@ export class WorkbenchClient {
     if (!preserveAccount) this.#account = undefined;
     const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string; account?: unknown }>("/bootstrap", {});
     if (!result.csrfToken || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() ||
-        (this.application !== "company" && (result.profileId !== (this.application === "story" ? "story-quick" : "saishi-readonly") || result.authentication !== "account" || !identifier(result.accountScope)))) {
+        (this.application !== "company" && (result.profileId !== "daoyin-workbench" || result.authentication !== "account" || !identifier(result.accountScope)))) {
       this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#receipts.clear();
       throw new WorkbenchError("账号工作台尚未接通，请稍后重新连接。");
     }

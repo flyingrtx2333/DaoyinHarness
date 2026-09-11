@@ -4,7 +4,7 @@ import { PluginIcon, WorkbenchIcon } from "./WorkbenchIcon.js";
 
 interface PluginActions { selectedId: string; onSelect: (id: string) => void; busy: boolean; authorizedProfiles?: readonly string[] }
 
-export function PluginCatalog({ onSelect, busy, authorizedProfiles = [] }: PluginActions): React.JSX.Element {
+export function PluginCatalog({ authorizedProfiles = [] }: PluginActions): React.JSX.Element {
   const [query, setQuery] = useState("");
   const matches = filterPlugins(query, authorizedProfiles);
   return <section className="plugin-catalog" aria-label="业务插件">
@@ -12,7 +12,7 @@ export function PluginCatalog({ onSelect, busy, authorizedProfiles = [] }: Plugi
     <div className="plugin-grid">{matches.map((plugin) => <article className={`plugin-card ${plugin.status}`} key={plugin.id} aria-labelledby={`catalog-${plugin.id}`}>
       <span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span>
       <div className="plugin-card-copy"><h2 id={`catalog-${plugin.id}`}>{plugin.name}</h2><p className="plugin-description">{plugin.description}</p></div>
-      {plugin.status !== "pending" ? <button className="plugin-use" aria-label={`${plugin.status === "account_required" ? "打开" : "使用"}${plugin.name}`} disabled={busy} onClick={() => onSelect(plugin.id)}>{plugin.status === "account_required" ? "打开" : "使用"}</button> : <span className="plugin-state">待接入</span>}
+      {plugin.status !== "pending" ? <span className="plugin-state">已启用</span> : <span className="plugin-state">待接入</span>}
     </article>)}</div>
     {matches.length === 0 && <p className="plugin-no-results" role="status">没有找到匹配的插件</p>}
   </section>;

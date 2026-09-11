@@ -5,6 +5,7 @@ import { createCompanyPublicProfile, isCompanyPublicIdentity, COMPANY_KNOWLEDGE_
 import { CloudError } from "./repository.js";
 import { createSaishiProfile, isSaishiIdentity } from "./saishi-profile.js";
 import { createStoryProfile, isStoryIdentity } from "./story-profile.js";
+import { createWorkbenchProfile, isWorkbenchIdentity } from "./workbench-profile.js";
 import { readModelStream } from "./model-stream.js";
 
 export interface PlatformAdapterOptions {
@@ -104,7 +105,8 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   });
   async function privateProfile(identity: ExecutionIdentity, signal: AbortSignal) {
     const catalog = await post("profile", { authorizationId: identity.authorizationId }, signal, true);
-    return (isStoryIdentity(identity) ? createStoryProfile : createSaishiProfile)(catalog, identity, {
+    const factory = isWorkbenchIdentity(identity) ? createWorkbenchProfile : isStoryIdentity(identity) ? createStoryProfile : createSaishiProfile;
+    return factory(catalog, identity, {
       authorize: async (name, input, current, operationId, childSignal) => {
         const value = await post("authorize-tool", { authorizationId: current.authorizationId, name, arguments: input,
           runId: "resource_check", operationId }, childSignal, true);
@@ -128,22 +130,22 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       const value = await post("introspect", { bearer }, signal, privateApp);
       if (!record(value)) return null;
       assertExecutionIdentity(value.identity);
-      if (privateApp ? !(isSaishiIdentity(value.identity) || isStoryIdentity(value.identity)) : !isCompanyPublicIdentity(value.identity)) return null;
+      if (privateApp ? !(isSaishiIdentity(value.identity) || isStoryIdentity(value.identity) || isWorkbenchIdentity(value.identity)) : !isCompanyPublicIdentity(value.identity)) return null;
       return snapshotExecutionIdentity(value.identity);
     },
     isAuthorizationActive: async (identity: ExecutionIdentity, signal) => {
-      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity);
+      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity);
       if (!privateApp && !isCompanyPublicIdentity(identity)) return false;
       const value = await post("authorize", { identity }, signal, privateApp);
       return record(value) && value.active === true;
     },
     resolveProfile: async (identity, signal) => {
-      if (isSaishiIdentity(identity) || isStoryIdentity(identity)) return privateProfile(identity, signal);
+      if (isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity)) return privateProfile(identity, signal);
       if (!isCompanyPublicIdentity(identity)) throw new CloudError(403, "APP_ACCESS_DENIED", "未开通当前应用。");
       return publicProfile;
     },
     createModel: async (identity, run, signal) => {
-      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity);
+      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity);
       if ((!privateApp && !isCompanyPublicIdentity(identity)) || run.authorizationId !== identity.authorizationId || run.billingAccountId !== identity.billingAccountId) {
         throw new CloudError(403, "RUN_IDENTITY_MISMATCH", "任务授权不匹配。");
       }

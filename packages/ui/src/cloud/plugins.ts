@@ -11,14 +11,14 @@ export interface WorkbenchPlugin {
 }
 
 export const PLUGINS: readonly WorkbenchPlugin[] = [
-  { id: "company-knowledge", name: "官网知识", mark: "知", status: "available", profileId: "company-public",
+  { id: "company-knowledge", name: "官网知识", mark: "知", status: "available", profileId: "daoyin-workbench",
     description: "检索道引产品与方案的公开资料",
     capabilities: ["公开资料检索", "产品问答", "来源引用"], note: "访客空间可用，仅查询公开资料。" },
-  { id: "saishi", name: "赛事只读", mark: "赛", status: "account_required", profileId: "saishi-readonly",
+  { id: "saishi", name: "赛事只读", mark: "赛", status: "available", profileId: "daoyin-workbench",
     description: "查询当前账号的赛事、素材与任务",
     capabilities: ["赛事查询", "设备与素材", "地图与点位", "个人时间线", "任务进度"],
     note: "登录道引账号后直接使用已有赛事读取权限。" },
-  { id: "story", name: "快速视频", mark: "剧", status: "account_required", profileId: "story-quick",
+  { id: "story", name: "快速视频", mark: "剧", status: "available", profileId: "daoyin-workbench",
     description: "通过对话生成视频与参考素材新版本",
     capabilities: ["文生视频", "参考图生成", "参考视频生成", "历史作品", "生成进度"],
     note: "登录后使用当前 Story 账号的生成能力。" },
