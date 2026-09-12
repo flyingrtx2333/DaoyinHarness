@@ -15,13 +15,13 @@ info.config = {port:env.DAOYIN_CLOUD_PORT,platform:env.DAOYIN_CLOUD_PLATFORM_URL
 info.node = execFileSync('/opt/daoyin-harness/node/bin/node',['--version'],{encoding:'utf8'}).trim();
 info.sourceRevision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
 info.disk=execFileSync('df',['-h','/opt/daoyin-harness'],{encoding:'utf8'}).trim();
-for (const url of ['http://127.0.0.1:4700/health','https://www.daoyintech.com/harness/','https://www.daoyintech.com/harness/release.json']) {
-  try {const r=await fetch(url,{signal:AbortSignal.timeout(10000)});const text=await r.text(); info[url]={status:r.status,...(url.endsWith('release.json')||url.endsWith('/health')?{body:text.slice(0,2000)}:{title:text.match(/<title>(.*?)<\/title>/s)?.[1],assets:[...text.matchAll(/(?:src|href)="(\/harness\/assets\/[^\"]+)"/g)].map(x=>x[1])})};} catch(e){info[url]={error:e.name};}
+for (const url of ['http://127.0.0.1:4700/health','https://harness.daoyintech.com/','https://harness.daoyintech.com/release.json']) {
+  try {const r=await fetch(url,{signal:AbortSignal.timeout(10000)});const text=await r.text(); info[url]={status:r.status,...(url.endsWith('release.json')||url.endsWith('/health')?{body:text.slice(0,2000)}:{title:text.match(/<title>(.*?)<\/title>/s)?.[1],assets:[...text.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(x=>x[1])})};} catch(e){info[url]={error:e.name};}
 }
 // Runtime compatibility probes use existing credentials in memory and report only status flags.
 for (const [kind, key] of [['agent-public','DAOYIN_CLOUD_SERVICE_TOKEN'],['agent-apps','DAOYIN_CLOUD_APP_SERVICE_TOKEN']]) {
   if (!env[key]) continue;
-  try {const r=await fetch(new URL(`/api/internal/${kind}/v1/health`,env.DAOYIN_CLOUD_PLATFORM_URL),{method:'POST',redirect:'error',headers:{'content-type':'application/json','x-agent-service-token':env[key]},body:'{}',signal:AbortSignal.timeout(8000)}); let body; try {body=await r.json();} catch {} info[kind+'-health']={status:r.status,schemaVersion:body?.schemaVersion,healthStatus:body?.status};} catch(e){info[kind+'-health']={error:e.name};}
+  try {const r=await fetch(new URL(`/api/internal/${kind}/v1/health`,env.DAOYIN_CLOUD_PLATFORM_URL),{method:'POST',redirect:'error',headers:{'content-type':'application/json','x-agent-service-token':env[key]},body:'{}',signal:AbortSignal.timeout(8000)}); let body; try {body=await r.json();} catch {body=undefined;} info[kind+'-health']={status:r.status,schemaVersion:body?.schemaVersion,healthStatus:body?.status};} catch(e){info[kind+'-health']={error:e.name};}
 }
 if (env.DAOYIN_CLOUD_POSTGRES_URL) {
   const {createRequire}=await import('node:module');

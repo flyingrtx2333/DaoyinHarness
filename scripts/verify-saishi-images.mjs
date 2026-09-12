@@ -13,7 +13,7 @@ const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR
 let base;
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, base).pathname;
-  const file = path === "/harness/" ? "index.html" : path.startsWith("/harness/") ? path.slice(9) : "";
+  const file = path === "/" ? "index.html" : path.startsWith("/") ? path.slice(1) : "";
   if (!Object.hasOwn(release.files, file)) { res.writeHead(404); res.end(); return; }
   res.setHeader("content-type", file.endsWith(".js") ? "application/javascript" : file.endsWith(".css") ? "text/css" : file.endsWith(".html") ? "text/html" : "image/png");
   res.end(await readFile(resolve(release.output, file)));
@@ -56,7 +56,7 @@ try {
       ws.send(JSON.stringify({ type: "run", sessionId: session.id, run }));
       ws.send(JSON.stringify({ type: "ready", sessionId: session.id, lastEventSeq: 1 }));
     }));
-    await page.goto(`${base}/harness/?app=saishi`);
+    await page.goto(`${base}/?app=saishi`);
     const gallery = page.getByRole("region", { name: "赛事图片", exact: true });
     await gallery.waitFor();
     await gallery.getByRole("button", { name: "重新加载图片" }).click();

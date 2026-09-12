@@ -20,7 +20,7 @@ Windows / Node 22.23.2：全仓 typecheck、lint、293 项测试、build 全部�
 
 ## 已部署版本的历史记录
 
-2026-09-11：赛事工具已并入统一工作台，入口为 `https://www.daoyintech.com/harness/`。会话不再按应用拆分，Agent 在同一会话内自动选择赛事、Story 或官网知识工具。
+2026-09-11：赛事工具已并入统一工作台，入口为 `https://harness.daoyintech.com/`。会话不再按应用拆分，Agent 在同一会话内自动选择赛事、Story 或官网知识工具。
 
 ## 执行方式
 

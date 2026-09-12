@@ -9,7 +9,7 @@ import sys
 import urllib.error
 import urllib.request
 
-ORIGIN = 'https://www.daoyintech.com'
+ORIGIN = 'https://harness.daoyintech.com'
 ROOT = pathlib.Path('/opt/daoyin-harness')
 
 
@@ -47,14 +47,14 @@ def main():
                                  ('evaluation-ready', 'http://127.0.0.1:4711/health', 'ok')]:
         status, data = fetch(url)
         check(name, status == 200 and json.loads(data).get('status') == expected)
-    status, html = fetch(ORIGIN + '/harness/')
+    status, html = fetch(ORIGIN + '/')
     check('workbench-http', status == 200)
     local = ROOT / 'workbench/current'
     manifest = json.loads((local / 'release.json').read_text(encoding='utf-8-sig'))
     check('served-index-hash', hashlib.sha256(html).hexdigest() == manifest['files']['index.html'])
     for name, digest in manifest['files'].items():
         if name.endswith(('.js', '.css')):
-            status, data = fetch(ORIGIN + '/harness/' + name)
+            status, data = fetch(ORIGIN + '/' + name)
             check('served-asset-' + name, status == 200 and hashlib.sha256(data).hexdigest() == digest)
     checks = [
         ('anonymous-bootstrap-denied', ORIGIN + '/api/harness-evaluation/bootstrap', {}, {'Origin': ORIGIN}, 401),

@@ -19,7 +19,7 @@ assert.deepEqual(await readFile(resolve(output, logoFile)), await readFile("pack
 for (const [file, hash] of Object.entries(release.files)) assert.equal(createHash("sha256").update(await readFile(resolve(output, file))).digest("hex"), hash);
 const server = createServer(async (request, response) => {
   const path = new URL(request.url, "http://localhost").pathname;
-  const file = path === "/harness/" ? "index.html" : path.startsWith("/harness/") ? path.slice("/harness/".length) : "";
+  const file = path === "/" ? "index.html" : path.startsWith("/") ? path.slice("/".length) : "";
   if (Object.hasOwn(release.files, file)) {
     response.setHeader("Content-Type", file.endsWith(".html") ? "text/html; charset=utf-8" : file.endsWith(".js") ? "application/javascript" : file.endsWith(".png") ? "image/png" : "text/css");
     response.end(await readFile(resolve(output, file)));
@@ -131,16 +131,16 @@ try {
     if (result.events) result.events = result.events.map(event => ({ id: `event_${event.eventSeq}`, sessionId: path.split("/")[2], accountId: "fixture", scopeId: "fixture", occurredAt: "2026-09-06T00:00:00Z", ...event }));
     await route.fulfill({ json: result });
   });
-  await page.goto(`${origin}/harness/`);
+  await page.goto(`${origin}/`);
   await page.getByRole("heading", { name: "今天，想完成什么？" }).waitFor();
-  const expectedLogoUrl = `${origin}/harness/${logoFile}`;
+  const expectedLogoUrl = `${origin}/${logoFile}`;
   await page.waitForFunction(() => [...document.querySelectorAll("img.harness-logo")].every(image => image.complete && image.naturalWidth > 0));
   for (const selector of [".brand-mark img", ".empty-mark img"]) {
-    assert.equal(await page.locator(selector).getAttribute("src"), `/harness/${logoFile}`);
+    assert.equal(await page.locator(selector).getAttribute("src"), `/${logoFile}`);
     assert.equal(await page.locator(selector).evaluate(image => getComputedStyle(image).objectFit), "contain");
   }
-  assert.equal(await page.locator('link[rel="icon"]').getAttribute("href"), `/harness/${logoFile}`);
-  assert.equal(await page.locator('link[rel="apple-touch-icon"]').getAttribute("href"), `/harness/${logoFile}`);
+  assert.equal(await page.locator('link[rel="icon"]').getAttribute("href"), `/${logoFile}`);
+  assert.equal(await page.locator('link[rel="apple-touch-icon"]').getAttribute("href"), `/${logoFile}`);
   const faviconResponse = await page.request.get(expectedLogoUrl);
   assert.equal(faviconResponse.status(), 200);
   assert.deepEqual(await faviconResponse.body(), await readFile("packages/ui/public/assets/harness-logo.png"));
@@ -182,7 +182,7 @@ try {
   assert.equal(await page.locator("#message").evaluate(node => node === document.activeElement), true);
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await page.getByRole("button", { name: "停止生成" }).waitFor();
-  assert.equal(await page.locator(".mini-mark img").getAttribute("src"), `/harness/${logoFile}`);
+  assert.equal(await page.locator(".mini-mark img").getAttribute("src"), `/${logoFile}`);
   await page.getByText("正在检索公开资料…", { exact: true }).waitFor();
   await capture(page, "desktop-running");
   await page.getByRole("button", { name: "插件", exact: true }).click();
@@ -271,7 +271,7 @@ try {
   await newSession.focus();
   await page.keyboard.press("Tab");
   assert.equal(await page.getByRole("searchbox", { name: "搜索会话" }).evaluate(node => node === document.activeElement), true);
-  assert.equal(await page.locator(".brand").getAttribute("href"), "/harness/");
+  assert.equal(await page.locator(".brand").getAttribute("href"), "/");
   assert.ok((await page.locator(".sidebar-footer .account-login").getAttribute("href")).includes("login"));
   for (let i = 4; i < 44; i++) sessions.push({ ...sessions[0], id: `session_sidebar_${i}`, title: `第 ${i} 条：${"需要截断的很长会话标题".repeat(4)}` });
   await page.reload();

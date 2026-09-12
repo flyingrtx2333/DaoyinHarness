@@ -15,7 +15,7 @@ const csp = (await readFile("deployment/harness-workbench.conf", "utf8")).match(
 await mkdir(output, { recursive: true });
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url, "http://localhost").pathname;
-  const file = pathname === "/harness/" ? "index.html" : pathname.startsWith("/harness/") ? pathname.slice(9) : "";
+  const file = pathname === "/" ? "index.html" : pathname.startsWith("/") ? pathname.slice(1) : "";
   if (pathname === "/login" || /^\/assets\/[A-Za-z0-9_.-]+$/u.test(pathname)) {
     const platformFile = pathname === "/login" ? "index.html" : pathname.slice(1);
     try {
@@ -81,7 +81,7 @@ try {
   });
   for (const width of [1280, 1920, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto(base + "/harness/?app=saishi");
+    await page.goto(base + "/?app=saishi");
     await page.getByText("账号 a 的回答", { exact: true }).waitFor();
     if (width === 1280) {
       await page.waitForTimeout(500);
@@ -116,7 +116,7 @@ try {
     await page.screenshot({ path: resolve(output, `catalog-${width}.png`), fullPage: true });
     checks.push(`signed-in, picker, catalog and layout ${width}px`);
   }
-  await page.goto(base + "/harness/?app=saishi");
+  await page.goto(base + "/?app=saishi");
   await page.getByText("账号 a 的回答", { exact: true }).waitFor();
   await page.getByRole("textbox", { name: "发送给 Harness 的问题" }).fill("同账号的未发送草稿");
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -175,7 +175,7 @@ try {
   assert.equal(await page.locator("input[type=password]").count(), 0);
   await page.screenshot({ path: resolve(output, "signed-out.png"), fullPage: true });
   checks.push("signed-out state has platform login without grant entry");
-  await page.goto(base + "/harness/");
+  await page.goto(base + "/");
   await page.getByRole("heading", { name: "今天，想完成什么？" }).waitFor();
   assert.equal(await page.getByRole("textbox", { name: "发送给 Harness 的问题" }).isEnabled(), true);
   const entry = page.locator(".visitor-account-prompt");
@@ -186,7 +186,7 @@ try {
   assert.equal(await register.getAttribute("href"), "/login?mode=register&redirect=%2Fharness%2F%3Fapp%3Dsaishi");
   await page.screenshot({ path: resolve(output, "visitor-account-entry.png"), fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto(base + "/harness/");
+  await page.goto(base + "/");
   const sidebarLogin = page.locator(".sidebar-footer").getByRole("link", { name: "登录道引账号", exact: true });
   await sidebarLogin.waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
@@ -197,12 +197,12 @@ try {
   if (harnessOnly) {
     // The independent Harness CI checkout does not contain the separately built
     // platform login application. Do not serve a made-up login page as evidence.
-    await page.goto(base + "/harness/?app=saishi");
+    await page.goto(base + "/?app=saishi");
     await page.getByText("账号 a 的回答", { exact: true }).waitFor();
     checks.push("Harness-only scope: platform login-app navigation NOT exercised; account BFF is mocked");
   } else {
     await page.goto(base + "/login?redirect=%2Fharness%2F%3Fapp%3Dsaishi");
-    await page.waitForURL(base + "/harness/?app=saishi");
+    await page.waitForURL(base + "/?app=saishi");
     await page.getByText("账号 a 的回答", { exact: true }).waitFor();
     assert.equal(requests.some(req => req.path === "/api/auth/account-session"), true);
     checks.push("existing platform login enters Harness without password or grant prompts");
@@ -258,7 +258,7 @@ try {
   assert.equal(new URL(page.url()).searchParams.get("app"), "saishi");
   logoutFails = false;
   await page.getByRole("menuitem", { name: "退出登录", exact: true }).click();
-  await page.waitForURL(base + "/harness/");
+  await page.waitForURL(base + "/");
   assert.equal(await page.locator(".account-identity").count(), 0);
   assert.equal(await page.evaluate(() => window.localStorage.getItem("athletereel_token")), null);
   checks.push("account menu, keyboard focus, persistent settings and confirmed logout pass at desktop and narrow widths");

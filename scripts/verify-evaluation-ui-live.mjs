@@ -91,7 +91,7 @@ function check(name,value){checks.push({name,passed:!!value});if(!value)throw ne
 try{
   browser=await chromium.launch(); const page=await browser.newPage({viewport:{width:1440,height:900}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}/harness/#plugins-evaluation`);
+  await page.goto(`http://127.0.0.1:${server.address().port}/#plugins-evaluation`);
   await page.waitForSelector('.eval-connection[data-ready]',{timeout:40000});
   await page.locator('#evaluation-input').fill('我有多少赛事素材');
   check('one-input-counts-immediately',(await page.locator('#evaluation-draft-count').textContent())==='1 题 · 1 次执行');

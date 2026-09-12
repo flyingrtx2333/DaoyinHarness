@@ -12,7 +12,7 @@ let base = "";
 const configuredCsp = (await readFile("deployment/harness-workbench.conf", "utf8")).match(/Content-Security-Policy "([^"]+)"/u)[1];
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, base).pathname;
-  const file = path === "/harness/" ? "index.html" : path.startsWith("/harness/") ? path.slice(9) : "";
+  const file = path === "/" ? "index.html" : path.startsWith("/") ? path.slice(1) : "";
   if (!Object.hasOwn(release.files, file)) { res.writeHead(404); res.end(); return; }
   try {
     if (file === "index.html") res.setHeader("Content-Security-Policy", configuredCsp.replace("wss://www.daoyintech.com", base.replace("http:", "ws:")));
@@ -73,7 +73,7 @@ try {
       events.push(event); run.lastEventSeq = event.eventSeq; return event;
     };
     const push = event => sockets.at(-1).send(JSON.stringify({ type: "events", sessionId: session.id, events: [event], nextEventSeq: event.eventSeq }));
-    await page.goto(`${base}/harness/${application === "saishi" ? "?app=saishi" : ""}`);
+    await page.goto(`${base}/${application === "saishi" ? "?app=saishi" : ""}`);
     await until(() => sockets.length === 1);
     push(append("assistant.delta", { contentBlockId: "text", delta: "第一段实时正文。" }));
     await page.locator(".assistant-message").filter({ hasText: "第一段实时正文。" }).waitFor();

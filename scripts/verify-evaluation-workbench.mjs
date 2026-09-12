@@ -10,7 +10,7 @@ if (process.platform !== "win32") throw new Error("Run UI acceptance from Window
 const release = JSON.parse(execFileSync(process.execPath, ["scripts/build-workbench-release.mjs", "--preview"], { encoding: "utf8", windowsHide: true }));
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
-  const file = url.pathname === "/harness/" ? "index.html" : url.pathname.startsWith("/harness/") ? url.pathname.slice(9) : "";
+  const file = url.pathname === "/" ? "index.html" : url.pathname.startsWith("/") ? url.pathname.slice(1) : "";
   if (!Object.hasOwn(release.files, file)) { res.writeHead(404); res.end(); return; }
   try {
     res.setHeader("Content-Type", file.endsWith(".html") ? "text/html" : file.endsWith(".js") ? "application/javascript" : file.endsWith(".css") ? "text/css" : "image/png");
@@ -58,10 +58,10 @@ try {
       if (url.pathname.endsWith("/sessions")) return route.fulfill({ json: { sessions: [] } });
       return route.fulfill({ status: 404, json: {} });
     });
-    await page.goto(base + "/harness/#plugins");
+    await page.goto(base + "/#plugins");
     await page.waitForTimeout(300);
     assert.equal(await page.getByRole("button", { name: "测试评估", exact: true }).count(), 0);
-    await page.goto(base + "/harness/#plugins-evaluation"); await page.reload();
+    await page.goto(base + "/#plugins-evaluation"); await page.reload();
     await page.getByText("测试评估仅向已验证的超级管理员开放。", { exact: true }).waitFor();
     isAdmin = true; await page.reload();
     await page.getByRole("heading", { name: "测试评估", exact: true }).waitFor();

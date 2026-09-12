@@ -210,7 +210,7 @@ export function App(): React.JSX.Element {
       // Match the platform's legacy user-store sign-out contract; never read the token.
       window.localStorage.removeItem("athletereel_token");
       accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSessions([]); setRuns([]); setEvents([]); setSelected(""); setDraft(""); setReferences([]); setPhase("expired");
-      window.location.replace("/harness/");
+      window.location.replace("/");
     } catch (cause) { loggingOut.current = false; throw cause; }
   }
 
@@ -289,7 +289,7 @@ export function App(): React.JSX.Element {
     <a className="skip-link" href="#conversation">跳到对话</a>
     <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航" onKeyDown={(event) => { if (event.key === "Escape" && sidebar) { event.preventDefault(); closeSidebar(); } }}>
       <button type="button" className="sidebar-close" aria-label="关闭会话导航" onClick={closeSidebar}>×</button>
-      <a className="brand" href="/harness/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
+      <a className="brand" href="/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
       <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button></nav>
       <SessionHistory key={`${APPLICATION}:${client.accountScope}:${accountEpoch.current}:${phase}`} sessions={sessions} selected={selected} chatActive={view === "chat"}
         disabled={phase !== "ready" || submitting || !!managing} isProtected={isSessionProtected} onChoose={choose} onManage={manageSession} />

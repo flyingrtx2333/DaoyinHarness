@@ -15,7 +15,7 @@ const runtimeDest=join(base,'releases',revision), uiDest=join(base,'workbench/re
 const runtimeLink=join(base,'current'), uiLink=join(base,'workbench/current');
 const report={revision,startedAt:new Date().toISOString(),environment:'independent-linux-server',testsRun:false,realModelValidation:'not-run',dataMigration:false};
 const phase=(name)=>console.log(JSON.stringify({phase:name,revision}));
-const run=(file,argv,options={})=>{try{return execFileSync(file,argv,{encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe'],...options});}catch(e){throw new Error(`Command failed: ${file} (exit ${e.status??'unknown'}); raw output withheld to protect configuration.`);}};
+const run=(file,argv,options={})=>{try{return execFileSync(file,argv,{encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe'],...options});}catch(e){throw new Error(`Command failed: ${file} (exit ${e.status??'unknown'}); raw output withheld to protect configuration.`,{cause:e});}};
 const digest=b=>createHash('sha256').update(b).digest('hex');
 async function verify(path, ui=false){
   const manifest=JSON.parse(await readFile(join(path,'release.json'),'utf8'));
@@ -72,18 +72,18 @@ try{
   run('systemctl',['start',service]);
   let ready=false;
   for(let i=0;i<12;i++){
-    try{const r=await probe('http://127.0.0.1:4700/health/ready');if((await r.json()).status==='ready'){ready=true;break;}}catch{}
+    try{const r=await probe('http://127.0.0.1:4700/health/ready');if((await r.json()).status==='ready'){ready=true;break;}}catch{/* Retry until the readiness deadline. */}
     await new Promise(r=>setTimeout(r,1000));
   }
   if(!ready)throw new Error('New runtime did not become ready; rolling back.');
   phase('switch-workbench');await replaceLink(uiLink,uiDest);
-  const publicRelease=await(await probe('https://www.daoyintech.com/harness/release.json')).json();
+  const publicRelease=await(await probe('https://harness.daoyintech.com/release.json')).json();
   if(publicRelease.revision!==revision)throw new Error('Public workbench revision mismatch.');
-  const html=await(await probe('https://www.daoyintech.com/harness/')).text();
+  const html=await(await probe('https://harness.daoyintech.com/')).text();
   if(digest(Buffer.from(html))!==uiManifest.files['index.html'])throw new Error('Public workbench HTML differs from release.');
   for(const[file,hash]of Object.entries(uiManifest.files)){
     if(!file.startsWith('assets/'))continue;
-    const actual=Buffer.from(await(await probe('https://www.daoyintech.com/harness/'+file)).arrayBuffer());
+    const actual=Buffer.from(await(await probe('https://harness.daoyintech.com/'+file)).arrayBuffer());
     if(digest(actual)!==hash)throw new Error('Public asset integrity mismatch.');
   }
   await probe('http://127.0.0.1:4700/api/v1/cloud/sessions',401);

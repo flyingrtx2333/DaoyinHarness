@@ -12,7 +12,7 @@ const output = resolve(".cache/streaming-ui-20260906");
 await mkdir(output, { recursive: true });
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, "http://localhost").pathname;
-  const file = path === "/harness/" ? "index.html" : path.slice(9);
+  const file = path === "/" ? "index.html" : path.slice(1);
   if (!Object.hasOwn(release.files, file)) { res.writeHead(404); res.end(); return; }
   res.setHeader("content-type", file.endsWith(".html") ? "text/html" : file.endsWith(".js") ? "application/javascript" : file.endsWith(".css") ? "text/css" : "image/png");
   res.end(await readFile(resolve(release.output, file)));
@@ -50,7 +50,7 @@ try {
       if (url.pathname.endsWith("/cancel")) { current.status = "cancelled"; current.cancelRequested = true; emit("turn.cancelled", { status: "cancelled", source: "user", lastCompletedEventSeq: events.length }); return route.fulfill({ json: { run: current } }); }
       throw new Error(`Unexpected fixture route ${url.pathname}`);
     });
-    await page.goto(base + "/harness/?app=saishi");
+    await page.goto(base + "/?app=saishi");
     await page.getByText(old.finalText, { exact: true }).waitFor();
     const original = await page.locator("article.turn").first().elementHandle();
     await page.evaluate(() => { window.detachedHistory = false; const node = document.querySelector("article.turn"); new MutationObserver(() => { if (!node.isConnected) window.detachedHistory = true; }).observe(document.querySelector(".conversation-content"), { childList: true, subtree: true }); });

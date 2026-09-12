@@ -1,8 +1,8 @@
 # 独立云端工作台
 
-入口：<https://www.daoyintech.com/harness/>。此入口使用独立静态发布目录，通过同源 BFF 调用已上线的共享 AgentEngine。
+入口：<https://harness.daoyintech.com/>。此入口使用独立域名和静态发布目录，通过该域名下的 BFF 调用已上线的共享 AgentEngine。
 
-唯一入口为 `/harness/`。登录后同一账号范围持久化会话列表、选择状态、多轮回答、工具状态、刷新恢复与取消；官网知识、赛事和 Story 工具共用同一个会话空间，由 Agent 按意图自动调用。支持 Story 图片和 MP4 参考素材上传；本机文件与进程工具尚未接入云端入口。
+唯一入口为独立域名根路径 `/`。登录在 `www.daoyintech.com` 完成后，通过父域 HttpOnly 账号 Cookie 返回工作台。登录后同一账号范围持久化会话列表、选择状态、多轮回答、工具状态、刷新恢复与取消；官网知识、赛事和 Story 工具共用同一个会话空间，由 Agent 按意图自动调用。支持 Story 图片和 MP4 参考素材上传；本机文件与进程工具尚未接入云端入口。
 
 左侧“插件”只展示能力与接入状态。已经接入的插件显示“已启用”，无需选择、打开或逐插件授权；网站与应用、文旅影像仍按实际接入状态展示。具体权限规则见 [插件盘点](PLUGINS.md)。
 
@@ -33,6 +33,6 @@
 
 服务器目录：`/opt/daoyin-harness/workbench/releases/<commit>`；版本无覆盖上传，资源复制到共享 `assets/` 并长期保留。校验文件 SHA256 后原子切换 `current` 链接。Nginx 配置为 `deployment/harness-workbench.conf`，放入现有官网 server 的 extension include，检查通过后平滑重载。
 
-该目录独立于官网 dist 和 Harness 服务端 releases。回滚只切换工作台 current 到上一版本；首次部署可移除单个工作台 include 后检查并重载 Nginx。保留访客数据库和历史资源，不重置云端会话。
+该目录独立于官网 dist 和 Harness 服务端 releases。回滚只切换工作台 current 到上一版本；Nginx 配置归属 `harness.daoyintech.com` 站点。保留访客数据库和历史资源，不重置云端会话。
 
 验收需包含 HTTPS 页面/资源哈希、安全响应头、桌面与窄屏布局、真实问答、资料引用、刷新恢复和取消。具体已完成证据记录在 `deployment/RELEASE-20260905.md`。
