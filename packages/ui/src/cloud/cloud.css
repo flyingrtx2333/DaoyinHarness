@@ -12,7 +12,6 @@
 .composer-plugins { display:flex; align-items:center; gap:5px; min-width:0; }
 .composer-controls .plugin-add { min-width:40px; width:40px; height:40px; padding:0; border-color:transparent; font-size:23px; color:#66748a; }
 .composer-controls .plugin-add[aria-expanded=true] { background:#eaf0f9; color:#315ba7; }
-.composer-controls .selected-plugin { min-width:0; min-height:36px; padding:5px 9px; font-size:11px; color:#526a8e; border-color:#e0e7f1; background:#f5f8fc; white-space:nowrap; }
 .composer-busy { font-size:11px; color:#728097; padding-left:5px; }
 .plugin-control { position:relative; flex-shrink:0; }
 .plugin-picker { position:absolute; z-index:4; bottom:calc(100% + 12px); left:0; width:340px; max-width:calc(100vw - 54px); max-height:min(450px, calc(100dvh - 210px)); overflow:auto; background:#fff; border:1px solid #dfe5ee; border-radius:13px; box-shadow:0 10px 40px #2339561c,0 2px 6px #23395608; padding:8px; }
