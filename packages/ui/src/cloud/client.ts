@@ -24,7 +24,11 @@ function errorMessage(value: unknown): string | undefined {
   const message = record(detail) ? detail.message : typeof detail === "string" ? detail : undefined;
   if (typeof message !== "string") return undefined;
   const normalized = message.trim();
-  return normalized && normalized.length <= 500 && !/[\u0000-\u001f\u007f]/u.test(normalized) ? normalized : undefined;
+  const hasControl = [...normalized].some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code < 32 || code === 127;
+  });
+  return normalized && normalized.length <= 500 && !hasControl ? normalized : undefined;
 }
 export interface PendingRequest { sessionId: string; requestId: string; message: string }
 interface StoragePort { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
