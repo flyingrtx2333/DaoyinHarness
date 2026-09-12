@@ -26,13 +26,15 @@ export function AccountIdentity({ account, onSettings, onLogout }: { account: Ac
   return <div className="account-control" ref={container} onBlur={(event) => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) close(); }} onKeyDown={(event) => {
     if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); close(true); }
   }}>
-    <button type="button" className="account-identity" ref={trigger} aria-label={`当前账号：${account.username}`} aria-haspopup="menu" aria-expanded={open} aria-controls="account-menu" onClick={() => setOpen(!open)} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); } }}>
+    <button type="button" className="account-identity" ref={trigger} aria-label={`当前账号：${account.username}`} aria-describedby={account.availableCredits === undefined ? undefined : "account-credits"} aria-haspopup="menu" aria-expanded={open} aria-controls="account-menu" onClick={() => setOpen(!open)} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); } }}>
     <span className="account-avatar" aria-hidden="true">
       {account.avatarUrl && account.avatarUrl !== failedUrl
         ? <img src={account.avatarUrl} alt="" referrerPolicy="no-referrer" onError={() => setFailedUrl(account.avatarUrl ?? undefined)} />
         : Array.from(account.username)[0]?.toUpperCase()}
     </span>
-    <span className="account-username" title={account.username}>{account.username}</span>
+    <span className="account-copy"><span className="account-username" title={account.username}>{account.username}</span>
+      {account.availableCredits !== undefined && <span className="account-credits" id="account-credits">剩余 {account.availableCredits} 积分</span>}
+    </span>
     <span className="account-menu-indicator" aria-hidden="true">···</span>
     </button>
     {open && <div className="account-menu" id="account-menu" role="menu" aria-label="账号菜单" ref={menu} onKeyDown={(event) => {

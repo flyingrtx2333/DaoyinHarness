@@ -65,6 +65,18 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
     await client.bootstrap(); await client.sessions();
     expect(calls).toEqual(["/api/agent-apps/saishi/workbench/bootstrap", "/api/agent-apps/saishi/workbench/sessions"]);
   });
+  it("shows validated Story credits and preserves a precise trusted BFF error", async () => {
+    let failed = false;
+    const client = new WorkbenchClient(memory(), async () => failed
+      ? json({ detail: { code: "PROFILE_TOOL_INVALID", message: "短剧工具配置未通过执行策略检查。" } }, 503)
+      : json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "daoyin-workbench",
+        authentication: "account", accountScope: "account_a", account: { username: "Alice" },
+        credits: { available: "128.500000", ignored: "private" } }), "saishi");
+    await client.bootstrap();
+    expect(client.account).toEqual({ username: "Alice", avatarUrl: null, availableCredits: "128.500000" });
+    failed = true;
+    await expect(client.sessions()).rejects.toMatchObject({ status: 503, message: "短剧工具配置未通过执行策略检查。" });
+  });
   it("isolates uncertain submissions across accounts and restores only the same account receipt", async () => {
     const store = memory();
     let scope = "account_a";

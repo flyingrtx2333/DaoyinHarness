@@ -76,6 +76,18 @@ async function abortable<T>(operation: () => Promise<T>, signal: AbortSignal): P
   finally { if (listener !== undefined) signal.removeEventListener("abort", listener); }
 }
 
+const REVIEWED_STORY_MUTATIONS: Readonly<Record<string, string>> = Object.freeze({
+  story_create_video: "story.generate",
+  story_call: "story.write",
+  story_create_production: "story.generate",
+  story_resume_production: "story.generate",
+  story_prepare_media_upload: "story.write",
+  story_commit_media_upload: "story.write",
+  story_upload_media_from_url: "story.write",
+  story_add_segment_video_frame_reference: "story.write",
+  story_bind_segment_video_frame_reference: "story.write",
+});
+
 function checkedProfile(profile: CloudProfile): CloudProfile {
   // Catalog memory entries are descriptors only. Ignore their executors and install trusted, run-bound tools later.
   const businessTools = profile.tools.filter((binding) => !isMemoryToolName(binding.definition.name) && !ORCHESTRATION_TOOLS.has(binding.definition.name));
@@ -86,7 +98,10 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
   const names = new Set<string>();
   const tools = businessTools.map((binding) => {
     const definition = binding.definition;
-    const reviewedStoryWrite = ["story-quick", "daoyin-workbench"].includes(profile.id) && definition.name === "story_create_video" && definition.mutating === true && binding.requiredPermissions.includes("story.generate");
+    const storyPermission = REVIEWED_STORY_MUTATIONS[definition.name];
+    const reviewedStoryWrite = ["story-quick", "daoyin-workbench"].includes(profile.id) &&
+      definition.mutating === true && storyPermission !== undefined &&
+      binding.requiredPermissions.length === 1 && binding.requiredPermissions[0] === storyPermission;
     if ((!reviewedStoryWrite && definition.mutating !== false) || definition.category !== "extension" || names.has(definition.name) || isMemoryToolName(definition.name) ||
         !/^[A-Za-z0-9_.-]{1,100}$/u.test(definition.name) || binding.requiredPermissions.length === 0 ||
         typeof binding.validateInput !== "function" || typeof binding.authorizeResource !== "function") {

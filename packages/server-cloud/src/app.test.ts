@@ -218,6 +218,23 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
     expect(complete).not.toHaveBeenCalled();
   });
 
+  it("admits only explicitly reviewed Story mutations with their exact permission", async () => {
+    const production = binding("story_create_production");
+    const reviewed = { ...production.tool, requiredPermissions: ["story.generate"],
+      definition: { ...production.tool.definition, mutating: true } };
+    const allowed = fixture({ resolveProfile: async () => ({ id: "daoyin-workbench", version: "1",
+      instructions: "按账号权限制作短剧。", tools: [reviewed] }) });
+    expect((await allowed.app.inject({ method: "POST", url: "/api/v1/cloud/sessions",
+      headers: headers(), payload: {} })).statusCode).toBe(201);
+
+    const denied = fixture({ resolveProfile: async () => ({ id: "daoyin-workbench", version: "1",
+      instructions: "按账号权限制作短剧。", tools: [{ ...reviewed, requiredPermissions: ["story.write"] }] }) });
+    const response = await denied.app.inject({ method: "POST", url: "/api/v1/cloud/sessions",
+      headers: headers(), payload: {} });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ error: { code: "PROFILE_TOOL_INVALID" } });
+  });
+
   it("never persists a raw provider exception", async () => {
     const current = fixture({ createModel: async () => ({ complete: async () => { throw new Error("DO_NOT_PERSIST_PROVIDER_SECRET"); } }) });
     const sessionId = await createSession(current.app);

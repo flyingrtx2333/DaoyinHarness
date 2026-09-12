@@ -2,9 +2,10 @@ import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { CloudRun, CloudSession, SessionAction } from "../../../server-cloud/src/repository.js";
 
 export type { CloudRun, CloudSession, SessionAction };
-export interface AccountProfile { username: string; avatarUrl: string | null }
+export interface AccountProfile { username: string; avatarUrl: string | null; availableCredits?: string }
 
-function accountProfile(value: unknown): AccountProfile | undefined {
+function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
+function accountProfile(value: unknown, credits?: unknown): AccountProfile | undefined {
   if (typeof value !== "object" || value === null || !("username" in value) ||
       typeof value.username !== "string" || !value.username.trim()) return undefined;
   let avatarUrl: string | null = null;
@@ -14,7 +15,16 @@ function accountProfile(value: unknown): AccountProfile | undefined {
       if (url.protocol === "https:" && !url.username && !url.password) avatarUrl = url.href;
     } catch { /* Missing or invalid avatars use the username initial. */ }
   }
-  return { username: value.username, avatarUrl };
+  const available = record(credits) && typeof credits.available === "string" &&
+    /^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$/u.test(credits.available) ? credits.available : undefined;
+  return { username: value.username, avatarUrl, ...(available === undefined ? {} : { availableCredits: available }) };
+}
+function errorMessage(value: unknown): string | undefined {
+  const detail = record(value) ? value.detail : undefined;
+  const message = record(detail) ? detail.message : typeof detail === "string" ? detail : undefined;
+  if (typeof message !== "string") return undefined;
+  const normalized = message.trim();
+  return normalized && normalized.length <= 500 && !/[\u0000-\u001f\u007f]/u.test(normalized) ? normalized : undefined;
 }
 export interface PendingRequest { sessionId: string; requestId: string; message: string }
 interface StoragePort { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
@@ -84,6 +94,9 @@ export class WorkbenchClient {
           }
           throw new WorkbenchError("访客授权已过期，请重新进入工作台。", response.status);
         }
+        const failure: unknown = await response.json().catch(() => null);
+        const preciseMessage = errorMessage(failure);
+        if (preciseMessage !== undefined) throw new WorkbenchError(preciseMessage, response.status);
         if (response.status === 429) throw new WorkbenchError("当前使用次数已达上限，请稍后重试。", 429);
         if (response.status === 409) throw new WorkbenchError("原任务仍在处理中，或原请求内容已改变。请刷新查看原任务。", 409);
         throw new WorkbenchError("请求未完成。请重新连接；提交结果不确定时可恢复原提交。", response.status);
@@ -126,7 +139,7 @@ export class WorkbenchClient {
   }
   public async bootstrap(preserveAccount = false): Promise<number> {
     if (!preserveAccount) this.#account = undefined;
-    const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string; account?: unknown }>("/bootstrap", {});
+    const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string; account?: unknown; credits?: unknown }>("/bootstrap", {});
     if (!result.csrfToken || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() ||
         (this.application !== "company" && (result.profileId !== "daoyin-workbench" || result.authentication !== "account" || !identifier(result.accountScope)))) {
       this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#receipts.clear();
@@ -134,7 +147,7 @@ export class WorkbenchClient {
     }
     if (this.application !== "company") {
       this.#accountScope = result.accountScope!;
-      this.#account = accountProfile(result.account);
+      this.#account = accountProfile(result.account, result.credits);
       this.#receiptKey = `${RECEIPTS}:${this.application}:${this.#accountScope}`;
       this.#restoreReceipts();
     }
