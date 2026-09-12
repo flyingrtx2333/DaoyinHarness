@@ -1,8 +1,10 @@
 export interface VideoCreationRequest {
+  mode: "quick" | "drama";
+  title: string;
   content: string;
   aspectRatio: "16:9" | "9:16" | "1:1";
-  duration: "4" | "5" | "10" | "15";
-  resolution: "auto" | "480p" | "720p" | "1080p";
+  duration: "4" | "5" | "10" | "15" | "30" | "60" | "90";
+  resolution: "auto" | "480p" | "720p" | "768p" | "1080p";
   voiceover: string;
   music: string;
   notes: string;
@@ -24,6 +26,22 @@ export function isVideoCreationIntent(message: string): boolean {
 export function buildVideoCreationMessage(request: VideoCreationRequest): string {
   const resolution = request.resolution === "auto" ? "按当前可用模型推荐" : request.resolution;
   const optional = (value: string): string => value.trim() || "无特殊要求";
+  if (request.mode === "drama") {
+    return [
+      "请调用 story_create_production，一键创建可恢复的完整短剧父任务。",
+      `项目名称：${request.title.trim() || request.content.trim().slice(0, 40)}`,
+      `故事创意与内容要求：${request.content.trim()}`,
+      `画幅：${request.aspectRatio}`,
+      `目标总时长：${request.duration} 秒`,
+      "单段时长：8 秒",
+      "视频模型：AutoDL-MiniMax-H3",
+      `清晰度：${resolution === "按当前可用模型推荐" ? "768p" : resolution}`,
+      `配音或旁白：${optional(request.voiceover)}`,
+      `背景音乐：${optional(request.music)}`,
+      `其他要求：${optional(request.notes)}`,
+      "我已通过制作表单明确确认本次剧本、分镜、分段视频、合片和字幕所产生的当前账号费用；请直接创建一次父任务，不要拆成多轮确认，也不要手工串联临时调用。",
+    ].join("\n");
+  }
   return [
     "请使用短剧制作工具新生成一段视频。",
     `画面内容：${request.content.trim()}`,
