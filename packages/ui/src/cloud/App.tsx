@@ -16,6 +16,8 @@ import { StoryVideos } from "./StoryVideos.js";
 import { StoryUpload, type StoryReference } from "./StoryUpload.js";
 import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
+import { VideoCreationDialog } from "./VideoCreationDialog.js";
+import { isVideoCreationIntent } from "./video-creation-intent.js";
 
 const APPLICATION = "saishi" as const;
 const entryUrl = new URL(window.location.href);
@@ -69,6 +71,7 @@ export function App(): React.JSX.Element {
   const [runs, setRuns] = useState<CloudRun[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [draft, setDraft] = useState("");
+  const [videoRequest, setVideoRequest] = useState("");
   const [error, setError] = useState("");
   const [loginUrl, setLoginUrl] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
@@ -242,11 +245,12 @@ export function App(): React.JSX.Element {
     void id; setView("chat"); setSidebar(false); setError("");
     if (focusComposer) window.requestAnimationFrame(() => document.getElementById("message")?.focus());
   }
-  async function send(message?: string): Promise<void> {
+  async function send(message?: string, skipVideoDialog = false, sessionTitle?: string): Promise<void> {
     const visibleMessage = message === undefined ? draft.trim() : visibleUserMessage(message);
-    const submittedMessage = message === undefined && references.length
-      ? `${visibleMessage}\n\n${references.map(referenceLine).join("\n")}` : message ?? visibleMessage;
+    const submittedMessage = references.length
+      ? `${message ?? visibleMessage}\n\n${references.map(referenceLine).join("\n")}` : message ?? visibleMessage;
     if (uploading || !visibleMessage || submission.current || sessionMutation.current || active || phase !== "ready" || loading) return;
+    if (!skipVideoDialog && isVideoCreationIntent(visibleMessage)) { setVideoRequest(visibleMessage); return; }
     if (session?.archivedAt) { setError("请先恢复已归档的会话，或新建会话。"); return; }
     if (!plugin?.profileId) { setError("当前会话的插件尚未支持，请新建会话并选择可用插件。"); return; }
     setSubmitting(true); setSendingMessage(visibleMessage); setError(""); nearBottom.current = true;
@@ -254,7 +258,7 @@ export function App(): React.JSX.Element {
     const operation = (async (): Promise<CloudRun> => {
       let id = selected;
       if (!id) {
-        const created = await client.createSession(visibleMessage, plugin.profileId);
+        const created = await client.createSession(sessionTitle ?? visibleMessage, plugin.profileId);
         if (epoch !== accountEpoch.current) throw new WorkbenchError("账号连接已变化，原问题未继续提交。");
         id = created.id; setSessions((list) => [created, ...list]); setSelected(id);
       }
@@ -332,5 +336,7 @@ export function App(): React.JSX.Element {
       </div>
     </main>
     {settingsOpen && <SettingsDialog preferences={preferences} onChange={savePreferences} onClose={closeSettings} saveError={preferenceError} />}
+    {videoRequest && <VideoCreationDialog initialRequest={videoRequest} onClose={() => setVideoRequest("")}
+      onConfirm={(message) => { const title = videoRequest; setVideoRequest(""); void send(message, true, title); }} />}
   </div>;
 }
