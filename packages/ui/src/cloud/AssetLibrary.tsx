@@ -4,20 +4,33 @@ import "./asset-library.css";
 
 const categories = { all: "全部", character: "角色图", scene: "场景图", storyboard: "分镜图", video: "视频" };
 type Category = keyof typeof categories;
-type Asset = { id: string; title: string; category: Category; mediaType: "image" | "video"; url?: string; status: string; project: string; error: string; variants: Asset[] };
+export type Asset = { id: string; title: string; category: Category; mediaType: "image" | "video"; url?: string; previewUrl?: string; status: string; project: string; error: string; variants: Asset[] };
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 function safeUrl(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   try { const u = new URL(v); return u.protocol === "https:" && !u.username && !u.password ? u.href : undefined; } catch { return undefined; }
 }
-function parse(v: unknown, nested = false): Asset {
+function firstSafeUrl(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const url = safeUrl(value);
+    if (url) return url;
+  }
+  return undefined;
+}
+export function parseAsset(v: unknown, nested = false): Asset {
   if (!isRecord(v) || typeof v.id !== "string" || typeof v.title !== "string" ||
       typeof v.category !== "string" || !Object.hasOwn(categories,v.category) || !["image","video"].includes(String(v.media_type))) throw new Error("素材数据格式无效，请刷新重试。");
   const u = safeUrl(v.url);
+  const previewUrl = firstSafeUrl(v.thumbnail_url, v.poster_url, v.preview_url, v.thumbnailUrl, v.posterUrl, v.previewUrl);
   return { id:v.id,title:v.title,category:v.category as Category,mediaType:v.media_type as Asset["mediaType"],
-    ...(u ? {url:u} : {}),status:String(v.status || ""),project:typeof v.project_title === "string" ? v.project_title : "",
+    ...(u ? {url:u} : {}),...(previewUrl ? {previewUrl} : {}),status:String(v.status || ""),project:typeof v.project_title === "string" ? v.project_title : "",
     error:typeof v.error_message === "string" ? v.error_message : "",
-    variants:!nested && Array.isArray(v.variants) ? v.variants.map(item=>parse(item,true)) : [] };
+    variants:!nested && Array.isArray(v.variants) ? v.variants.map(item=>parseAsset(item,true)) : [] };
+}
+export function videoPreviewSource(url: string): string {
+  const parsed = new URL(url);
+  if (!parsed.hash) parsed.hash = "t=0.1";
+  return parsed.href;
 }
 const statuses: Record<string,string> = {SUCCEEDED:"生成完成",DRAFT:"草稿",LOCKED:"已锁定",STALE:"已过期",FAILED:"失败",READY:"已就绪",APPROVED:"已确认",GENERATING:"生成中",REJECTED:"质检未通过",CHECKED:"质检通过",RUNNING:"处理中",PENDING:"等待处理",DONE:"已生成"};
 
@@ -36,7 +49,7 @@ export function AssetLibrary({client,ready,onConnect}:{client:WorkbenchClient;re
     void client.storyAssets(category,offset,controller.signal).then(response=>{
       const result = isRecord(response.result) ? response.result : response;
       if (!Array.isArray(result.items) || typeof result.total !== "number") throw new Error("素材列表暂不可用，请刷新重试。");
-      if (!controller.signal.aborted) setData({items:result.items.map(item=>parse(item)),total:result.total});
+      if (!controller.signal.aborted) setData({items:result.items.map(item=>parseAsset(item)),total:result.total});
     }).catch((cause:unknown)=>{if(!controller.signal.aborted)setError(cause instanceof Error ? cause.message : "素材加载失败。");})
       .finally(()=>{if(!controller.signal.aborted)setBusy(false);});
     return ()=>controller.abort();
@@ -51,15 +64,33 @@ export function AssetLibrary({client,ready,onConnect}:{client:WorkbenchClient;re
       {!busy && data?.items.length===0 && <p role="status">暂无{category==="all" ? "资产" : categories[category]}。</p>}
       <div className="asset-grid">{data?.items.map(item=><article className="asset-item" key={item.id}>
         <button type="button" className="asset-preview" onClick={()=>setSelected(item)} aria-label={`预览 ${item.title}`}>
-          {item.url && item.mediaType==="image" ? <img src={item.url} alt={item.title} loading="lazy" onError={event=>{event.currentTarget.hidden=true;}} /> : <span>{item.mediaType==="video" ? "▶ 视频" : "预览不可用"}</span>}
+          <AssetThumbnail asset={item} />
         </button>
-        <h2>{item.title}</h2><p>{categories[item.category]} · {statuses[item.status] || item.status}</p>{item.variants.length>0 && <p>{item.variants.length} 张图片 · 查看版本与失败原因</p>}{item.project && <p>{item.project}</p>}
+        <div className="asset-meta"><h2 title={item.title}>{item.title}</h2><p>{categories[item.category]} · {statuses[item.status] || item.status}</p>{item.variants.length>0 && <p>{item.variants.length} 个版本</p>}{item.project && <p className="asset-project">{item.project}</p>}</div>
       </article>)}</div>
       {data && <footer className="asset-pagination"><span role="status">共 {data.total} 项</span><button type="button" disabled={busy || offset===0} onClick={()=>setOffset(v=>Math.max(0,v-24))}>上一页</button>
         <button type="button" disabled={busy || offset+24>=data.total} onClick={()=>setOffset(v=>v+24)}>下一页</button></footer>}
     </>}
     {selected && <AssetPreview asset={selected} onClose={()=>setSelected(undefined)} />}
   </section>;
+}
+
+function AssetThumbnail({asset}:{asset:Asset}):React.JSX.Element {
+  const [imageFailed,setImageFailed] = useState(false);
+  const [videoFailed,setVideoFailed] = useState(false);
+  if (asset.mediaType === "image") {
+    return asset.url && !imageFailed
+      ? <img src={asset.url} alt="" loading="lazy" onError={()=>setImageFailed(true)} />
+      : <span className="asset-preview-fallback">预览不可用</span>;
+  }
+  return <>
+    {asset.previewUrl && !imageFailed
+      ? <img src={asset.previewUrl} alt="" loading="lazy" onError={()=>setImageFailed(true)} />
+      : asset.url && !videoFailed
+        ? <video src={videoPreviewSource(asset.url)} muted playsInline preload="metadata" aria-hidden="true" onError={()=>setVideoFailed(true)} />
+        : <span className="asset-preview-fallback">视频预览不可用</span>}
+    <span className="asset-play" aria-hidden="true"><span /></span>
+  </>;
 }
 
 function AssetPreview({asset,onClose}:{asset:Asset;onClose:()=>void}):React.JSX.Element {
