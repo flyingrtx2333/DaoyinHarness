@@ -9,4 +9,7 @@ if r.returncode:
 report=json.loads(r.stdout.strip().splitlines()[-1])
 out=pathlib.Path("/opt/daoyin-projects/acceptance");out.mkdir(exist_ok=True)
 (out/(mode+".json")).write_text(json.dumps(report,ensure_ascii=False,indent=2))
+if report.get("runId"):(out/(mode+"-"+report["runId"]+".json")).write_text(json.dumps(report,ensure_ascii=False,indent=2))
 print(json.dumps({k:v for k,v in report.items() if k!="diagnostics"},ensure_ascii=False,indent=2))
+
+if report.get("runStatus") in {"failed","cancelled","interrupted"}:raise SystemExit(1)

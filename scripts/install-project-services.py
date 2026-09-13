@@ -114,6 +114,12 @@ if updated!=original:
     except Exception:
         workbench.write_text(original)
         raise
+current=pathlib.Path("/opt/daoyin-projects/current")
+if current.exists() and not current.is_symlink():raise RuntimeError("Unexpected project release link")
+next_link=current.with_name("current.next")
+if next_link.is_symlink():next_link.unlink()
+next_link.symlink_to(RELEASE,target_is_directory=True)
+next_link.replace(current)
 run(["systemctl","daemon-reload"])
 run(["systemctl","enable","daoyin-project-executor.service","daoyin-projects.service"])
 run(["systemctl","restart","daoyin-project-executor.service"])

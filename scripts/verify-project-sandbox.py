@@ -5,7 +5,7 @@ def docker(code):return subprocess.run(['docker','exec','--user','1000:1000',nam
 result=docker((root/'scripts/project-sandbox-probe.mjs').read_text());report=json.loads(result.stdout)
 quota=docker("""import fs from 'node:fs/promises';let code='';try{await fs.writeFile('/run/app/quota-probe.bin',Buffer.alloc(2*1024*1024));}catch(e){code=e.code;}finally{await fs.unlink('/run/app/quota-probe.bin').catch(()=>{});}if(code!=='ENOSPC')throw new Error('Writable socket storage not bounded');await fs.link('/run/app/app.sock','/run/app/pinned-test.sock');console.log(JSON.stringify({writeLimit:code}));""")
 report['writableSocketQuota']=json.loads(quota.stdout)
-policy=pathlib.Path('/opt/daoyin-projects/releases/20260913-v10/socketPolicy.mjs')
+policy=pathlib.Path('/opt/daoyin-projects/current/socketPolicy.mjs')
 node="""
 import {pinAppSocket,unixJson} from 'POLICY';
 import {execFileSync} from 'node:child_process';
