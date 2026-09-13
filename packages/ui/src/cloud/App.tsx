@@ -19,6 +19,7 @@ import { StoryUpload, type StoryReference } from "./StoryUpload.js";
 import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
 import { VideoCreationDialog } from "./VideoCreationDialog.js";
+import { LoginGateway } from "./LoginGateway.js";
 
 const APPLICATION = "saishi" as const;
 const entryUrl = new URL(window.location.href);
@@ -297,6 +298,10 @@ export function App(): React.JSX.Element {
       setInteractionBusy(false);
       setInteractionError(cause instanceof WorkbenchError ? cause.message : "确认结果未提交，请重试。");
     }
+  }
+
+  if ((phase === "error" || phase === "expired") && loginUrl) {
+    return <LoginGateway fallbackLoginUrl={loginUrl} workbenchError={error} />;
   }
 
   return <div className="workbench">
