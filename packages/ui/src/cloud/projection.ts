@@ -11,6 +11,7 @@ export interface PendingVideoInteraction {
   operation: "story_create_video" | "story_create_production";
   input: Record<string, unknown>;
   estimate?: unknown;
+  firstFrameUrl?: string;
 }
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const toolLabels: Record<string, string> = {
@@ -31,8 +32,17 @@ export function pendingVideoInteraction(events: AgentEvent[], sessionId: string)
   const requested = [...events].reverse().find((event) => event.sessionId === sessionId && !terminalRuns.has(event.turnId) && event.type === "interaction.requested" &&
     event.payload.kind === "video_confirmation" && !resolved.has(event.payload.interactionId));
   if (requested?.type !== "interaction.requested" || !record(requested.payload.input)) return undefined;
+  let firstFrameUrl: string | undefined;
+  if (requested.payload.input.target === "continue") {
+    for (const event of events) {
+      if (event.turnId !== requested.turnId || event.type !== "tool.completed" || event.payload.toolName !== "story_get_video") continue;
+      const result = event.payload.evidence.result;
+      if (!record(result) || !record(result.data) || result.data.id !== requested.payload.input.source_video_id) continue;
+      try { const url = new URL(String(result.data.last_frame_url)); if (url.protocol === "https:" && !url.username && !url.password) firstFrameUrl = url.href; } catch { /* No usable preview. */ }
+    }
+  }
   return { interactionId: requested.payload.interactionId, runId: requested.turnId, operation: requested.payload.operation,
-    input: structuredClone(requested.payload.input), ...(requested.payload.estimate === undefined ? {} : { estimate: requested.payload.estimate }) };
+    input: structuredClone(requested.payload.input), ...(firstFrameUrl ? { firstFrameUrl } : {}), ...(requested.payload.estimate === undefined ? {} : { estimate: requested.payload.estimate }) };
 }
 
 export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[] {

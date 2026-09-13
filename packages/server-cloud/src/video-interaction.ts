@@ -13,6 +13,8 @@ export const VIDEO_CONFIRMATION_INSTRUCTIONS = `付费创建视频前必须先�
 这类请求读取 story_video_options 后直接采用受支持的默认方案并进入确认：优先豆包 Seedance 2.0 Mini、720p、10 秒、16:9、target=new；没有明确口播时默认无口播，按用户风格补充合适的背景音乐描述。确认窗口负责让用户检查或修改这些默认值。
 只有缺少任何可表现的主题/内容，或用户明确表示要引用但尚未指定已有/上传素材时，才在消息中追问。
 如有 story_estimate_video，应先调用它；确认窗口会直接展示其最近一次可信结果。
+用户要求续接上一段或生成下一段时，先调用 story_get_video 读取当前会话指向的视频，再调用 story_video_options，选择 supports_tail_continuation=true 的可用模型；必须使用 target=continue 和 source_video_id，不能用 existing 代替。尾帧作为首帧属于图片输入，估价 hasVideoInput=false。
+根据完整上段内容润色后续动作，不能只取开头镜头；没有观察实际尾帧时不得声称看到了结尾画面，提示词以“从给定首帧的主体、构图和动作自然延续”开头。禁止擅自把未观察的尾帧描述成赛车等具体场景。
 确认工具返回后，必须使用返回的 operation 和 input 原样调用对应生成工具，不得自行改动参数或再次提交。`;
 
 type VideoOperation = "story_create_video" | "story_create_production";
@@ -84,7 +86,22 @@ export class VideoInteractionCoordinator {
       return { ok: false as const, code: "VIDEO_CONFIRMATION_INVALID", message: "视频生成参数尚未完整，未打开确认窗口。", retryable: false };
     }
     const interactionId = `interaction_${crypto.randomUUID()}`;
-    const estimate = latestEstimate(await events.read(run.sessionId), run.id);
+    const history = await events.read(run.sessionId);
+    if (operation === "story_create_video" && /(?:接着|续接|延续|下一段|后续|续写)/u.test(run.userMessage) && requestedInput.target !== "continue") {
+      return { ok: false as const, code: "VIDEO_CONTINUATION_REQUIRED", message: "续接必须使用 target=continue，把上一段尾帧作为首帧；请重新读取源视频和可用模型后估价确认。", retryable: false };
+    }
+    if (requestedInput.target === "continue") {
+      const sourceRead = history.some(event => {
+        if (event.turnId !== run.id || event.type !== "tool.completed" || event.payload.toolName !== "story_get_video") return false;
+        const result = event.payload.evidence.result;
+        return inputRecord(result) && inputRecord(result.data) && result.data.id === requestedInput.source_video_id && result.data.status === "SUCCEEDED" && typeof result.data.last_frame_url === "string";
+      });
+      if (!sourceRead) return { ok: false as const, code: "VIDEO_SOURCE_REQUIRED", message: "请先调用 story_get_video 核验源视频及其尾帧，再准备续接确认。", retryable: false };
+    }
+    if (!await binding.authorizeResource({ id: `${context.toolCallId}_preflight`, name: String(operation), input: requestedInput }, identity, signal)) {
+      return { ok: false as const, code: "VIDEO_PREFLIGHT_FAILED", message: "视频参数或参考方式未通过业务校验，请读取当前模型能力并修正后再确认。", retryable: false };
+    }
+    const estimate = latestEstimate(history, run.id);
     let settle!: (value: Resolution) => void;
     const resolutionPromise = new Promise<Resolution>((resolve) => { settle = resolve; });
     const pending: Pending = { run, identity, events, signal, accountId: context.accountId, scopeId: context.scopeId,
@@ -130,6 +147,10 @@ export class VideoInteractionCoordinator {
       throw new CloudError(409, "INTERACTION_NOT_PENDING", "该确认请求已处理、已失效或不属于当前任务。");
     }
     const confirmedInput = resolution.input ?? pending.requestedInput;
+    if (resolution.resolution === "confirmed" && pending.requestedInput.target === "continue" &&
+        ["target", "source_video_id", "modelName", "resolution", "durationSeconds", "aspectRatio", "request_key"].some(key => confirmedInput[key] !== pending.requestedInput[key])) {
+      throw new CloudError(400, "VIDEO_CONFIRMATION_INVALID", "续接来源和已估价规格已变化，请重新准备确认。");
+    }
     if (resolution.resolution === "confirmed" && (!inputRecord(confirmedInput) || !pending.binding.validateInput(confirmedInput))) {
       throw new CloudError(400, "VIDEO_CONFIRMATION_INVALID", "视频参数不完整或不受当前模型支持，请修改后再确认。");
     }
