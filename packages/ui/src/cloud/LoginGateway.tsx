@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { HarnessLogo } from "./HarnessLogo.js";
+import heroImage from "../../public/assets/login-hero-ribbon-v2.png";
+import heroVideo from "../../public/assets/login-hero-ribbon-loop-v1.mp4";
 
 const PLATFORM = "https://www.daoyintech.com";
 const API = "/api";
 const REGISTER_URL = `${PLATFORM}/login?mode=register&redirect=harness&app=saishi`;
+const HERO_IMAGE = heroImage;
+const HERO_VIDEO = heroVideo;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -36,12 +40,21 @@ export function LoginGateway(): React.JSX.Element {
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [motionEnabled, setMotionEnabled] = useState(false);
 
   useEffect(() => {
     if (countdown <= 0) return;
     const timer = window.setTimeout(() => setCountdown(value => Math.max(0, value - 1)), 1000);
     return () => window.clearTimeout(timer);
   }, [countdown]);
+
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncMotion = (): void => setMotionEnabled(!preference.matches);
+    syncMotion();
+    preference.addEventListener("change", syncMotion);
+    return () => preference.removeEventListener("change", syncMotion);
+  }, []);
 
   async function sendCode(): Promise<void> {
     if (sending || countdown > 0) return;
@@ -95,6 +108,18 @@ export function LoginGateway(): React.JSX.Element {
   return <main className="login-gateway">
     <header className="login-brand"><HarnessLogo aria-hidden="true" /><strong>道引 Harness</strong></header>
     <section className="login-story" aria-labelledby="login-story-title">
+      <video
+        className="login-story-video"
+        src={motionEnabled ? HERO_VIDEO : undefined}
+        poster={HERO_IMAGE}
+        autoPlay={motionEnabled}
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        aria-hidden="true"
+        tabIndex={-1}
+      />
       <div className="login-aurora" aria-hidden="true"><span /><span /></div>
       <div className="login-story-copy">
         <h1 id="login-story-title">与 AI 一起，<br />把想法变成成果</h1>

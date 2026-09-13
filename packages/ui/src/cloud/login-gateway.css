@@ -3,6 +3,7 @@
 .login-brand img { width: 36px; height: 36px; }
 .login-story { position: relative; display: flex; align-items: center; min-width: 0; overflow: visible; padding: 84px clamp(36px, 6.5vw, 100px) 72px; background: #f9fbff; }
 .login-story::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 128%; background: url("../../public/assets/login-hero-ribbon-v2.png") center / 100% 100% no-repeat; opacity: .70; pointer-events: none; }
+.login-story-video { position: absolute; z-index: 1; inset: 0 auto 0 0; width: 128%; height: 100%; object-fit: fill; opacity: .70; pointer-events: none; }
 .login-story-copy { position: relative; z-index: 2; width: min(620px, 100%); transform: translateY(-116px); }
 .login-story h1 { margin: 0; max-width: 560px; color: #13213c; font-size: 48px; font-weight: 680; line-height: 1.25; letter-spacing: -1.5px; }
 .login-story-copy > p { margin: 24px 0 0; color: #526178; font-size: 16px; line-height: 1.6; }
@@ -42,6 +43,7 @@
   .login-brand img { width: 30px; height: 30px; }
   .login-story { display: block; min-height: 210px; padding: var(--ui-space-5) var(--ui-space-4) 56px; overflow: visible; }
   .login-story::before { width: 100%; }
+  .login-story-video { width: 100%; }
   .login-story-copy { transform: none; }
   .login-story h1 { font-size: var(--ui-font-hero); letter-spacing: -.5px; }
   .login-story-copy > p { margin-top: var(--ui-space-3); font-size: var(--ui-font-body); }
@@ -55,5 +57,6 @@
   .login-code button { min-width: 98px; padding-inline: var(--ui-space-2); }
 }
 @media (prefers-reduced-motion: reduce) {
+  .login-story-video { display: none; }
   .login-gateway *, .login-gateway *::before, .login-gateway *::after { transition: none !important; }
 }

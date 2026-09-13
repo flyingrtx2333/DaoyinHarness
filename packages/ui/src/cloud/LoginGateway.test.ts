@@ -28,5 +28,7 @@ describe("Harness unified-account login gateway", () => {
     expect(html).not.toContain("Harness 账号注册");
     expect(html).not.toContain("内容创作");
     expect(html).not.toContain("使用主平台登录页");
+    expect(html).toContain("poster=");
+    expect(html).not.toContain("<video src=");
   });
 });
