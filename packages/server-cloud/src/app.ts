@@ -341,8 +341,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         };
         await ensureActive(identity, controller.signal);
         // One gateway client and operation sequence for the complete tree: accounting stays on the root Run.
-        const baseModel = createExplicitVideoFlow(run) ??
-          await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
+        const platformModel = await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
+        const baseModel = createExplicitVideoFlow(run, platformModel) ?? platformModel;
         let modelCalls = 0;
         const createMeteredModel = async (targetRun: CloudRun, parentSignal: AbortSignal): Promise<ModelClient> => {
           return {

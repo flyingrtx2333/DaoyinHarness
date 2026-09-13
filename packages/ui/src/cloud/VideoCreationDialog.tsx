@@ -6,6 +6,10 @@ const number = (input: Record<string, unknown>, key: string, fallback: number): 
   typeof input[key] === "number" && Number.isFinite(input[key]) ? input[key] : fallback;
 const bool = (input: Record<string, unknown>, key: string, fallback: boolean): boolean =>
   typeof input[key] === "boolean" ? input[key] : fallback;
+const modelLabel = (value: string): string => ({
+  "doubao-seedance-2-0-mini-260615": "豆包 Seedance 2.0 Mini",
+  "AutoDL-MiniMax-H3": "AutoDL MiniMax H3",
+}[value] ?? value) || "系统推荐模型";
 
 function findCredit(value: unknown, key: string, depth = 0): string | undefined {
   if (depth > 4 || value === null || typeof value !== "object") return undefined;
@@ -60,12 +64,9 @@ export function VideoCreationDialog({ interaction, busy, error, onCancel, onConf
         <label className="video-field"><span>清晰度</span><select value={text(input, "resolution")} onChange={(event) => update("resolution", event.target.value)}>
           {["480p", "720p", "768p", "1080p", "2k", "4k"].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       </div>
-      <div className="video-field-grid">
-        <label className="video-field"><span>视频模型</span><input required maxLength={128} value={text(input, "modelName")}
-          onChange={(event) => update("modelName", event.target.value)} /></label>
-        {production && <label className="video-field"><span>单段时长</span><input type="number" min="4" max="15" step="1"
-          value={number(input, "segmentDurationSeconds", 8)} onChange={(event) => update("segmentDurationSeconds", event.target.valueAsNumber)} /></label>}
-      </div>
+      <p className="video-creation-meta">视频模型：{modelLabel(text(input, "modelName"))}（系统自动选择）</p>
+      {production && <div className="video-field-grid"><label className="video-field"><span>单段时长</span><input type="number" min="4" max="15" step="1"
+        value={number(input, "segmentDurationSeconds", 8)} onChange={(event) => update("segmentDurationSeconds", event.target.valueAsNumber)} /></label></div>}
       {production && <div className="video-confirm-checks">
         <label><input type="checkbox" checked={bool(input, "generateAudio", true)} onChange={(event) => update("generateAudio", event.target.checked)} />生成配音</label>
         <label><input type="checkbox" checked={bool(input, "generateSubtitles", true)} onChange={(event) => update("generateSubtitles", event.target.checked)} />生成字幕</label>

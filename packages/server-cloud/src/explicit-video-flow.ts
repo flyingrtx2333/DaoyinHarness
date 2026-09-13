@@ -39,12 +39,24 @@ function defaults(request: ModelRequest, prompt: string, requestKey: string): Re
   };
 }
 
+async function polishPrompt(model: ModelClient, request: ModelRequest, original: string): Promise<string> {
+  const reply = await model.complete({ messages: [{ role: "user", content: original }], tools: [], signal: request.signal,
+    systemPrompt: { stableText: `你是视频生成提示词编辑器。把用户的简短视频创意润色为一段可直接交给视频生成模型的中文提示词。
+忠实保留主题，不添加用户未要求的台词、品牌、人物身份或敏感内容；补全镜头、主体动作、环境、光影、节奏和声音设计。
+没有明确口播时写明“无旁白、无人物对白”；高燃内容匹配有冲击力的背景音乐。只输出提示词正文，不解释、不列参数、不使用 Markdown，最多 1200 字。`,
+      dynamicText: "", sections: [{ id: "video_prompt_polish", kind: "stable" }] } });
+  if (reply.kind !== "assistant") throw new Error("Video prompt polishing did not return text.");
+  const polished = reply.content.trim();
+  if (!polished || polished.length > 5000) throw new Error("Video prompt polishing returned invalid text.");
+  return polished;
+}
+
 function call(id: string, name: string, input: Record<string, unknown>): ModelReply {
   return { kind: "tool_calls", calls: [{ id, name, input }] };
 }
 
 /** Deterministic paid-action preflight: explicit creation opens the existing modal instead of becoming prose. */
-export function createExplicitVideoFlow(run: CloudRun): ModelClient | undefined {
+export function createExplicitVideoFlow(run: CloudRun, model: ModelClient): ModelClient | undefined {
   if (!isExplicitNewVideoRequest(run.userMessage)) return undefined;
   const requestKey = `harness_${run.id.replace(/^run_/u, "").replaceAll("-", "")}`;
   let stage = 0;
@@ -58,7 +70,10 @@ export function createExplicitVideoFlow(run: CloudRun): ModelClient | undefined 
     if (stage === 1) {
       const options = toolResult(request, "story_video_options");
       if (options?.ok !== true) return { kind: "assistant", content: text(options?.message) ?? "当前未能读取可用视频模型，本轮未提交生成任务。" };
-      input = defaults(request, run.userMessage, requestKey); stage = 2;
+      let prompt: string;
+      try { prompt = await polishPrompt(model, request, run.userMessage); }
+      catch { return { kind: "assistant", content: "AI 未能完成视频提示词润色，本轮未提交生成任务，请重试。" }; }
+      input = defaults(request, prompt, requestKey); stage = 2;
       return call("video_estimate", "story_estimate_video", { modelName: input.modelName!, resolution: input.resolution!,
         durationSeconds: input.durationSeconds!, hasVideoInput: false });
     }
