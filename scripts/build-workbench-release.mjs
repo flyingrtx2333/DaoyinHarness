@@ -13,7 +13,13 @@ const preview = process.argv.includes("--preview");
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", windowsHide: true });
 const revision = git("rev-parse", "HEAD").trim();
 const root = resolve(".");
-const read = (path) => preview ? readFile(resolve(path), "utf8") : Promise.resolve(git("show", `${revision}:${path}`));
+const overlayIndex=process.argv.indexOf("--project-overlay");
+const baseRevision=overlayIndex<0?undefined:process.argv[overlayIndex+1];
+if(baseRevision!==undefined&&(preview||!/^[a-f0-9]{40}$/u.test(baseRevision)))throw new Error("Project overlay requires an exact deployed base and committed source.");
+const read = (path) => {
+ const source=baseRevision!==undefined&&!["packages/ui/src/cloud/ProjectWorkspace.tsx","packages/ui/src/cloud/projects.css"].includes(path)?baseRevision:revision;
+ return preview?readFile(resolve(path),"utf8"):Promise.resolve(git("show",source+":"+path));
+};
 const { version } = JSON.parse(await read("package.json"));
 if (typeof version !== "string" || !version.trim()) throw new Error("Workbench package version missing");
 // The UI and release manifest share the exact same immutable build identity.
@@ -62,5 +68,5 @@ if (!js || !css || !logo || !loginHero || !loginHeroVideo) throw new Error("Work
 await writeFile(`${output}/index.html`, `<!doctype html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f6f7f9"><meta name="description" content="道引 Harness 云端工作台：公开知识问答、会话与资料引用。"><title>道引 Harness 工作台</title><link rel="icon" type="image/png" href="/assets/${logo}"><link rel="apple-touch-icon" href="/assets/${logo}"><link rel="stylesheet" href="/assets/${css}"><script type="module" src="/assets/${js}"></script></head><body><div id="root"></div><noscript>请启用 JavaScript 使用工作台。</noscript></body></html>\n`);
 const files = {};
 for (const file of ["index.html", `assets/${js}`, `assets/${css}`, `assets/${logo}`, `assets/${loginHero}`, `assets/${loginHeroVideo}`]) files[file] = createHash("sha256").update(await readFile(`${output}/${file}`)).digest("hex");
-await writeFile(`${output}/release.json`, JSON.stringify({ ...buildInfo, preview, files }, null, 2));
+await writeFile(`${output}/release.json`, JSON.stringify({ ...buildInfo, ...(baseRevision?{baseRevision,scope:"independent-project-overlay"}:{}), preview, files }, null, 2));
 console.log(JSON.stringify({ output, ...buildInfo, preview, files }, null, 2));

@@ -114,3 +114,13 @@ requests, not mock-model or legacy regression results.
 Fresh cloud/UI TypeScript checks, scoped lint and committed-source release builds
 are recorded separately from the above runtime evidence. No full-host power-loss
 test, CPU/memory stress benchmark or external penetration-test certification is claimed.
+
+## Scoped release during parallel development
+
+When HEAD also contains unrelated code requiring an unapproved migration, build
+the cloud/workbench release with --project-overlay followed by the exact current
+production revision. The manifest records that base explicitly. The cloud bundle
+overlays only the independent projects directory and the shutdown connection fix;
+the workbench overlays only its project panel and project styles. This preserves
+other work's source and deployment boundaries without creating another checkout
+or applying unrelated database migrations.

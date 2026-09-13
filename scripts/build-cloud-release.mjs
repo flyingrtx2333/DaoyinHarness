@@ -12,7 +12,19 @@ if (process.platform !== "win32" && !(process.platform === "linux" && process.ar
 }
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", windowsHide: true });
 const revision = git("rev-parse", "HEAD").trim();
-const read = (path) => git("show", `${revision}:${path}`);
+const overlayIndex=process.argv.indexOf("--project-overlay");
+const baseRevision=overlayIndex<0?undefined:process.argv[overlayIndex+1];
+if(baseRevision!==undefined&&!/^[a-f0-9]{40}$/u.test(baseRevision))throw new Error("Project overlay requires an exact deployed base revision.");
+const read = (path) => {
+  const source=baseRevision!==undefined&&!path.startsWith("packages/server-cloud/src/projects/")?baseRevision:revision;
+  let value=git("show",source+":"+path);
+  if(baseRevision!==undefined&&path==="packages/server-cloud/src/app.ts"){
+    const before="const app = Fastify({ logger: false, bodyLimit: 64_000,";
+    if(!value.includes(before)&&!value.includes("forceCloseConnections: true"))throw new Error("Unexpected deployed cloud app shape.");
+    value=value.replace(before,"const app = Fastify({ logger: false, forceCloseConnections: true, bodyLimit: 64_000,");
+  }
+  return value;
+};
 const output = resolve(".cache", "cloud-release", revision);
 await mkdir(output, { recursive: true });
 const aliases = {
@@ -71,5 +83,5 @@ const files = {};
 for (const name of ["main.mjs", "postgres-migrate.mjs", "sqlite-to-postgres.mjs", "evaluation.mjs", "package.json", "package-lock.json"]) {
   files[name] = createHash("sha256").update(await readFile(`${output}/${name}`)).digest("hex");
 }
-await writeFile(`${output}/release.json`, JSON.stringify({ revision, node: "22.23.2", entry: "main.mjs", files, builtAt: new Date().toISOString() }, null, 2));
+await writeFile(`${output}/release.json`, JSON.stringify({ revision, ...(baseRevision?{baseRevision,scope:"independent-project-overlay"}:{}), node: "22.23.2", entry: "main.mjs", files, builtAt: new Date().toISOString() }, null, 2));
 console.log(output);
