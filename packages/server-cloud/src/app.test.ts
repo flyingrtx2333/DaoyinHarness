@@ -116,6 +116,8 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
         call += 1;
         if (call === 1) {
           expect(request.tools.map((tool) => tool.name)).toContain("request_video_confirmation");
+          expect(request.systemPrompt.stableText + request.systemPrompt.dynamicText).toContain("生成一段高燃混剪视频");
+          expect(request.systemPrompt.stableText + request.systemPrompt.dynamicText).toContain("720p、10 秒、16:9");
           return { kind: "tool_calls", calls: [{ id: "confirm-1", name: "request_video_confirmation",
             input: { operation: "story_create_video", input } }] };
         }

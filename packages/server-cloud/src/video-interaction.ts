@@ -9,6 +9,9 @@ export const VIDEO_CONFIRMATION_TOOL = "request_video_confirmation";
 export const VIDEO_GENERATION_OPERATIONS = new Set(["story_create_video", "story_create_production"]);
 export const VIDEO_CONFIRMATION_INSTRUCTIONS = `付费创建视频前必须先调用 request_video_confirmation，并传入将要执行的业务工具名和完整、精确的业务参数。
 仅在用户确实要求创建视频且必要参数已经齐全时调用；咨询、排错、查询进度、取消或仅修改文案时不得调用。
+用户明确要求全新生成且已经给出可执行的主题或风格（例如“生成一段高燃混剪视频”）时，主题即视为必要内容已经齐全；不得再要求用户逐项补充可选参数。
+这类请求读取 story_video_options 后直接采用受支持的默认方案并进入确认：优先豆包 Seedance 2.0 Mini、720p、10 秒、16:9、target=new；没有明确口播时默认无口播，按用户风格补充合适的背景音乐描述。确认窗口负责让用户检查或修改这些默认值。
+只有缺少任何可表现的主题/内容，或用户明确表示要引用但尚未指定已有/上传素材时，才在消息中追问。
 如有 story_estimate_video，应先调用它；确认窗口会直接展示其最近一次可信结果。
 确认工具返回后，必须使用返回的 operation 和 input 原样调用对应生成工具，不得自行改动参数或再次提交。`;
 
