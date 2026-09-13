@@ -16,7 +16,7 @@ export interface ProjectOperation {
   error: string | null; createdAt: string;
 }
 export interface ExecutorRequest {
-  action: "domains" | "readiness" | "prepare" | "check" | "preview" | "publish" | "rollback" | "stop" | "status";
+  action: "domains" | "readiness" | "prepare" | "check" | "preview" | "publish" | "rollback" | "stop" | "status" | "reconcile";
   projectId: string; slug?: string; versionId?: string; files?: ProjectFile[]; mode?: "development" | "production";
 }
 export const PROJECT_TOOLS = ["project_list", "project_create", "project_files", "project_write", "project_check", "project_preview", "project_publish"] as const;

@@ -166,6 +166,12 @@ async function dispatch(input:ExecutorRequest):Promise<unknown>{
   if(input.action==="status"){
     const target=instance(input);try{await healthy(target.socket);return{running:true,...target};}catch{return{running:false,...target};}
   }
+  if(input.action==="reconcile"){
+    const keep=instance({...input,mode:"production"}).name,prefix="hp-"+input.projectId.slice(4)+"-production-";
+    const names=(await command(["ps","-a","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n");
+    for(const name of names)if(name.startsWith(prefix)&&name!==keep){await command(["rm","-f",name],30000);const dir=path.join(ROOT,"instances",name);if(await mounted(dir))await boundedMount(dir,1,true);}
+    return{reconciled:true};
+  }
   if(input.action==="stop"){
     const prefix="hp-"+input.projectId.slice(4)+"-"+(input.mode==="production"?"production":"development")+"-";
     const names=(await command(["ps","-a","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n");

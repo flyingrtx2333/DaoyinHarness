@@ -209,7 +209,7 @@ for(const op of interrupted){
 }
 const existingProjects=(await pool.query<{id:string;active_version:string|null}>("SELECT id,active_version FROM harness_projects")).rows;
 for(const project of existingProjects){
- if(project.active_version)await brokers.ensure(project.id,"production");
+ if(project.active_version){await brokers.ensure(project.id,"production");await exec({action:"reconcile",projectId:project.id,versionId:project.active_version,mode:"production"}).catch(()=>undefined);}
  const preview=(await pool.query("SELECT id FROM harness_project_operations WHERE project_id=$1 AND kind='preview' AND status='completed' LIMIT 1",[project.id])).rowCount;
  if(preview){await brokers.ensure(project.id,"development");touches.set(project.id,Date.now());}
 }
