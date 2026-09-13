@@ -64,6 +64,8 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
       estimate: { estimated_balance_consumption_credits: "12.5" } });
     const resolved = event(2, "interaction.resolved", { interactionId: "interaction_1", toolCallId: "confirm_1", resolution: "confirmed", input: { prompt: "追逐" } });
     expect(pendingVideoInteraction([requested, resolved], run.sessionId)).toBeUndefined();
+    const interrupted = event(2, "turn.interrupted", { status: "interrupted", reason: "runtime_restart", lastCompletedEventSeq: 1 });
+    expect(pendingVideoInteraction([requested, interrupted], run.sessionId)).toBeUndefined();
     expect(pendingVideoInteraction([{ ...requested, sessionId: "foreign" }], run.sessionId)).toBeUndefined();
   });
 });

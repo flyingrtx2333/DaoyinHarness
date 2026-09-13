@@ -24,9 +24,11 @@ const toolLabels: Record<string, string> = {
 };
 
 export function pendingVideoInteraction(events: AgentEvent[], sessionId: string): PendingVideoInteraction | undefined {
+  const terminalRuns = new Set(events.filter((event) => event.sessionId === sessionId &&
+    ["turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted"].includes(event.type)).map((event) => event.turnId));
   const resolved = new Set(events.filter((event) => event.sessionId === sessionId && event.type === "interaction.resolved")
     .map((event) => event.type === "interaction.resolved" ? event.payload.interactionId : ""));
-  const requested = [...events].reverse().find((event) => event.sessionId === sessionId && event.type === "interaction.requested" &&
+  const requested = [...events].reverse().find((event) => event.sessionId === sessionId && !terminalRuns.has(event.turnId) && event.type === "interaction.requested" &&
     event.payload.kind === "video_confirmation" && !resolved.has(event.payload.interactionId));
   if (requested?.type !== "interaction.requested" || !record(requested.payload.input)) return undefined;
   return { interactionId: requested.payload.interactionId, runId: requested.turnId, operation: requested.payload.operation,
