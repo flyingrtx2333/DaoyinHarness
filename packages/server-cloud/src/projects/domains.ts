@@ -13,7 +13,7 @@ export function registerDomain(projectId:string,slug:string):Promise<void>{
 async function apply(projectId:string,slug:string):Promise<void>{
  identifier(projectId,"prj");slugValue(slug);
  let entries:Record<string,string>={};
- try{entries=JSON.parse(await readFile(registry,"utf8")) as Record<string,string>;}catch{/* First install. */}
+ try{entries=JSON.parse(await readFile(registry,"utf8")) as Record<string,string>;}catch(e){if(!(e instanceof Error)||!("code" in e)||e.code!=="ENOENT")throw new ProjectError("PROJECT_DOMAIN_REGISTRY_INVALID","网址记录暂不可用，现有路由保持不变。",503);}
  if(entries[projectId]===slug)return;
  if(Object.entries(entries).some(([id,value])=>value===slug&&id!==projectId))throw new ProjectError("PROJECT_DOMAIN_TAKEN","网址名称已被占用。",409);
  const names=[slug+".demo.daoyintech.com","p-"+projectId.slice(4)+".demo.daoyintech.com"];
@@ -59,7 +59,7 @@ server {
  try{
   await run("/www/server/nginx/sbin/nginx",["-t"],{timeout:15000,maxBuffer:65536});
   await run("/www/server/nginx/sbin/nginx",["-s","reload"],{timeout:15000,maxBuffer:65536});
-  await writeFile(registry,JSON.stringify(entries),{mode:0o600});
+  await writeFile(registry+".next",JSON.stringify(entries),{mode:0o600});await rename(registry+".next",registry);
  }catch{
   await writeFile(target,previous??"# Project domain registration failed; no routes enabled.\n",{mode:0o644});
   throw new ProjectError("PROJECT_DOMAIN_SETUP_FAILED","网址路由检查失败，原有站点未更改。",503);
