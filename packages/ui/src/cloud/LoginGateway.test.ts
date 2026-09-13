@@ -29,6 +29,8 @@ describe("Harness unified-account login gateway", () => {
     expect(html).not.toContain("内容创作");
     expect(html).not.toContain("使用主平台登录页");
     expect(html).toContain("poster=");
+    expect(html).toContain("login-hero-ribbon-loop-v1.mp4");
+    expect(html).toContain('autoPlay=""');
     expect(html).not.toContain("<video src=");
   });
 });

@@ -58,6 +58,5 @@
   .login-code button { min-width: 98px; padding-inline: var(--ui-space-2); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .login-story-video { display: none; }
   .login-gateway *, .login-gateway *::before, .login-gateway *::after { transition: none !important; }
 }

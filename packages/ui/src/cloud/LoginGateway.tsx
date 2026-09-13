@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { HarnessLogo } from "./HarnessLogo.js";
 import heroImage from "../../public/assets/login-hero-ribbon-v2.png";
 import heroVideo from "../../public/assets/login-hero-ribbon-loop-v1.mp4";
@@ -40,8 +40,8 @@ export function LoginGateway(): React.JSX.Element {
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [motionEnabled, setMotionEnabled] = useState(true);
   const [videoReady, setVideoReady] = useState(false);
+  const heroVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -50,11 +50,20 @@ export function LoginGateway(): React.JSX.Element {
   }, [countdown]);
 
   useEffect(() => {
-    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const syncMotion = (): void => setMotionEnabled(!preference.matches);
-    syncMotion();
-    preference.addEventListener?.("change", syncMotion);
-    return () => preference.removeEventListener?.("change", syncMotion);
+    const play = (): void => {
+      const video = heroVideoRef.current;
+      if (!video) return;
+      video.muted = true;
+      void video.play().catch(() => setVideoReady(false));
+    };
+    const resume = (): void => { if (!document.hidden) play(); };
+    play();
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("pointerdown", play);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("pointerdown", play);
+    };
   }, []);
 
   async function sendCode(): Promise<void> {
@@ -110,14 +119,19 @@ export function LoginGateway(): React.JSX.Element {
     <header className="login-brand"><HarnessLogo aria-hidden="true" /><strong>道引 Harness</strong></header>
     <section className={`login-story${videoReady ? " login-story-video-ready" : ""}`} aria-labelledby="login-story-title">
       <video
+        ref={heroVideoRef}
         className="login-story-video"
-        src={motionEnabled ? HERO_VIDEO : undefined}
+        src={HERO_VIDEO}
         poster={HERO_IMAGE}
-        autoPlay={motionEnabled}
+        autoPlay
         muted
         loop
         playsInline
-        preload="metadata"
+        preload="auto"
+        onCanPlay={event => {
+          event.currentTarget.muted = true;
+          void event.currentTarget.play().catch(() => setVideoReady(false));
+        }}
         onPlaying={() => setVideoReady(true)}
         onPause={() => setVideoReady(false)}
         aria-hidden="true"
