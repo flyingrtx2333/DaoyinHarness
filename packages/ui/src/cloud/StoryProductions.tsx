@@ -68,7 +68,7 @@ function ProductionCard({ id, client }: { id: string; client: WorkbenchClient })
   return <section className="story-video-card" aria-label="短剧制作任务">
     <p className="story-video-status" role="status">{status} · {Number(data?.progress || 0)}%</p>
     {videoUrl && <video className="story-video-player" controls preload="metadata" src={videoUrl} />}
-    {budget && <p>已用 {String(budget.spentCredits)} · 预留 {String(budget.reservedCredits)} · 上限 {String(budget.maxCredits)} 积分</p>}
+    {budget && <p>已用 {Number(budget.spentCredits).toFixed(2)} · 预留 {Number(budget.reservedCredits).toFixed(2)} · 上限 {Number(budget.maxCredits).toFixed(2)} 积分</p>}
     {typeof data?.error_message === "string" && data.error_message && <p className="story-video-error">{data.error_message}</p>}
     {error && <p role="alert" className="story-video-error">{error}</p>}
     <button type="button" onClick={() => setOpen(true)}>查看制作详情</button>
@@ -111,6 +111,8 @@ function ProductionDetails({ data, busy, error, onClose, onControl }: {
       <h3>镜头 {String(segment.segment_index)} · {String(segment.duration_seconds)} 秒</h3>
       {url(segment.frame_url) && <img style={{ maxWidth: "100%", maxHeight: 180, objectFit: "contain" }} src={url(segment.frame_url)} alt={`镜头 ${String(segment.segment_index)} 首帧`} />}
       <p>{String(segment.video_prompt || "")}</p><p>{String(segment.dialogue || "")}</p>
+      {record(segment.video) && <p>{String(segment.video.status)}{typeof segment.video.error_message === "string" && ` · ${segment.video.error_message}`}</p>}
+      {record(segment.video) && url(segment.video.output_url) && <video className="story-video-player" controls preload="metadata" src={url(segment.video.output_url)} />}
     </section>)}</details>
     {error && <p className="video-creation-error" role="alert">{error}</p>}
     {cancelRequested && !terminal && <p role="alert">取消只停止后续提交，已经提交供应商的任务仍可能完成并结算。
@@ -120,6 +122,7 @@ function ProductionDetails({ data, busy, error, onClose, onControl }: {
       {data.workflowVersion === 2 && !terminal && <>
         {(state === "AWAITING_REVIEW" || (state === "BLOCKED" && data.stage === "REVIEW")) && <button type="button" className="primary" disabled={busy} onClick={() => { void onControl("approve"); }}>确认资产与分镜，开始生成视频</button>}
         {state === "PAUSED" && <button type="button" disabled={busy} onClick={() => { void onControl("resume"); }}>继续制作</button>}
+        {state === "BLOCKED" && data.stage === "REVIEW" && <button type="button" disabled={busy} onClick={() => { void onControl("resume"); }}>重试失败角色参考（最多一次）</button>}
         {state === "RUNNING" && <button type="button" disabled={busy} onClick={() => { void onControl("pause"); }}>暂停</button>}
         <button type="button" disabled={busy} onClick={() => setCancelRequested(true)}>取消后续制作</button>
       </>}
