@@ -44,6 +44,13 @@ async def main(mode):
               'authority': 'existing-valid-single-admin-actor', 'browserCookieFlow': 'not-performed', 'modelCalls': 0}
     if mode == 'catalog':
         print(json.dumps(report, ensure_ascii=False)); return
+    if mode.startswith('report:'):
+        result = await forward('GET', '/runs/' + mode.split(':', 1)[1] + '/report', session, max_bytes=8_000_000)
+        report['status'] = result.get('status'); report['completed'] = result.get('completed'); report['planned'] = result.get('planned')
+        report['trials'] = [{'case': trial.get('caseId'), 'runStatus': trial.get('runStatus'), 'errorCode': trial.get('errorCode'),
+            'answer': str(trial.get('answer', ''))[:1200], 'checks': trial.get('checks', []), 'tools': trial.get('tools', []),
+            'runId': trial.get('runId'), 'runtimeRevision': trial.get('runtimeRevision')} for trial in result.get('trials', [])]
+        print(json.dumps(report, ensure_ascii=False)); return
     if not catalog.get('liveAvailable'): raise RuntimeError('Real platform model is not available')
     if mode == 'multi':
         spec = {'requestId': str(uuid.uuid4()), 'title': '上线验收 · 三条真实多 Agent 小样本', 'mode': 'live',
@@ -100,10 +107,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--run-sample', action='store_true')
     parser.add_argument('--run-multi-agent-sample', action='store_true')
+    parser.add_argument('--report-id')
     args = parser.parse_args()
-    if args.run_sample and args.run_multi_agent_sample:
-        parser.error('choose only one sample mode')
-    mode = 'multi' if args.run_multi_agent_sample else 'sample' if args.run_sample else 'catalog'
+    if sum(bool(value) for value in (args.run_sample, args.run_multi_agent_sample, args.report_id)) > 1:
+        parser.error('choose only one mode')
+    mode = 'report:' + args.report_id if args.report_id else 'multi' if args.run_multi_agent_sample else 'sample' if args.run_sample else 'catalog'
     result = subprocess.run(['docker', 'exec', '-i', '-w', '/app', 'daoyintech-backend', 'python', '-',
                              mode], input=PROGRAM, text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=380)
