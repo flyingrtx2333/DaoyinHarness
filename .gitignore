@@ -40,6 +40,14 @@ Thumbs.db
 # Test artifacts
 playwright-report/
 test-results/
+__pycache__/
+# Server-side deployment scratch files retained outside version control.
+/output/deploy-harness-gateway-patch.py
+/output/harness-gateway-patch.tar
+/output/live-saishi-agent-bridge.py
+/output/platform-orchestration.bundle
+/scripts/cloud-orchestration-cancel.patch
+/scripts/cloud-orchestration-finish.patch
 # Disposable fixture workspaces, not acceptance reports/screenshots.
 /evidence/workspace-management/run-*/
 # Editor recovery files; do not ignore intentional .bak assets or documentation.
