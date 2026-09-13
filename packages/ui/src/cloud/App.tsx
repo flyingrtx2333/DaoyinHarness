@@ -12,7 +12,7 @@ import { AccountIdentity } from "./AccountIdentity.js";
 import { scheduleExpiry } from "./expiry.js";
 import { SettingsDialog } from "./SettingsDialog.js";
 import { ToolActivity } from "./ToolActivity.js";
-import { StoryVideos } from "./StoryVideos.js";
+import { hasCreatedStoryVideo, StoryVideos } from "./StoryVideos.js";
 import { StoryUpload, type StoryReference } from "./StoryUpload.js";
 import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
@@ -319,7 +319,7 @@ export function App(): React.JSX.Element {
             <div className="user-message"><div className="message-meta"><span className="message-label">你</span><MessageTime value={turn.run.createdAt} /></div><p>{visibleUserMessage(turn.run.userMessage)}</p></div>
             <div className="assistant-message"><div className="assistant-label"><span className="mini-mark" aria-hidden="true"><HarnessLogo /></span><span>Harness</span><span className="run-status">{statusText[turn.run.status]}</span><MessageTime value={turn.assistantOccurredAt} /></div>
               {turn.tools.length > 0 && <ToolActivity tools={turn.tools} />}
-              <div className="markdown">{turn.text && <MarkdownMessage text={turn.text} />}</div>
+              <div className="markdown">{turn.text && !hasCreatedStoryVideo(events, turn.run.id) && <MarkdownMessage text={turn.text} />}</div>
               <StoryVideos key={`${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
               {turn.images.length > 0 && <ImageGallery key={`${client.accountScope}:${turn.run.id}`} images={turn.images} accountScope={client.accountScope} />}
               {(turn.run.status === "running" || turn.run.status === "queued") && !turn.tools.some((tool) => tool.status === "running") && <p className="thinking" role="status"><span className="spinner" />{turn.run.status === "queued" ? "正在等待处理…" : turn.text ? "正在回复…" : "正在处理你的问题…"}</p>}

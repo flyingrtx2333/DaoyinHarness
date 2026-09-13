@@ -119,6 +119,10 @@ button.primary:hover:enabled { background: #174bcb; }
 .video-creation-error { margin: 0; color: #a33b28; font-size: var(--ui-font-control); }
 .video-creation-dialog footer { display: flex; justify-content: flex-end; gap: var(--ui-space-2); padding-top: var(--ui-space-1); }
 .video-creation-dialog footer button { min-height: var(--ui-control-height); padding: 0 var(--ui-space-4); }
+.story-video-card { margin-top: var(--ui-space-3); }
+.story-video-player { display: block; width: 100%; max-height: 480px; background: #080b10; }
+.story-video-status { display: flex; align-items: center; gap: var(--ui-space-2); margin: 0; color: var(--ui-muted); }
+.story-video-error { margin: var(--ui-space-2) 0 0; color: #a33b28; }
 @media (max-width: 640px) {
   .video-creation-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
   .video-creation-dialog form { gap: var(--ui-space-3); padding: var(--ui-space-3); }

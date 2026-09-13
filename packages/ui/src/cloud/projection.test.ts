@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { CloudRun } from "./client.js";
 import { pendingVideoInteraction, projectTurns } from "./projection.js";
+import { hasCreatedStoryVideo } from "./StoryVideos.js";
 
 const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request_1", userMessage: "问题", status: "completed", finalText: "最终回答", lastEventSeq: 4, cancelRequested: false, authorizationId: "grant_1", billingAccountId: "payer_1", createdAt: "2026-09-05T12:00:00Z" };
 const event = (eventSeq: number, type: string, payload: unknown, occurredAt = run.createdAt): AgentEvent => ({ id: `event_${eventSeq}`, eventSeq, type, payload, sessionId: run.sessionId, turnId: run.id, accountId: "visitor_1", scopeId: "scope_1", occurredAt }) as AgentEvent;
 
 describe("cloud workbench transcript projection (replay fixtures)", () => {
+  it("lets a created-video card own the visible completion state", () => {
+    const rows = [event(1, "tool.completed", { toolCallId: "create", toolName: "story_create_video", summary: "created",
+      evidence: { schemaVersion: 1, toolName: "story_create_video", result: { tool: "story_create_video", data: { id: "video_1" } }, artifacts: [], diagnostics: [] } })];
+    expect(hasCreatedStoryVideo(rows, "run_1")).toBe(true);
+  });
+
   it("displays stable image references before the answer and preserves them after cancellation/replay", () => {
     const image = { image_id: 3, event_id: 2, image_kind: "highlight", title: "赛事照片", url: "https://evil.invalid/tracker" };
     const completed = event(1, "tool.completed", { toolCallId: "photos", toolName: "saishi_list_images", evidence: { result: { tool: "saishi_list_images", data: { items: [image, image, { ...image, image_id: -1 }, { ...image, image_kind: "../../" }] } } } });
