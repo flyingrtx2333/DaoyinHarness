@@ -277,8 +277,22 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
 
   function startRun(identity: ExecutionIdentity, profile: CloudProfile, run: CloudRun, maxModelCalls = 12): void {
     const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort("runtime"), runTimeoutMs);
-    deadline.unref();
+    let remainingRunMs = runTimeoutMs;
+    let activeSince = Date.now();
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const resumeRunDeadline = (): void => {
+      if (controller.signal.aborted || deadline !== undefined) return;
+      activeSince = Date.now();
+      deadline = setTimeout(() => controller.abort("runtime"), remainingRunMs);
+      deadline.unref();
+    };
+    const suspendRunDeadline = (): void => {
+      if (deadline === undefined) return;
+      clearTimeout(deadline);
+      deadline = undefined;
+      remainingRunMs = Math.max(1, remainingRunMs - (Date.now() - activeSince));
+    };
+    resumeRunDeadline();
     const done = (async () => {
       try {
         const bound = await options.repository.bindRun(identity, run.sessionId, run.id);
@@ -303,7 +317,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? [])];
         const bindings = new Map(runBindings.map((binding) => [binding.definition.name, binding]));
         const videoConfirmationTool = identity.space.kind === "public" ? undefined
-          : videoInteractions.createTool(run, identity, stores.events, bindings);
+          : videoInteractions.createTool(run, identity, stores.events, bindings, { suspendRunDeadline, resumeRunDeadline });
         const wrappedDefinitions = runBindings.map<ToolDefinition>((binding) => ({
           ...binding.definition,
           execute: (input, signal, context) => measurements.measure(run.id, "tool_inclusive", async () => {
@@ -433,7 +447,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
               payload: { status: "cancelled", source: controller.signal.reason === "user" ? "user" : "runtime", lastCompletedEventSeq: child.run.lastEventSeq } });
           }
         } catch { storageFault = true; }
-        clearTimeout(deadline);
+        if (deadline !== undefined) clearTimeout(deadline);
         videoInteractions.clear(run.id);
         active.delete(run.id);
       }

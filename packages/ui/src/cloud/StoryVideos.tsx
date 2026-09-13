@@ -10,14 +10,22 @@ export function hasCreatedStoryVideo(events: AgentEvent[], runId: string): boole
     return record(result) && result.tool === "story_create_video" && record(result.data) && typeof result.data.id === "string";
   });
 }
-export function StoryVideos({ events, runId, client }: { events: AgentEvent[]; runId: string; client: WorkbenchClient }): React.JSX.Element | null {
+export function storyVideoIds(events: AgentEvent[], runId: string): string[] {
+  const confirmationFlow = events.some((event) => event.turnId === runId && event.type === "interaction.requested" &&
+    event.payload.kind === "video_confirmation");
   const ids: string[] = [];
   for (const event of events) {
     if (event.turnId !== runId || event.type !== "tool.completed") continue;
     const result: unknown = event.payload.evidence.result;
-    if (record(result) && ["story_create_video", "story_get_video"].includes(String(result.tool)) && record(result.data) &&
-        typeof result.data.id === "string" && !ids.includes(result.data.id)) ids.push(result.data.id);
+    if (!record(result) || !record(result.data) || typeof result.data.id !== "string") continue;
+    if (result.tool === "story_create_video" || (result.tool === "story_get_video" && !confirmationFlow)) {
+      if (!ids.includes(result.data.id)) ids.push(result.data.id);
+    }
   }
+  return ids;
+}
+export function StoryVideos({ events, runId, client }: { events: AgentEvent[]; runId: string; client: WorkbenchClient }): React.JSX.Element | null {
+  const ids = storyVideoIds(events, runId);
   return ids.length ? <div>{ids.slice(0, 8).map(id => <VideoCard key={id} id={id} client={client} />)}</div> : null;
 }
 function VideoCard({ id, client }: { id: string; client: WorkbenchClient }): React.JSX.Element {

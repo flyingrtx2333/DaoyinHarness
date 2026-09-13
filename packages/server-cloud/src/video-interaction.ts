@@ -17,6 +17,10 @@ export const VIDEO_CONFIRMATION_INSTRUCTIONS = `付费创建视频前必须先�
 
 type VideoOperation = "story_create_video" | "story_create_production";
 interface Resolution { resolution: "confirmed" | "cancelled"; input?: Record<string, unknown> }
+interface InteractionWaitLifecycle {
+  suspendRunDeadline(): void;
+  resumeRunDeadline(): void;
+}
 interface Pending {
   run: CloudRun;
   identity: ExecutionIdentity;
@@ -54,7 +58,7 @@ export class VideoInteractionCoordinator {
   readonly #approvals = new Set<string>();
 
   public createTool(run: CloudRun, identity: ExecutionIdentity, events: SessionEventStore,
-    bindings: ReadonlyMap<string, CloudToolBinding>): ToolDefinition | undefined {
+    bindings: ReadonlyMap<string, CloudToolBinding>, waitLifecycle?: InteractionWaitLifecycle): ToolDefinition | undefined {
     const operations = [...VIDEO_GENERATION_OPERATIONS].filter((name) => bindings.has(name)) as VideoOperation[];
     if (!operations.length) return undefined;
     return {
@@ -65,13 +69,13 @@ export class VideoInteractionCoordinator {
         operation: { type: "string", enum: operations }, input: { type: "object", maxProperties: 32 },
       } },
       auditInput: (input) => ({ operation: input.operation }),
-      execute: async (input, signal, context) => this.#request(run, identity, events, bindings, input, signal, context),
+      execute: async (input, signal, context) => this.#request(run, identity, events, bindings, input, signal, context, waitLifecycle),
     };
   }
 
   async #request(run: CloudRun, identity: ExecutionIdentity, events: SessionEventStore,
     bindings: ReadonlyMap<string, CloudToolBinding>, value: Record<string, unknown>, signal: AbortSignal,
-    context: ToolExecutionContext) {
+    context: ToolExecutionContext, waitLifecycle?: InteractionWaitLifecycle) {
     const operation = value.operation;
     const requestedInput = value.input;
     const binding = typeof operation === "string" ? bindings.get(operation) : undefined;
@@ -81,28 +85,42 @@ export class VideoInteractionCoordinator {
     }
     const interactionId = `interaction_${crypto.randomUUID()}`;
     const estimate = latestEstimate(await events.read(run.sessionId), run.id);
-    await events.append({ type: "interaction.requested", accountId: context.accountId, scopeId: context.scopeId,
-      sessionId: run.sessionId, turnId: run.id, payload: { interactionId, toolCallId: context.toolCallId,
-        kind: "video_confirmation", operation: operation as VideoOperation, input: structuredClone(requestedInput) as JsonValue,
-        ...(estimate === undefined ? {} : { estimate }) } });
-    const resolution = await new Promise<Resolution>((resolve) => {
-      const pending: Pending = { run, identity, events, signal, accountId: context.accountId, scopeId: context.scopeId,
-        toolCallId: context.toolCallId!, operation: operation as VideoOperation,
-        requestedInput: structuredClone(requestedInput), binding, settle: resolve, settled: false, resolving: false };
-      this.#pending.set(interactionId, pending);
-      const abort = (): void => {
-        if (pending.settled || pending.resolving) return;
-        pending.settled = true; this.#pending.delete(interactionId); resolve({ resolution: "cancelled" });
-      };
-      signal.addEventListener("abort", abort, { once: true });
+    let settle!: (value: Resolution) => void;
+    const resolutionPromise = new Promise<Resolution>((resolve) => { settle = resolve; });
+    const pending: Pending = { run, identity, events, signal, accountId: context.accountId, scopeId: context.scopeId,
+      toolCallId: context.toolCallId, operation: operation as VideoOperation,
+      requestedInput: structuredClone(requestedInput), binding, settle, settled: false, resolving: false };
+    this.#pending.set(interactionId, pending);
+    const abort = (): void => {
+      if (pending.settled || pending.resolving) return;
+      pending.settled = true; this.#pending.delete(interactionId); settle({ resolution: "cancelled" });
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      await events.append({ type: "interaction.requested", accountId: context.accountId, scopeId: context.scopeId,
+        sessionId: run.sessionId, turnId: run.id, payload: { interactionId, toolCallId: context.toolCallId,
+          kind: "video_confirmation", operation: operation as VideoOperation, input: structuredClone(requestedInput) as JsonValue,
+          ...(estimate === undefined ? {} : { estimate }) } });
+      waitLifecycle?.suspendRunDeadline();
       if (signal.aborted) abort();
-    });
-    if (resolution.resolution === "cancelled" || resolution.input === undefined) {
-      return { ok: false as const, code: "VIDEO_CONFIRMATION_CANCELLED", message: "用户取消了本次视频生成，未产生生成费用。", retryable: false };
+      const resolution = await resolutionPromise;
+      if (resolution.resolution === "cancelled" || resolution.input === undefined) {
+        return { ok: false as const, code: "VIDEO_CONFIRMATION_CANCELLED", message: "用户取消了本次视频生成，未产生生成费用。", retryable: false };
+      }
+      return { ok: true as const, summary: "用户已确认视频生成参数",
+        evidence: { schemaVersion: 1 as const, toolName: VIDEO_CONFIRMATION_TOOL,
+          result: { operation, input: resolution.input } as JsonValue, artifacts: [], diagnostics: [] } };
+    } catch (error) {
+      if (!pending.settled) {
+        pending.settled = true;
+        this.#pending.delete(interactionId);
+        settle({ resolution: "cancelled" });
+      }
+      throw error;
+    } finally {
+      signal.removeEventListener("abort", abort);
+      waitLifecycle?.resumeRunDeadline();
     }
-    return { ok: true as const, summary: "用户已确认视频生成参数",
-      evidence: { schemaVersion: 1 as const, toolName: VIDEO_CONFIRMATION_TOOL,
-        result: { operation, input: resolution.input } as JsonValue, artifacts: [], diagnostics: [] } };
   }
 
   public async resolve(identity: ExecutionIdentity, runId: string, interactionId: string, resolution: Resolution): Promise<void> {

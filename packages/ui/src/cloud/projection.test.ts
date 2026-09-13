@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { CloudRun } from "./client.js";
 import { pendingVideoInteraction, projectTurns } from "./projection.js";
-import { hasCreatedStoryVideo } from "./StoryVideos.js";
+import { hasCreatedStoryVideo, storyVideoIds } from "./StoryVideos.js";
 
 const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request_1", userMessage: "问题", status: "completed", finalText: "最终回答", lastEventSeq: 4, cancelRequested: false, authorizationId: "grant_1", billingAccountId: "payer_1", createdAt: "2026-09-05T12:00:00Z" };
 const event = (eventSeq: number, type: string, payload: unknown, occurredAt = run.createdAt): AgentEvent => ({ id: `event_${eventSeq}`, eventSeq, type, payload, sessionId: run.sessionId, turnId: run.id, accountId: "visitor_1", scopeId: "scope_1", occurredAt }) as AgentEvent;
@@ -12,6 +12,18 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
     const rows = [event(1, "tool.completed", { toolCallId: "create", toolName: "story_create_video", summary: "created",
       evidence: { schemaVersion: 1, toolName: "story_create_video", result: { tool: "story_create_video", data: { id: "video_1" } }, artifacts: [], diagnostics: [] } })];
     expect(hasCreatedStoryVideo(rows, "run_1")).toBe(true);
+  });
+
+  it("does not present a continuation source lookup as the new video result", () => {
+    const source = event(1, "tool.completed", { toolCallId: "lookup", toolName: "story_get_video", summary: "read",
+      evidence: { schemaVersion: 1, toolName: "story_get_video", result: { tool: "story_get_video", data: { id: "old_video" } }, artifacts: [], diagnostics: [] } });
+    const confirmation = event(2, "interaction.requested", { interactionId: "interaction_1", toolCallId: "confirm",
+      kind: "video_confirmation", operation: "story_create_video", input: { source_video_id: "old_video" } });
+    expect(storyVideoIds([source], "run_1")).toEqual(["old_video"]);
+    expect(storyVideoIds([source, confirmation], "run_1")).toEqual([]);
+    const created = event(3, "tool.completed", { toolCallId: "create", toolName: "story_create_video", summary: "created",
+      evidence: { schemaVersion: 1, toolName: "story_create_video", result: { tool: "story_create_video", data: { id: "new_video" } }, artifacts: [], diagnostics: [] } });
+    expect(storyVideoIds([source, confirmation, created], "run_1")).toEqual(["new_video"]);
   });
 
   it("displays stable image references before the answer and preserves them after cancellation/replay", () => {
