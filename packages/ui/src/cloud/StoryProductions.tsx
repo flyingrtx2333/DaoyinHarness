@@ -125,7 +125,7 @@ function ProductionDetails({ data, busy, error, onClose, onControl }: {
       {data.workflowVersion === 2 && !terminal && <>
         {(state === "AWAITING_REVIEW" || (state === "BLOCKED" && data.stage === "REVIEW")) && <button type="button" className="primary" disabled={busy} onClick={() => { void onControl("approve"); }}>确认资产与分镜，开始生成视频</button>}
         {state === "PAUSED" && <button type="button" disabled={busy} onClick={() => { void onControl("resume"); }}>继续制作</button>}
-        {state === "BLOCKED" && data.stage === "REVIEW" && <button type="button" disabled={busy} onClick={() => { void onControl("resume"); }}>重试失败角色参考（最多一次）</button>}
+        {state === "BLOCKED" && data.canRetryCharacter === true && <button type="button" disabled={busy} onClick={() => { void onControl("resume"); }}>重试失败角色参考（最多一次）</button>}
         {state === "RUNNING" && <button type="button" disabled={busy} onClick={() => { void onControl("pause"); }}>暂停</button>}
         <button type="button" disabled={busy} onClick={() => setCancelRequested(true)}>取消后续制作</button>
       </>}
