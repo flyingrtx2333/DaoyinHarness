@@ -302,8 +302,14 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
     const accepted = await submit(current.app, sessionId);
     const result = await terminal(current.repository, current.owner, accepted.json<{ run: CloudRun }>().run.id);
     expect(result.status).toBe("failed");
+    expect(result.finalText).toContain("模型服务本次未完成响应");
+    expect(result.finalText).not.toContain("授权不可用");
     expect(JSON.stringify(result)).not.toContain("DO_NOT_PERSIST_PROVIDER_SECRET");
-    expect(JSON.stringify(await current.repository.readEvents(current.owner, sessionId, 0, 100))).not.toContain("DO_NOT_PERSIST_PROVIDER_SECRET");
+    const events = await current.repository.readEvents(current.owner, sessionId, 0, 100);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "turn.failed", payload: expect.objectContaining({ code: "MODEL_PROVIDER_REQUEST_FAILED" }) }),
+    ]));
+    expect(JSON.stringify(events)).not.toContain("DO_NOT_PERSIST_PROVIDER_SECRET");
   });
 
   it("allows reading old records but prevents silently replacing a session's profile", async () => {

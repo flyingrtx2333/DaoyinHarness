@@ -364,7 +364,17 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                 return reply;
               } catch (error) {
                 if (error instanceof CloudError && error.code === "MODEL_CALL_LIMIT") throw error;
-                throw Object.assign(new Error("模型或执行授权不可用，本轮未继续执行。"), { code: "MODEL_CLOUD_REQUEST_FAILED" });
+                if (error instanceof CloudError && (
+                  ["AUTHORIZATION_REVOKED", "AUTHENTICATION_REQUIRED", "APP_ACCESS_DENIED", "RUN_IDENTITY_MISMATCH"].includes(error.code) ||
+                  (error.code === "PLATFORM_BRIDGE_REJECTED" && [401, 403].includes(error.statusCode))
+                )) {
+                  throw Object.assign(new Error("登录或执行授权已失效，本轮未执行任何工具；请重新连接工作台。"), {
+                    code: "MODEL_AUTHORIZATION_FAILED",
+                  });
+                }
+                throw Object.assign(new Error("模型服务本次未完成响应，本轮尚未执行任何工具；请重试。"), {
+                  code: "MODEL_PROVIDER_REQUEST_FAILED",
+                });
               }
             }),
           };
