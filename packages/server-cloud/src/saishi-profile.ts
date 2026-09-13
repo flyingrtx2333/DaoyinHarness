@@ -3,6 +3,7 @@ import type { JsonValue } from "@daoyin/harness-protocol";
 import type { CloudProfile, CloudToolBinding } from "./app.js";
 import { isMemoryToolName } from "./memory-agent-policy.js";
 import { createMemoryProfileBindings, memoryToolAllowed } from "./memory-tools.js";
+import { createEpisodicMemoryProfileBindings, episodicMemoryToolAllowed, isEpisodicMemoryToolName } from "./episodic-memory-tools.js";
 import { cloudOrchestrationDescriptors, validateCloudOrchestrationInput } from "./cloud-orchestration.js";
 
 export const SAISHI_PROFILE = "saishi-readonly";
@@ -26,6 +27,7 @@ export function isSaishiIdentity(identity: ExecutionIdentity): boolean {
     identity.permissions.includes("agent.use") && identity.permissions.includes("saishi.events.read") &&
     identity.allowedTools.length > 0 && new Set(identity.allowedTools).size === identity.allowedTools.length &&
     identity.allowedTools.every((name) => isMemoryToolName(name) ? memoryToolAllowed(identity, name)
+      : isEpisodicMemoryToolName(name) ? episodicMemoryToolAllowed(identity, name)
       : Object.hasOwn(scopes, name) && identity.permissions.includes(scopes[name]!));
 }
 
@@ -71,7 +73,7 @@ const outputKeys = new Set(["items", "has_more", "next_after_id", "id", "title",
   "revision", "published", "image_asset_id", "points", "routes", "key", "label", "kind", "x", "y", "point_keys", "path_vertex_count",
   "person", "map_revision", "observed_count", "point_count", "diagnostics", "basis", "timezone", "route", "observed", "observed_at", "last_seen_at",
   "material_count", "timeline_keys", "missing_time", "unbound_camera", "job_type", "progress", "video_id", "reel_id",
-  "image_id", "image_kind", "event_id", "captured_at"]);
+  "image_id", "image_kind", "event_id", "captured_at", "cover_image_id"]);
 function cleanData(value: unknown, depth = 0): JsonValue {
   if (depth > 12) throw new Error("Saishi result nesting exceeded.");
   if (value === null || typeof value === "boolean") return value;
@@ -144,8 +146,9 @@ export function createSaishiProfile(catalog: unknown, identity: ExecutionIdentit
       },
     };
   });
-  if (seen.size !== identity.allowedTools.filter((name) => !isMemoryToolName(name)).length || seen.size === 0) throw new Error("Incomplete Saishi catalog.");
+  if (seen.size !== identity.allowedTools.filter((name) => !isMemoryToolName(name) && !isEpisodicMemoryToolName(name)).length || seen.size === 0) throw new Error("Incomplete Saishi catalog.");
   // The metered model adapter validates calls against this catalog; memory execution stays in Harness.
   // Orchestration policy bindings are validation-only descriptors: checkedProfile removes them and the cloud runtime installs the trusted executors.
-  return { id: SAISHI_PROFILE, version: "1", instructions: catalog.instructions, tools: [...tools, ...createMemoryProfileBindings(identity), ...orchestrationPolicyBindings()] };
+  return { id: SAISHI_PROFILE, version: "1", instructions: catalog.instructions,
+    tools: [...tools, ...createMemoryProfileBindings(identity), ...createEpisodicMemoryProfileBindings(identity), ...orchestrationPolicyBindings()] };
 }

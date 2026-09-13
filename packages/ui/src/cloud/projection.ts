@@ -2,7 +2,7 @@ import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { CloudRun } from "./client.js";
 
 export interface PublicSource { id: string; title: string; location: string; content: string }
-export interface EventImage { id: number; eventId: number; kind: "material" | "highlight" | "video_preview"; title: string }
+export interface EventImage { id: number; eventId: number; kind: "event_cover" | "material" | "highlight" | "video_preview"; title: string }
 export interface ToolView { id: string; status: "running" | "completed" | "failed"; text: string; startedAt: string; finishedAt?: string }
 export interface TurnView { run: CloudRun; text: string; tools: ToolView[]; sources: PublicSource[]; images: EventImage[]; assistantOccurredAt: string }
 export interface PendingVideoInteraction {
@@ -45,6 +45,23 @@ export function pendingVideoInteraction(events: AgentEvent[], sessionId: string)
     input: structuredClone(requested.payload.input), ...(firstFrameUrl ? { firstFrameUrl } : {}), ...(requested.payload.estimate === undefined ? {} : { estimate: requested.payload.estimate }) };
 }
 
+function appendImage(turn: TurnView, image: unknown): void {
+  if (!record(image) || typeof image.image_id !== "number" || !Number.isSafeInteger(image.image_id) || image.image_id < 1 ||
+      typeof image.event_id !== "number" || !Number.isSafeInteger(image.event_id) || image.event_id < 1 ||
+      !["event_cover", "material", "highlight", "video_preview"].includes(String(image.image_kind)) || turn.images.length >= 24) return;
+  const kind = image.image_kind as EventImage["kind"];
+  if (turn.images.some(item => item.id === image.image_id && item.kind === kind && item.eventId === image.event_id)) return;
+  turn.images.push({ id: image.image_id, eventId: image.event_id, kind,
+    title: typeof image.title === "string" ? image.title.slice(0, 160) : kind === "event_cover" ? "赛事封面" : "赛事图片" });
+}
+
+function appendEventCover(turn: TurnView, event: unknown): void {
+  if (!record(event) || typeof event.id !== "number" || !Number.isSafeInteger(event.id) || event.id < 1 ||
+      typeof event.cover_image_id !== "number" || !Number.isSafeInteger(event.cover_image_id) || event.cover_image_id !== event.id) return;
+  appendImage(turn, { image_id: event.cover_image_id, event_id: event.id, image_kind: "event_cover",
+    title: typeof event.title === "string" ? `${event.title.slice(0, 140)} · 赛事封面` : "赛事封面" });
+}
+
 export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[] {
   const turns = [...runs].reverse().map((run) => ({ run, text: "", tools: [] as ToolView[], sources: [] as PublicSource[], images: [] as EventImage[], assistantOccurredAt: run.createdAt }));
   const byId = new Map(turns.map((turn) => [turn.run.id, turn]));
@@ -73,16 +90,14 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       if (event.type === "tool.completed") {
         const result: unknown = event.payload.evidence.result;
         tool.status = "completed"; tool.text = `${label}完成`;
-        if (name === "saishi_list_images" && record(result) && result.tool === name && record(result.data) && Array.isArray(result.data.items)) {
-          for (const image of result.data.items.slice(0, 12)) {
-            if (!record(image) || typeof image.image_id !== "number" || !Number.isSafeInteger(image.image_id) || image.image_id < 1 ||
-                typeof image.event_id !== "number" || !Number.isSafeInteger(image.event_id) || image.event_id < 1 ||
-                !["material", "highlight", "video_preview"].includes(String(image.image_kind)) || turn.images.length >= 24) continue;
-            const kind = image.image_kind as EventImage["kind"];
-            if (!turn.images.some(item => item.id === image.image_id && item.kind === kind && item.eventId === image.event_id)) {
-              turn.images.push({ id: image.image_id, eventId: image.event_id, kind, title: typeof image.title === "string" ? image.title.slice(0, 160) : "赛事图片" });
-            }
+        if (record(result) && result.tool === name && record(result.data)) {
+          if (name === "saishi_list_images" && Array.isArray(result.data.items)) {
+            for (const image of result.data.items.slice(0, 12)) appendImage(turn, image);
           }
+          if (name === "saishi_list_events" && Array.isArray(result.data.items)) {
+            for (const item of result.data.items.slice(0, 8)) appendEventCover(turn, item);
+          }
+          if (name === "saishi_get_event") appendEventCover(turn, result.data);
         }
         if (record(result) && Array.isArray(result.sources)) for (const source of result.sources.slice(0, 5)) {
           if (record(source) && typeof source.id === "string" && typeof source.title === "string" && typeof source.content === "string" &&

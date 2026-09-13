@@ -3,7 +3,7 @@ import type { EventImage } from "./projection.js";
 import "./image-gallery.css";
 
 export function imagePath(image: EventImage, accountScope: string): string | null {
-  if (!/^[a-f0-9]{64}$/u.test(accountScope) || !Number.isSafeInteger(image.id) || image.id < 1 || !Number.isSafeInteger(image.eventId) || image.eventId < 1 || !["material", "highlight", "video_preview"].includes(image.kind)) return null;
+  if (!/^[a-f0-9]{64}$/u.test(accountScope) || !Number.isSafeInteger(image.id) || image.id < 1 || !Number.isSafeInteger(image.eventId) || image.eventId < 1 || !["event_cover", "material", "highlight", "video_preview"].includes(image.kind)) return null;
   return `/api/agent-apps/saishi/workbench/images/${accountScope}/${image.eventId}/${image.kind}/${image.id}`;
 }
 

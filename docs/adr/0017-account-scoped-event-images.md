@@ -8,7 +8,7 @@ The material-status tool could only enumerate video rows. A request to see photo
 
 ## Decision
 
-`saishi_list_images` inherits the account's existing `saishi.materials.read` permission. It returns at most 12 stable references (6 by default) from uploaded originals and highlight photos. If there are no photos on the initial page, it returns existing video thumbnails with `image_kind=video_preview` and explicit preview labels. It does not generate frames or substitute face crops. Follow-up pagination uses both `source` and `next_after_id` from the result.
+The platform bridge may enrich event list/detail results with a storage-free `cover_image_id`; the workbench renders it as `image_kind=event_cover` through the same account-scoped proxy under `saishi.events.read`. `saishi_list_images` continues to inherit `saishi.materials.read` and return uploaded originals and highlight photos. When its default first page has no photos and the business service would otherwise fall back to video thumbnails, the bridge substitutes the event cover when one exists; `image_kind=video_preview` remains available when no cover exists or video previews were explicitly requested. It does not generate frames or substitute face crops. Follow-up pagination continues to use `source` and `next_after_id`.
 
 Tool results contain `image_id`, `image_kind`, `event_id`, title and capture time, never storage URLs, paths, cookies or credentials. The UI projects completed tool results immediately into image cards, independent of final model text. Replay deduplicates references; cancellation preserves completed evidence. The UI supports loading, retry, native modal viewing and keyboard dismissal.
 
