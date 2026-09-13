@@ -117,7 +117,7 @@ button.primary:hover:enabled { background: #174bcb; }
 .video-confirm-checks label { display: inline-flex; align-items: center; gap: var(--ui-space-2); font-size: var(--ui-font-control); }
 .video-confirm-checks input { width: 16px; height: 16px; }
 .video-creation-error { margin: 0; color: #a33b28; font-size: var(--ui-font-control); }
-.video-creation-dialog footer { display: flex; justify-content: flex-end; gap: var(--ui-space-2); padding-top: var(--ui-space-1); }
+.video-creation-dialog footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ui-space-2); padding-top: var(--ui-space-1); }
 .video-creation-dialog footer button { min-height: var(--ui-control-height); padding: 0 var(--ui-space-4); }
 .story-video-card { margin-top: var(--ui-space-3); }
 .story-video-player { display: block; width: 100%; max-height: 480px; background: #080b10; }

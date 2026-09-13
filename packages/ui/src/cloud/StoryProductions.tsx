@@ -97,12 +97,15 @@ function ProductionDetails({ data, busy, error, onClose, onControl }: {
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <form onSubmit={event => event.preventDefault()}>
     <header><h2>短剧制作</h2><button ref={close} type="button" className="plugin-close" aria-label="关闭制作详情" disabled={busy} onClick={onClose}>×</button></header>
-    <details open><summary>角色参考</summary><div className="video-field-grid">{rows(assets.characters).map(character => <section key={String(character.id)}>
+    <details open><summary>角色参考</summary>{rows(assets.characters).map(character => <section key={String(character.id)}>
       <h3>{String(character.extracted_name)}</h3>
-      {record(character.references) && Object.entries(character.references).map(([view, image]) => record(image) && url(image.output_url)
-        ? <figure key={view}><img style={{ width: "100%", maxHeight: 200, objectFit: "contain" }} src={url(image.output_url)} alt={`${String(character.extracted_name)} · ${viewLabels[view] || view}`} />
-          <figcaption>{viewLabels[view] || view}</figcaption></figure> : null)}
-    </section>)}</div></details>
+      <div className="video-field-grid video-field-grid-wide">{Object.keys(viewLabels).map(view => {
+        const image = record(character.references) ? character.references[view] : undefined;
+        return record(image) && url(image.output_url)
+        ? <figure key={view} style={{ margin: 0 }}><img style={{ width: "100%", maxHeight: 200, objectFit: "contain" }} src={url(image.output_url)} alt={`${String(character.extracted_name)} · ${viewLabels[view]}`} />
+          <figcaption>{viewLabels[view]}</figcaption></figure> : null;
+      })}</div>
+    </section>)}</details>
     <details open><summary>环境参考</summary><div className="video-field-grid">{rows(assets.scenes).map(scene => <figure key={String(scene.id)}>
       {url(scene.reference_url) && <img style={{ width: "100%", maxHeight: 200, objectFit: "contain" }} src={url(scene.reference_url)} alt={String(scene.name)} />}<figcaption>{String(scene.name)}</figcaption>
       {rows(scene.camera_references).map(camera => <div key={String(camera.request_id || camera.angle)}>{url(camera.output_url) && <img style={{ width: "100%", maxHeight: 160, objectFit: "contain" }} src={url(camera.output_url)} alt={`${String(scene.name)} · ${String(camera.angle)}`} />}<p>{String(camera.angle)}</p></div>)}
