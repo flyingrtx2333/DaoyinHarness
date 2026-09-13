@@ -1,3 +1,6 @@
+import { registerProjectAuthorization } from "./projects/authorization.js";
+import { createProjectTools, PROJECT_INSTRUCTIONS, cancelProjectRun } from "./projects/tools.js";
+import { registerProjectRoutes } from "./projects/routes.js";
 import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createCloudOrchestrationTools, validateCloudOrchestrationInput } from "./cloud-orchestration.js";
 export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
@@ -204,6 +207,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     return reply.code(503).send({ error: { code: "CLOUD_REQUEST_FAILED", message: "请求未完成，请保留原请求标识并查询任务状态。" } });
   });
 
+  registerProjectAuthorization(app, { repository: options.repository, ensureActive });
+  registerProjectRoutes(app, { repository: options.repository, identityFor, ensureActive });
   registerCloudEventStream(app, { repository: options.repository, identityFor, ensureActive,
     ...(options.eventStream === undefined ? {} : { limits: options.eventStream }) });
 
@@ -299,6 +304,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const stores: BoundRunStores = { ...bound, events: {
           read: (sessionId, after) => bound.events.read(sessionId, after),
           append: (pending) => measurements.measure(run.id, "event_persist", async () => {
+            if (pending.type === "turn.cancelled") await cancelProjectRun(identity, run.id).catch(() => undefined);
             if (["turn.completed", "turn.failed", "turn.cancelled"].includes(pending.type)) {
               const children = await options.repository.listChildRuns?.(identity, run.id) ?? [];
               if (children.some((child) => child.run.status === "running")) throw new CloudError(409, "CHILDREN_NOT_SETTLED", "子任务尚未全部收尾，父任务不能报告完成。");
@@ -314,7 +320,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           toolCalls++;
         };
         const orchestrationAvailable = identity.space.kind !== "public" && options.repository.acceptChildRun !== undefined && options.repository.listChildRuns !== undefined;
-        const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? [])];
+        const projectBindings = createProjectTools(identity, run, ensureActive);
+        const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? []), ...projectBindings];
         const bindings = new Map(runBindings.map((binding) => [binding.definition.name, binding]));
         const videoConfirmationTool = identity.space.kind === "public" ? undefined
           : videoInteractions.createTool(run, identity, stores.events, bindings, { suspendRunDeadline, resumeRunDeadline });
@@ -403,7 +410,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         };
         const childTools = new ToolRegistry(wrappedDefinitions.filter((definition) => definition.mutating === false && !isMemoryToolName(definition.name)), { authorize });
         const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
-          tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}`, signal: controller.signal,
+          tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}`, signal: controller.signal,
           remainingModelCalls: () => maxModelCalls - modelCalls, chargeTool, createModel: createMeteredModel, ensureActive });
         const tools = new ToolRegistry([...wrappedDefinitions, ...(videoConfirmationTool === undefined ? [] : [videoConfirmationTool]), ...orchestrationDefinitions], { authorize });
         const model = await createMeteredModel(run, controller.signal);
@@ -411,7 +418,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const engine = new AgentEngine({
           model, tools, events: stores.events, compactionStore: stores.compactions,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
-          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
+          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: maxModelCalls, maxToolCalls: 24,
         });
         await engine.runTurn({

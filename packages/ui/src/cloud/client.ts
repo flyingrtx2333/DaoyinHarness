@@ -263,6 +263,7 @@ export class WorkbenchClient {
     this.#forget(sessionId);
     return result.run;
   }
+  public async project<T=Record<string,unknown>>(input: Record<string,unknown>): Promise<T> { return this.#request<T>("/projects/control",input); }
   public async cancel(runId: string): Promise<void> { await this.#request(`/runs/${encodeURIComponent(runId)}/cancel`, {}); }
   public async respondInteraction(runId: string, interactionId: string, resolution: "confirmed" | "cancelled",
     input?: Record<string, unknown>): Promise<void> {

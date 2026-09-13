@@ -1,0 +1,17 @@
+import {createRequire} from "node:module";
+const {build}=createRequire(new URL("../packages/cli/package.json",import.meta.url))("esbuild");
+import {mkdir,readFile,writeFile} from "node:fs/promises";
+import {createHash} from "node:crypto";
+import {execFileSync} from "node:child_process";
+const output=process.argv[2];
+if(process.platform!=="linux"||!output?.startsWith("/opt/daoyin-projects/releases/"))throw new Error("Use the independent server and explicit project release path.");
+await mkdir(output,{recursive:true});
+const entries={service:"packages/server-cloud/src/projects/service.ts",executor:"packages/server-cloud/src/projects/executor.ts",policy:"packages/server-cloud/src/projects/tools.ts"};
+await build({entryPoints:entries,bundle:true,platform:"node",format:"esm",target:"node22",outdir:output,outExtension:{".js":".mjs"},external:["pg"]});
+const definitions=(await import(output+"/policy.mjs")).PROJECT_DEFINITIONS;
+await writeFile(output+"/tool-schemas.json",JSON.stringify(definitions,null,2));
+await writeFile("deployment/projects/tool-schemas.json",JSON.stringify(definitions,null,2));
+const manifest={sourceRevision:execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim(),sourceState:"scoped-uncommitted-project-implementation",builtAt:new Date().toISOString(),files:{}};
+for(const name of ["service.mjs","executor.mjs","policy.mjs","tool-schemas.json"])manifest.files[name]=createHash("sha256").update(await readFile(output+"/"+name)).digest("hex");
+await writeFile(output+"/release.json",JSON.stringify(manifest,null,2));
+console.log(JSON.stringify(manifest));

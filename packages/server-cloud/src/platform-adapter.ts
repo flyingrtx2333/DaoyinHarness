@@ -1,3 +1,4 @@
+import { isProjectTool, validateProjectInput } from "./projects/tools.js";
 import { assertExecutionIdentity, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import { wireMessages, type ModelReply } from "@daoyin/harness-agent-core";
 import { createCloudServer, type CloudServerOptions } from "./app.js";
@@ -26,6 +27,7 @@ type CallPolicy = (name: string, input: Record<string, unknown>) => boolean;
 export function privateModelCallAllowed(name: string, input: Record<string, unknown>,
   requestTools: ReadonlyArray<{ name: string }>, bindings: ReadonlyArray<{ definition: { name: string }; validateInput(input: Record<string, unknown>): boolean }>): boolean {
   if (!requestTools.some((tool) => tool.name === name)) return false;
+  if (isProjectTool(name)) return validateProjectInput(name, input);
   const direct = bindings.find((binding) => binding.definition.name === name);
   if (direct !== undefined) return direct.validateInput(input);
   if (name !== VIDEO_CONFIRMATION_TOOL || typeof input.operation !== "string" || !VIDEO_GENERATION_OPERATIONS.has(input.operation) ||

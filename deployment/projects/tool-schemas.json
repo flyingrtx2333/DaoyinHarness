@@ -1,0 +1,149 @@
+[
+  {
+    "name": "project_list",
+    "description": "查看云端项目、当前对话关联项目和最近执行状态。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "project_create",
+    "description": "创建独立云端全栈应用，并关联当前对话；自带网站登录、数据库和上传。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "title"
+      ]
+    }
+  },
+  {
+    "name": "project_files",
+    "description": "读取所属云端项目源代码和当前 revision，修改前必须先读取。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    }
+  },
+  {
+    "name": "project_write",
+    "description": "按 revision 原子更新项目源代码；网站线上版本保持不变。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 180
+              },
+              "content": {
+                "type": "string",
+                "maxLength": 131072
+              }
+            },
+            "required": [
+              "path",
+              "content"
+            ]
+          }
+        }
+      },
+      "required": [
+        "projectId",
+        "revision",
+        "files"
+      ]
+    }
+  },
+  {
+    "name": "project_check",
+    "description": "在强隔离沙箱检查 TypeScript 并构建；返回真实检查状态。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    }
+  },
+  {
+    "name": "project_preview",
+    "description": "构建并启动登录保护的项目预览，等待完成或报告排队状态。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    }
+  },
+  {
+    "name": "project_publish",
+    "description": "仅在本轮明确要求发布时发布不可变版本。失败保留旧网站。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    }
+  }
+]
