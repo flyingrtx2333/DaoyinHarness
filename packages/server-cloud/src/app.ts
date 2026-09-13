@@ -131,7 +131,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   const runTimeoutMs = options.runTimeoutMs ?? 120_000;
   if (!Number.isSafeInteger(maxConcurrentRuns) || maxConcurrentRuns < 1 || maxConcurrentRuns > 32 ||
       !Number.isSafeInteger(runTimeoutMs) || runTimeoutMs < 100 || runTimeoutMs > 600_000) throw new Error("Invalid cloud runtime limits.");
-  const app = Fastify({ logger: false, bodyLimit: 64_000,
+  const app = Fastify({ logger: false, forceCloseConnections: true, bodyLimit: 64_000,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const identities = new WeakMap<FastifyRequest, ExecutionIdentity>();
   const active = new Map<string, { controller: AbortController; done: Promise<void> }>();

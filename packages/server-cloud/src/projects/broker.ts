@@ -42,6 +42,8 @@ interface BrokerInput { action:string; token?:string; email?:string; password?:s
 export class ProjectBrokers {
   readonly servers=new Map<string,http.Server>();
   readonly pools=new Map<string,Pool>();
+  inflight=0;
+  readonly reading=new Map<string,number>();
   readonly pending=new Map<string,Promise<unknown>>();
   readonly depths=new Map<string,number>();
   readonly rates=new Map<string,{count:number;expires:number}>();
@@ -67,6 +69,12 @@ export class ProjectBrokers {
     const socket=dir+"/broker.sock";await unlink(socket).catch(()=>undefined);
     const server=http.createServer((req,res)=>{
       if(req.url!=="/broker"||req.method!=="POST"){res.writeHead(404).end();return;}
+      if(this.inflight>=8||(this.reading.get(key)??0)>=2){res.writeHead(429,{"Connection":"close","Content-Type":"application/json"}).end(JSON.stringify({error:"请求较多，请稍后重试。"}));req.resume();return;}
+      this.inflight++;this.reading.set(key,(this.reading.get(key)??0)+1);
+      let released=false;
+      const release=():void=>{if(released)return;released=true;this.inflight--;this.reading.set(key,(this.reading.get(key)??1)-1);};
+      res.once("close",release);req.once("aborted",release);req.setTimeout(20000,()=>req.destroy());
+
       let body="";req.on("data",(b:Buffer)=>{body+=b.toString();if(Buffer.byteLength(body)>7500000)req.destroy();});
       req.on("end",()=>{void(async()=>{
         try{

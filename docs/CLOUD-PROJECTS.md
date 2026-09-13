@@ -44,6 +44,9 @@ not an unrestricted shell or package-installation service.
 - Application sockets are inode-pinned with O_PATH/O_NOFOLLOW. Descriptor-path HTTP
   pooling is disabled. This prevents symlink races and descriptor reuse from
   routing a request into another environment.
+- Trusted project-service requests are bounded before buffering, with 8 concurrent
+  broker requests globally / 2 per environment. The project service is capped at
+  512 MiB / 1 CPU; the root executor at 256 MiB / 0.5 CPU.
 - Website uploads: 5 MiB per file / 100 MiB per environment. Up to 1000 website
   users and 10000 JSON records. Broker writes and quota checks serialize.
 - Pilot domains use the reserved `h-` namespace under `demo.daoyintech.com`.

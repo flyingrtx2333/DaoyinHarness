@@ -28,5 +28,5 @@ export function registerProjectAuthorization(app:FastifyInstance,options:{
   await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(socket,resolve);});
   await chmod(socket,0o660);
  });
- app.addHook("onClose",async()=>{await new Promise<void>(resolve=>server.close(()=>resolve()));await unlink(socket).catch(()=>undefined);});
+ app.addHook("onClose",async()=>{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await unlink(socket).catch(()=>undefined);});
 }
