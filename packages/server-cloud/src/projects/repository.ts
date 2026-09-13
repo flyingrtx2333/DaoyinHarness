@@ -105,7 +105,7 @@ export class ProjectRepository {
       if(Number(daily.rows[0]?.count)>=100)throw new ProjectError("PROJECT_OPERATION_QUOTA","项目已达到每日 100 次执行限额。",429);
       const version=versionId??(await this.snapshot(owner,id,db)).id;
       const opId=newId("op");
-      const row=await db.query<ProjectOperation>('INSERT INTO harness_project_operations(id,project_id,request_id,kind,input_hash,result,authorization,source_run) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING '+operationColumns,[opId,id,requestId,kind,inputHash,JSON.stringify({versionId:version}),JSON.stringify(authorization??null),sourceRun??null]);
+      const row=await db.query<ProjectOperation>('INSERT INTO harness_project_operations(id,project_id,request_id,kind,input_hash,result,execution_identity,source_run) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING '+operationColumns,[opId,id,requestId,kind,inputHash,JSON.stringify({versionId:version}),JSON.stringify(authorization??null),sourceRun??null]);
       return row.rows[0]!;
     });
   }

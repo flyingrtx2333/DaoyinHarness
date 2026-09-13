@@ -1,3 +1,4 @@
+import { isProjectAccountIdentity } from "./projects/profile.js";
 import { isProjectTool, validateProjectInput } from "./projects/tools.js";
 import { assertExecutionIdentity, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import { wireMessages, type ModelReply } from "@daoyin/harness-agent-core";
@@ -117,6 +118,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
     }, signal),
   });
   async function privateProfile(identity: ExecutionIdentity, signal: AbortSignal) {
+    if (isProjectAccountIdentity(identity)) return {id:"daoyin-workbench",version:"1",instructions:"使用当前账号的独立云端项目工具开发与发布应用。所有代码执行均通过隔离执行服务。",tools:[]};
     const catalog = await post("profile", { authorizationId: identity.authorizationId }, signal, true);
     const factory = isWorkbenchIdentity(identity) ? createWorkbenchProfile : isStoryIdentity(identity) ? createStoryProfile : createSaishiProfile;
     return factory(catalog, identity, {
@@ -143,22 +145,22 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       const value = await post("introspect", { bearer }, signal, privateApp);
       if (!record(value)) return null;
       assertExecutionIdentity(value.identity);
-      if (privateApp ? !(isSaishiIdentity(value.identity) || isStoryIdentity(value.identity) || isWorkbenchIdentity(value.identity)) : !isCompanyPublicIdentity(value.identity)) return null;
+      if (privateApp ? !(isSaishiIdentity(value.identity) || isStoryIdentity(value.identity) || isWorkbenchIdentity(value.identity) || isProjectAccountIdentity(value.identity)) : !isCompanyPublicIdentity(value.identity)) return null;
       return snapshotExecutionIdentity(value.identity);
     },
     isAuthorizationActive: async (identity: ExecutionIdentity, signal) => {
-      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity);
+      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
       if (!privateApp && !isCompanyPublicIdentity(identity)) return false;
       const value = await post("authorize", { identity }, signal, privateApp);
       return record(value) && value.active === true;
     },
     resolveProfile: async (identity, signal) => {
-      if (isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity)) return privateProfile(identity, signal);
+      if (isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity)) return privateProfile(identity, signal);
       if (!isCompanyPublicIdentity(identity)) throw new CloudError(403, "APP_ACCESS_DENIED", "未开通当前应用。");
       return publicProfile;
     },
     createModel: async (identity, run, signal) => {
-      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity);
+      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
       if ((!privateApp && !isCompanyPublicIdentity(identity)) || run.authorizationId !== identity.authorizationId || run.billingAccountId !== identity.billingAccountId) {
         throw new CloudError(403, "RUN_IDENTITY_MISMATCH", "任务授权不匹配。");
       }

@@ -14,7 +14,7 @@ for name in files:
 run(["python3",str(root/"scripts/patch-project-platform.py"),str(stage)])
 for name in ["services/harness_projects.py","services/harness_project_tools.json"]:
  (stage/name).write_bytes((source/name).read_bytes())
-config={"allowedUsers":["1"]}
+config={"allowedUsers":["1","3"]}
 (stage/"services/harness_project_admission.json").write_text(json.dumps(config))
 for name in files+["services/harness_projects.py"]:
  compile((stage/name).read_text(),name,"exec")

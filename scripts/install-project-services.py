@@ -31,7 +31,8 @@ if not envfile.exists():
     os.chmod(dbfile,0o600)
 socketdir=pathlib.Path("/run/daoyin-projects-db")
 socketdir.mkdir(exist_ok=True)
-os.chown(socketdir,999,gid); os.chmod(socketdir,0o750)
+postgres_uid=int(run(["docker","run","--rm","--network","none","postgres:16-alpine","id","-u","postgres"]).stdout.strip())
+os.chown(socketdir,postgres_uid,gid); os.chmod(socketdir,0o750)
 existing=run(["docker","ps","-a","--filter","name=^harness-projects-db$","--format","{{.Names}}"]).stdout.strip()
 if not existing:
     run(["docker","run","-d","--name","harness-projects-db","--restart","unless-stopped","--network","none",
@@ -47,7 +48,7 @@ else:raise RuntimeError("Independent project PostgreSQL did not become ready")
 run(["docker","exec","-i","harness-projects-db","sh","-c",'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -h /var/run/postgresql -U postgres -d harness_projects -v ON_ERROR_STOP=1'],
     input=(ROOT/"packages/server-cloud/src/projects/schema.sql").read_text())
 # Persist the socket directory across reboots; the database itself uses its independent Docker volume.
-pathlib.Path("/etc/tmpfiles.d/daoyin-projects.conf").write_text(f"d /run/daoyin-projects-db 0750 999 {gid} -\n")
+pathlib.Path("/etc/tmpfiles.d/daoyin-projects.conf").write_text(f"d /run/daoyin-projects-db 0750 {postgres_uid} {gid} -\n")
 runtime=pathlib.Path("/opt/daoyin-harness/current").resolve()
 dependencies=RELEASE/"node_modules"
 if not dependencies.exists():dependencies.symlink_to(runtime/"node_modules",target_is_directory=True)
@@ -100,8 +101,21 @@ UMask=0027
 WantedBy=multi-user.target
 """}
 for name,body in units.items():pathlib.Path("/etc/systemd/system",name).write_text(body)
+# Preserve all unrelated live workbench directives; only allow isolated preview frames.
+workbench=pathlib.Path("/www/server/panel/vhost/nginx/html_harness.daoyintech.com.conf")
+original=workbench.read_text()
+needle="; frame-ancestors 'none'; form-action 'self'"
+updated=original.replace(needle,"; frame-src https://*.demo.daoyintech.com"+needle) if "frame-src https://*.demo.daoyintech.com" not in original else original
+if updated!=original:
+    workbench.write_text(updated)
+    try:
+        run(["/www/server/nginx/sbin/nginx","-t"])
+        run(["/www/server/nginx/sbin/nginx","-s","reload"])
+    except Exception:
+        workbench.write_text(original)
+        raise
 run(["systemctl","daemon-reload"])
 run(["systemctl","enable","daoyin-project-executor.service","daoyin-projects.service"])
 run(["systemctl","restart","daoyin-project-executor.service"])
 run(["systemctl","restart","daoyin-projects.service"])
-print(json.dumps({"services":"started","release":str(RELEASE),"publicAdmission":False,"allowedTestActors":["1"]}))
+print(json.dumps({"services":"started","release":str(RELEASE),"publicAdmission":False}))

@@ -40,5 +40,5 @@ CREATE TABLE IF NOT EXISTS harness_project_executor_lease (
  singleton integer PRIMARY KEY CHECK(singleton=1), owner text NOT NULL, expires_at timestamptz NOT NULL
 );
 
-ALTER TABLE harness_project_operations ADD COLUMN IF NOT EXISTS authorization jsonb;
+ALTER TABLE harness_project_operations ADD COLUMN IF NOT EXISTS execution_identity jsonb;
 ALTER TABLE harness_project_operations ADD COLUMN IF NOT EXISTS source_run text;

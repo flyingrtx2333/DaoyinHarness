@@ -11,7 +11,7 @@ await build({entryPoints:entries,bundle:true,platform:"node",format:"esm",target
 const definitions=(await import(output+"/policy.mjs")).PROJECT_DEFINITIONS;
 await writeFile(output+"/tool-schemas.json",JSON.stringify(definitions,null,2));
 await writeFile("deployment/projects/tool-schemas.json",JSON.stringify(definitions,null,2));
-const manifest={sourceRevision:execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim(),sourceState:"scoped-uncommitted-project-implementation",builtAt:new Date().toISOString(),files:{}};
+const manifest={sourceRevision:execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim(),sourceState:execFileSync("git",["diff","--name-only","HEAD","--","packages/server-cloud/src/projects","deployment/projects"],{encoding:"utf8"}).trim()?"project-sources-uncommitted":"committed-project-sources",builtAt:new Date().toISOString(),files:{}};
 for(const name of ["service.mjs","executor.mjs","policy.mjs","tool-schemas.json"])manifest.files[name]=createHash("sha256").update(await readFile(output+"/"+name)).digest("hex");
 await writeFile(output+"/release.json",JSON.stringify(manifest,null,2));
 console.log(JSON.stringify(manifest));

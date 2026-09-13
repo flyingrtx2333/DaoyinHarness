@@ -52,7 +52,7 @@ async function prepare(input:ExecutorRequest):Promise<string>{
   const id=identifier(input.projectId,"prj"),version=identifier(input.versionId,"ver");
   const root=path.join(ROOT,"versions",id,version);
   try{await lstat(path.join(root,"ready"));return root;}catch{/* New version. */}
-  const files=checkedFiles(input.files);
+  const files=checkedFiles(input.files, true);
   const temp=root+".preparing";
   try{const info=await lstat(temp);if(!info.isDirectory()||info.isSymbolicLink()||info.uid!==0)throw new Error("Unsafe preparation directory");await rm(temp,{recursive:true});}catch(e){if(!(e instanceof Error)||!("code" in e)||e.code!=="ENOENT")throw e;}
   await mkdir(temp,{recursive:true,mode:0o755});
@@ -64,14 +64,21 @@ async function prepare(input:ExecutorRequest):Promise<string>{
 }
 async function build(input:ExecutorRequest):Promise<string>{
   if(buildBusy)throw new ProjectError("PROJECT_CAPACITY_WAIT","另一个项目正在构建，请稍候。",429);
-  await headroom(1536);
   const id=identifier(input.projectId,"prj"),version=identifier(input.versionId,"ver");
   const name="hp-build-"+id.slice(4)+"-"+version.slice(4,12);
-  const root=await prepare(input);
   const output=path.join(ROOT,"artifacts",id,version);
   buildBusy=true;
   try{
     try{await lstat(output+".complete");return output;}catch{/* Build once. */}
+    const running=(await command(["ps","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n");
+    for(const n of running.filter(n=>n.includes("-development-")||n.startsWith("hp-build-"))){
+      if(n.startsWith("hp-"+id.slice(4)+"-development-"))await command(["rm","-f",n],30000);
+      else throw new ProjectError("PROJECT_CAPACITY_WAIT","开发或构建环境正在使用；空闲后继续执行。",429);
+    }
+    await headroom(1536);
+    const root=await prepare(input);
+    // A failed build directory is never reused as a successful artifact.
+    try{const old=await lstat(output);if(!old.isDirectory()||old.isSymbolicLink())throw new Error("Unsafe artifact directory");await rm(output,{recursive:true});}catch(e){if(!(e instanceof Error)||!("code" in e)||e.code!=="ENOENT")throw e;}
     await mkdir(output,{recursive:true,mode:0o755});await chown(output,1000,1000);
     const args=[...baseArgs(name,"1536m","1"),"--mount","type=bind,src="+root+",dst=/app,readonly",
       "--mount","type=bind,src="+output+",dst=/output",IMAGE,"node","/opt/harness/build.mjs"];
@@ -118,7 +125,7 @@ async function start(input:ExecutorRequest):Promise<Record<string,unknown>>{
   await command(["rm","-f",target.name],30000).catch(()=>undefined);
   const source=path.join(ROOT,"versions",input.projectId,input.versionId!);
   const broker=path.join("/run/daoyin-projects/brokers",input.projectId,production?"production":"development");
-  const args=[...baseArgs(target.name,production?"512m":"1536m",production?"0.5":"1"),"-d",
+  const args=[...baseArgs(target.name,production?"512m":"1536m",production?"0.5":"1"),"-d",...(production?["--restart","unless-stopped"]:[]),
     "--mount","type=bind,src="+source+",dst=/app,readonly",
     "--mount","type=bind,src="+artifact+",dst=/app/dist,readonly",
     "--mount","type=bind,src="+target.root+",dst=/run/app",
@@ -146,7 +153,7 @@ async function dispatch(input:ExecutorRequest):Promise<unknown>{
   if(input.action==="stop"){
     const prefix="hp-"+input.projectId.slice(4)+"-"+(input.mode==="production"?"production":"development")+"-";
     const names=(await command(["ps","-a","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n");
-    for(const name of names)if((name.startsWith("hp-build-"+input.projectId.slice(4)+"-")&&input.mode!=="production")||name.startsWith(prefix)&&(!input.versionId||name===instance(input).name))await command(["rm","-f",name],30000);
+    for(const name of names)if((name.startsWith("hp-build-"+input.projectId.slice(4)+"-")&&(!input.versionId||name.endsWith("-"+input.versionId.slice(4,12))))||name.startsWith(prefix)&&(!input.versionId||name===instance(input).name))await command(["rm","-f",name],30000);
     return{stopped:true};
   }
   throw new ProjectError("PROJECT_EXECUTOR_OPERATION_DENIED","不允许的执行操作。",403);
@@ -163,7 +170,7 @@ try{
 }catch{process.stderr.write("Project isolation probe unavailable; execution remains disabled.\n");}
 http.createServer((req,res)=>{
   if(req.method!=="POST"||req.url!=="/execute"){res.writeHead(404).end();return;}
-  let body="";req.on("data",(b:Buffer)=>{body+=b.toString();if(Buffer.byteLength(body)>1048576)req.destroy();});
+  let body="";req.on("data",(b:Buffer)=>{body+=b.toString();if(Buffer.byteLength(body)>8388608)req.destroy();});
   req.on("end",()=>{void(async()=>{
     try{const value=await dispatch(JSON.parse(body) as ExecutorRequest);res.writeHead(200,{"Content-Type":"application/json"}).end(JSON.stringify(value));}
     catch(e){const err=e instanceof ProjectError?e:new ProjectError("PROJECT_EXECUTOR_FAILED","隔离执行失败；源码和原发布版本保留。",503);

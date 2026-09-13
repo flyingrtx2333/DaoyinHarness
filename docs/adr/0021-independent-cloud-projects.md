@@ -19,3 +19,9 @@ React/Vite + Node.js/TypeScript is the first template. The trusted application S
 Main-platform changes are limited to existing account/permission/model bridge and authenticated proxy support. No second plugin consent or privileged identity is introduced. New functionality is feature-gated and initially admitted only for explicitly configured test accounts.
 
 Validation uses a bounded set of real-model / real-cloud scenarios and direct runtime checks. No mock-model or legacy test suites. Production, model, packaging and browser results are reported separately.
+
+The pilot account adapter validates real account sessions and active tenant membership. A project-only installation has an independent identity boundary and no inherited business tools when the account lacks an unrelated business application subscription. Existing business tool authorization is unchanged.
+
+Build and development share one slot. A build may suspend its own preview but never its published application; another project's active development queues it. Immutable completed artifacts can be reused without allocating a build sandbox. Completion markers are root-owned outside writable artifacts. Published containers restart independently; interrupted operations are recorded and unfinished candidates are stopped on service recovery.
+
+The workbench CSP explicitly permits preview iframe origins. User code receives neither parent-domain cookies nor platform authorization headers. The gateway controls response security headers and cookie forwarding; the app origin itself is never treated as a trusted platform origin.

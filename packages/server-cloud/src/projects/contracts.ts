@@ -40,8 +40,8 @@ export function filePath(value: unknown): string {
     throw new ProjectError("PROJECT_PATH_DENIED", "只允许项目内的源代码、样式和文本文件。");
   return value;
 }
-export function checkedFiles(value: unknown): ProjectFile[] {
-  if (!Array.isArray(value) || value.length > 60) throw new ProjectError("PROJECT_FILES_INVALID", "单次最多修改 60 个文件。");
+export function checkedFiles(value: unknown, snapshot = false): ProjectFile[] {
+  if (!Array.isArray(value) || value.length > (snapshot ? 200 : 60)) throw new ProjectError("PROJECT_FILES_INVALID", "单次最多修改 60 个文件。");
   let bytes = 0;
   const paths = new Set<string>();
   return value.map((f: unknown) => {
@@ -49,7 +49,7 @@ export function checkedFiles(value: unknown): ProjectFile[] {
     const p = filePath(f.path);
     if (paths.has(p) || typeof f.content !== "string" || Buffer.byteLength(f.content) > 131072) throw new ProjectError("PROJECT_FILE_TOO_LARGE", "文件重复或超过 128 KB。");
     paths.add(p); bytes += Buffer.byteLength(f.content);
-    if (bytes > 524288) throw new ProjectError("PROJECT_WRITE_TOO_LARGE", "单次修改超过 512 KB。");
+    if (bytes > (snapshot ? 5242880 : 524288)) throw new ProjectError("PROJECT_WRITE_TOO_LARGE", "单次修改超过 512 KB。");
     if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:saishi|story)_agent_[A-Za-z0-9_-]{64}/u.test(f.content))
       throw new ProjectError("PROJECT_SECRET_DENIED", "检测到凭据，请勿写入项目代码。");
     return { path: p, content: f.content };

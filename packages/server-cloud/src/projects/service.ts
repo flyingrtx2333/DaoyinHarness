@@ -83,14 +83,14 @@ async function stopCandidate(projectId:string,versionId:string,mode:"development
 }
 async function worker():Promise<void>{
   if(workerBusy)return;workerBusy=true;
-  let selected:{id:string;project_id:string;kind:string;authorization:unknown;source_run?:string;result:{versionId:string}}|undefined;
+  let selected:{id:string;project_id:string;kind:string;execution_identity:unknown;source_run?:string;result:{versionId:string}}|undefined;
   try{
     selected=await repository.locked("project-worker",async db=>{
-      const row=(await db.query<{id:string;project_id:string;kind:string;authorization:unknown;source_run?:string;result:{versionId:string}}>("SELECT id,project_id,kind,result,authorization,source_run FROM harness_project_operations WHERE status='queued' ORDER BY updated_at,created_at LIMIT 1 FOR UPDATE SKIP LOCKED")).rows[0];
+      const row=(await db.query<{id:string;project_id:string;kind:string;execution_identity:unknown;source_run?:string;result:{versionId:string}}>("SELECT id,project_id,kind,result,execution_identity,source_run FROM harness_project_operations WHERE status='queued' ORDER BY updated_at,created_at LIMIT 1 FOR UPDATE SKIP LOCKED")).rows[0];
       if(row)await db.query("UPDATE harness_project_operations SET status='running',updated_at=now() WHERE id=$1",[row.id]);return row;
     });
     if(!selected)return;
-    await authorize(selected.authorization,selected.source_run);
+    await authorize(selected.execution_identity,selected.source_run);
     const op=selected,versionId=identifier(op.result.versionId,"ver");
     const version=(await pool.query<{files:{path:string;content:string}[]}>("SELECT files FROM harness_project_versions WHERE id=$1 AND project_id=$2",[versionId,op.project_id])).rows[0];
     if(!version)throw new ProjectError("PROJECT_VERSION_MISSING","代码快照不存在。",404);
@@ -104,7 +104,7 @@ async function worker():Promise<void>{
     let checking=false;
     const watchdog=setInterval(()=>{if(checking)return;checking=true;void(async()=>{
       try{
-        await authorize(op.authorization,op.source_run);
+        await authorize(op.execution_identity,op.source_run);
         const current=(await pool.query<{status:string}>("SELECT status FROM harness_project_operations WHERE id=$1",[op.id])).rows[0];
         if(current?.status==="cancelled")throw new Error("Operation cancelled");
       }catch{
@@ -117,7 +117,7 @@ async function worker():Promise<void>{
     try{result=await exec({action,projectId:op.project_id,versionId,files:version.files,mode});}
     finally{clearInterval(watchdog);}
 
-    try{await authorize(op.authorization,op.source_run);}catch(e){if(op.kind!=="check")await stopCandidate(op.project_id,versionId,mode);throw e;}
+    try{await authorize(op.execution_identity,op.source_run);}catch(e){if(op.kind!=="check")await stopCandidate(op.project_id,versionId,mode);throw e;}
     let cancelled=false,previous:string|null=null;
     await repository.locked(op.project_id,async db=>{
       const current=(await db.query<{status:string}>("SELECT status FROM harness_project_operations WHERE id=$1 FOR UPDATE",[op.id])).rows[0];
@@ -128,7 +128,7 @@ async function worker():Promise<void>{
         await db.query("INSERT INTO harness_project_deployments VALUES($1,$2,$3,$4,now())",[newId("dep"),op.project_id,versionId,op.id]);
       }
       await db.query("UPDATE harness_project_operations SET status='completed',result=$1,error=NULL,updated_at=now() WHERE id=$2",
-        [JSON.stringify({versionId,checked:op.kind==="check",running:op.kind!=="check",...(typeof result.name==="string"?{instance:result.name}:{})}),op.id]);
+        [JSON.stringify({versionId,checked:true,running:op.kind!=="check",...(typeof result.name==="string"?{instance:result.name}:{})}),op.id]);
     });
     if(cancelled&&op.kind!=="check")await stopCandidate(op.project_id,versionId,mode);
     if(previous&&previous!==versionId)await exec({action:"stop",projectId:op.project_id,versionId:previous,mode:"production"});
@@ -200,7 +200,10 @@ const lease=await pool.connect();
 const acquired=await lease.query<{locked:boolean}>("SELECT pg_try_advisory_lock(726910231) AS locked");
 if(!acquired.rows[0]?.locked)throw new Error("Another project service owns execution.");
 lease.on("error",()=>process.exit(1));
-await pool.query("UPDATE harness_project_operations SET status='interrupted',error='服务重启中断了操作；请检查状态后重新执行，原网站保留。',updated_at=now() WHERE status='running'");
+const interrupted=(await pool.query<{project_id:string;kind:string;result:{versionId?:string}}>("UPDATE harness_project_operations SET status='interrupted',error='服务重启中断了操作；请检查状态后重新执行，原网站保留。',updated_at=now() WHERE status='running' RETURNING project_id,kind,result")).rows;
+for(const op of interrupted){
+ const versionId=op.result?.versionId;if(versionId)await stopCandidate(op.project_id,versionId,op.kind==="publish"||op.kind==="rollback"?"production":"development").catch(()=>undefined);
+}
 const existingProjects=(await pool.query<{id:string;active_version:string|null}>("SELECT id,active_version FROM harness_projects")).rows;
 for(const project of existingProjects){
  if(project.active_version)await brokers.ensure(project.id,"production");

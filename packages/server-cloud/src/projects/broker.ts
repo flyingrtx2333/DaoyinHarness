@@ -42,6 +42,8 @@ interface BrokerInput { action:string; token?:string; email?:string; password?:s
 export class ProjectBrokers {
   readonly servers=new Map<string,http.Server>();
   readonly pools=new Map<string,Pool>();
+  readonly pending=new Map<string,Promise<unknown>>();
+  readonly depths=new Map<string,number>();
   readonly rates=new Map<string,{count:number;expires:number}>();
   constructor(readonly admin:Pool,readonly config:PoolConfig,readonly secret:string){}
   async ensure(projectId:string,mode:"development"|"production"):Promise<void>{
@@ -69,7 +71,7 @@ export class ProjectBrokers {
       req.on("end",()=>{void(async()=>{
         try{
           const input=JSON.parse(body) as BrokerInput;
-          const result=await this.dispatch(pool,key,input);
+          const result=await this.serial(pool,key,input);
           res.writeHead(200,{"Content-Type":"application/json"}).end(JSON.stringify(result));
         }catch(e){
           const err=e instanceof ProjectError?e:new ProjectError("APP_REQUEST_FAILED","请求未完成，请稍后重试。",503);
@@ -79,6 +81,14 @@ export class ProjectBrokers {
     });
     await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(socket,()=>resolve());});
     await chmod(socket,0o666);this.servers.set(key,server);
+  }
+  async serial(db:Pool,key:string,input:BrokerInput):Promise<unknown>{
+    const count=this.depths.get(key)??0;
+    if(count>=32)throw new ProjectError("APP_BUSY","请求较多，请稍后重试。",429);
+    this.depths.set(key,count+1);
+    const previous=this.pending.get(key)??Promise.resolve();
+    const next=previous.catch(()=>undefined).then(()=>this.dispatch(db,key,input));this.pending.set(key,next);
+    try{return await next;}finally{this.depths.set(key,(this.depths.get(key)??1)-1);if(this.pending.get(key)===next)this.pending.delete(key);}
   }
   limit(key:string,max:number):void{
     const now=Date.now();let entry=this.rates.get(key);

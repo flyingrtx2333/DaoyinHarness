@@ -31,3 +31,22 @@ async def project_control(payload: dict, auth=Depends(browser)):
     return await cloud_request(*auth, "POST", "projects/control", payload)
 """
     routes.write_text(s)
+
+# Account-only project pilot: retain actual tenant membership, remove unrelated app subscription dependency.
+s=access.read_text()
+if "project_only = require_account_access" not in s:
+    needle='        require_access(cur, int(row["actor_user_id"]), int(row["tenant_id"]), first_party=True)'
+    assert needle in s
+    s=s.replace(needle,'        from services.harness_projects import require_account_access\n        project_only = require_account_access(cur, int(row["actor_user_id"]), int(row["tenant_id"]))\n        if project_only:\n            return {**row, "event_ids": [], "scopes": [], "access_mode":"account", "workbench_scopes": [], "project_only":True}',1)
+    needle='        require_access(cur, uid, tenant_id, first_party=True)'
+    assert needle in s
+    s=s.replace(needle,'        from services.harness_projects import require_account_access\n        require_account_access(cur, uid, tenant_id)',1)
+    needle='    return extend_identity(_project_base_identity(row), row)'
+    assert needle in s
+    s=s.replace(needle,'    value = _project_base_identity(row)\n    if row.get("project_only"):\n        value={**value,"allowedTools":[],"permissions":["agent.use"],"appInstallationId":f"daoyin-workbench:{row[\'tenant_id\']}:independent-projects-v1"}\n    return extend_identity(value, row)')
+    access.write_text(s)
+
+# Version the project-only installation boundary independently from all business catalogs.
+s=access.read_text()
+s=s.replace('f"daoyin-workbench:{row[\'tenant_id\']}:independent-projects-v1"', 'f"daoyin-projects:{row[\'tenant_id\']}:{digest(\'independent-project-account-v1\')[:24]}"')
+access.write_text(s)
