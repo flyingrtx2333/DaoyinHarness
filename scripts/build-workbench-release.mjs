@@ -31,7 +31,7 @@ const result = await build({
     builder.onLoad({ filter: /packages[\\/]ui[\\/]public[\\/]assets[\\/](?:harness-logo|login-hero-ribbon-v2)\.png$/ }, async (args) => ({
       contents: preview
         ? await readFile(args.path)
-        : execFileSync("git", ["show", `${revision}:${args.path.endsWith("login-hero-ribbon-v2.png") ? loginHeroPath : logoPath}`], { windowsHide: true }),
+        : execFileSync("git", ["show", `${revision}:${args.path.endsWith("login-hero-ribbon-v2.png") ? loginHeroPath : logoPath}`], { windowsHide: true, maxBuffer: 4 * 1024 * 1024 }),
       loader: "file",
     }));
     builder.onLoad({ filter: /packages[\\/]ui[\\/]src[\\/]/ }, async (args) => {
