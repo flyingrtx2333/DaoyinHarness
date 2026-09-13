@@ -11,9 +11,20 @@ import {
 
 import { prepareMemoryContext, readMemoryUses, type MemoryPreparation, type MemoryUse } from "./memory-runtime.js";
 import type { MemoryContextSnapshot } from "@daoyin/harness-agent-core";
-import { agentSourceShape, verifyAgentSource, recallRelevance, rankMemoryHits, type MemoryMutation, type MemoryInvalidation } from "./memory-agent-policy.js";
+import { agentSourceShape, verifyAgentSource, type MemoryMutation, type MemoryInvalidation } from "./memory-agent-policy.js";
+import { LexicalMemoryRetriever } from "./memory-retrieval-lexical.js";
+import type { SynchronousMemoryRetriever } from "./memory-retrieval.js";
 
 /** Implementations may be synchronous (local SQLite) or asynchronous (cloud PostgreSQL). */
+export interface MemoryEmbeddingStatus {
+  readonly retriever: string;
+  readonly active: number;
+  readonly embedded: number;
+  readonly pending: number;
+  readonly model: string | null;
+  readonly embeddingVersion: number;
+}
+
 export interface CloudMemoryRepository {
   /** Trusted runtime entrypoints; not human confirmation routes. */
   remember(identity: ExecutionIdentity, raw: MemoryProposal, source: MemorySource): MaybePromise<MemoryMutation>;
@@ -31,6 +42,8 @@ export interface CloudMemoryRepository {
   references(identity: ExecutionIdentity, sessionId: string, turnId: string): MaybePromise<MemoryUse[]>;
   shares(identity: ExecutionIdentity, id: string): MaybePromise<Array<{ id: string; revision: number; targetAppId: string; expiresAt: number; revoked: boolean }>>;
   audit(identity: ExecutionIdentity, id: string, offset?: number): MaybePromise<{ items: MemoryAuditEntry[]; hasMore: boolean }>;
+  embeddingStatus?(identity: ExecutionIdentity): MaybePromise<MemoryEmbeddingStatus>;
+  backfillEmbeddings?(identity: ExecutionIdentity, limit?: number): MaybePromise<{ attempted: number; embedded: number; failed: number; remaining: number }>;
 }
 
 type Row = Record<string, unknown>;
@@ -51,7 +64,8 @@ function view(row: Row): DurableMemory {
 
 /** SQL mutations use the parent repository's fenced transaction. No network or model calls. */
 export class SqliteMemoryRepository {
-  public constructor(private readonly db: DatabaseSync, private readonly transaction: Transaction) {
+  public constructor(private readonly db: DatabaseSync, private readonly transaction: Transaction,
+    private readonly retriever: SynchronousMemoryRetriever = new LexicalMemoryRetriever()) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS durable_memories (
         id TEXT PRIMARY KEY, domain_key TEXT NOT NULL, owner_key TEXT NOT NULL, origin_app TEXT NOT NULL,
@@ -391,12 +405,7 @@ export class SqliteMemoryRepository {
     }
     const rows = this.#visibleRows(identity);
     if (rows.length > 5000) throw new CloudError(429, "MEMORY_CAPACITY", "记忆数量超过当前检索容量。");
-    const hits: RecalledMemory[] = [];
-    for (const row of rows) {
-      const memory = view(row);
-      const relevance = recallRelevance(memory, query, includeDefaults);
-      if (relevance !== null) hits.push({ memory, reference: this.#reference(identity, row), ...relevance });
-    }
-    return rankMemoryHits(hits, limit);
+    const candidates = rows.map((row) => ({ memory: view(row), reference: this.#reference(identity, row) }));
+    return this.retriever.recall({ identity, query, limit, includeDefaults, candidates });
   }
 }

@@ -4,6 +4,10 @@ import { assertHistoryAdmission, readCompleteHistory } from "./history-policy.js
 import { assertExecutionIdentity, executionScopeKey, type AppendCompactionInput, type ExecutionIdentity, type ExecutionScope } from "@daoyin/harness-contracts";
 import type { AgentEvent, AgentEventType, PendingAgentEvent, SessionCompaction } from "@daoyin/harness-protocol";
 import { PostgresMemoryRepository, migratePostgresMemory } from "./postgres-memory-repository.js";
+import type { MemoryRetriever } from "./memory-retrieval.js";
+import { memoryPermission } from "./memory-policy.js";
+import { episodicEventPreview, episodicIndexText, type EpisodicMemoryRepository, type SessionReadResult,
+  type SessionSearchHit, type SessionTraceResult } from "./episodic-memory.js";
 import { CloudError, type BoundRunStores, type CloudChildInput, type CloudChildRun, type CloudRepository, type CloudRun, type CloudSession, type SessionAction } from "./repository.js";
 import { applySessionAction, sessionState } from "./session-management.js";
 
@@ -31,6 +35,7 @@ function run(row: Row): CloudRun {
 }
 
 const cloudSchema = [
+  "CREATE EXTENSION IF NOT EXISTS pg_trgm",
   `CREATE TABLE IF NOT EXISTS cloud_runtime_lease (
     singleton SMALLINT PRIMARY KEY CHECK(singleton=1), owner_id TEXT NOT NULL, expires_at BIGINT NOT NULL
   )`,
@@ -52,6 +57,12 @@ const cloudSchema = [
   )`,
   "CREATE UNIQUE INDEX IF NOT EXISTS cloud_one_active_run ON cloud_runs(session_id) WHERE status='running'",
   "CREATE INDEX IF NOT EXISTS cloud_runs_scope ON cloud_runs(scope_key, session_id)",
+  `CREATE TABLE IF NOT EXISTS session_search_documents (
+    turn_id TEXT PRIMARY KEY REFERENCES cloud_runs(id), scope_key TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES cloud_sessions(id), search_text TEXT NOT NULL DEFAULT '', updated_at BIGINT NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS session_search_scope ON session_search_documents(scope_key,updated_at DESC,turn_id)",
+  "CREATE INDEX IF NOT EXISTS session_search_trgm ON session_search_documents USING GIN(search_text gin_trgm_ops)",
   `CREATE TABLE IF NOT EXISTS cloud_child_runs (
     parent_run_id TEXT NOT NULL REFERENCES cloud_runs(id),
     parent_session_id TEXT NOT NULL REFERENCES cloud_sessions(id),
@@ -79,6 +90,10 @@ export async function migratePostgres(pool: Pool): Promise<void> {
     await client.query("BEGIN");
     for (const statement of cloudSchema) await client.query(statement);
     await migratePostgresMemory(client);
+    await client.query(`INSERT INTO session_search_documents(turn_id,scope_key,session_id,search_text,updated_at)
+      SELECT r.id,r.scope_key,r.session_id,LEFT(CONCAT_WS(' ',s.title,r.user_message,r.final_text),20000),$1
+      FROM cloud_runs r JOIN cloud_sessions s ON s.id=r.session_id
+      ON CONFLICT(turn_id) DO NOTHING`, [Date.now()]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
@@ -89,18 +104,28 @@ export async function migratePostgres(pool: Pool): Promise<void> {
 /** PostgreSQL cloud store. Every state mutation checks the current runtime lease in its transaction. */
 export class PostgresCloudRepository implements CloudRepository {
   public readonly memory: PostgresMemoryRepository;
+  public readonly episodicMemory: EpisodicMemoryRepository;
   #leaseOwner: string | null = null;
   #leaseDurationMs = 30_000;
 
-  private constructor(private readonly pool: Pool) {
-    this.memory = new PostgresMemoryRepository(pool, (operation) => this.#transaction(operation));
+  private constructor(private readonly pool: Pool, memoryRetriever?: MemoryRetriever) {
+    this.memory = new PostgresMemoryRepository(pool, (operation) => this.#transaction(operation), memoryRetriever);
+    this.episodicMemory = {
+      search: (identity, query, limit) => this.#sessionSearch(identity, query, limit),
+      read: (identity, sessionId, afterEventSeq, limit) => this.#sessionRead(identity, sessionId, afterEventSeq, limit),
+      trace: (identity, turnId, limit) => this.#sessionTrace(identity, turnId, limit),
+    };
   }
 
-  public static async open(connectionString: string): Promise<PostgresCloudRepository> {
+  public static async open(connectionString: string, options: {
+    memoryRetriever?: MemoryRetriever;
+    memoryRetrieverFactory?: (pool: Pool) => MemoryRetriever;
+  } = {}): Promise<PostgresCloudRepository> {
     const pool = new Pool({ connectionString, max: 10, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 });
     try {
       await pool.query("SELECT 1");
-      return new PostgresCloudRepository(pool);
+      if (options.memoryRetriever && options.memoryRetrieverFactory) throw new Error("Choose one memory retriever source.");
+      return new PostgresCloudRepository(pool, options.memoryRetriever ?? options.memoryRetrieverFactory?.(pool));
     } catch (error) {
       await pool.end().catch(() => undefined);
       throw error;
@@ -128,7 +153,7 @@ export class PostgresCloudRepository implements CloudRepository {
   public async migrate(): Promise<void> { await migratePostgres(this.pool); }
 
   public async verifySchema(): Promise<void> {
-    const required = ["cloud_runtime_lease", "cloud_sessions", "cloud_runs", "cloud_events", "cloud_compactions",
+    const required = ["cloud_runtime_lease", "cloud_sessions", "cloud_runs", "cloud_events", "cloud_compactions", "session_search_documents",
       "durable_memories", "memory_requests", "memory_shares", "memory_audit", "memory_references"];
     const result = await this.pool.query<{ relation: string | null }>("SELECT to_regclass($1) AS relation", ["cloud_runtime_lease"]);
     if (result.rows[0]?.relation === null) throw new Error("PostgreSQL schema has not been migrated.");
@@ -139,6 +164,10 @@ export class PostgresCloudRepository implements CloudRepository {
     // Fail readiness before serving the new API against an unmigrated database.
     await this.pool.query("SELECT pinned_at,archived_at,deleted_at FROM cloud_sessions WHERE FALSE");
     await this.pool.query("SELECT parent_run_id,parent_session_id,operation_id,tool_call_id,node_id,child_run_id,child_session_id,scope_key,created_at FROM cloud_child_runs WHERE FALSE");
+    await this.pool.query("SELECT turn_id,scope_key,session_id,search_text,updated_at FROM session_search_documents WHERE FALSE");
+    await this.pool.query("SELECT embedding,embedding_model,embedding_version,embedded_at FROM durable_memories WHERE FALSE");
+    const extensions = await this.pool.query<{ extname: string }>("SELECT extname FROM pg_extension WHERE extname IN ('pg_trgm','vector')");
+    if (new Set(extensions.rows.map((row) => row.extname)).size !== 2) throw new Error("PostgreSQL memory search extensions are incomplete.");
   }
 
   public async acquireRuntimeLease(options: { durationMs?: number; recoverInterrupted?: boolean } = {}): Promise<{ recoveredRuns: number }> {
@@ -264,9 +293,13 @@ export class PostgresCloudRepository implements CloudRepository {
         (SELECT COUNT(*) FROM cloud_runs WHERE session_id=$1) AS runs FROM cloud_events WHERE session_id=$1`, [sessionId]);
       assertHistoryAdmission({ events: Number(usage.rows[0]?.events), bytes: Number(usage.rows[0]?.bytes), runs: Number(usage.rows[0]?.runs) });
       const runId = id("run");
+      const createdAt = now();
       await client.query(`INSERT INTO cloud_runs(id,scope_key,session_id,request_id,input_hash,user_message,status,authorization_id,billing_account_id,created_at)
         VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$9)`, [runId, key, sessionId, requestId, inputHash, userMessage,
-        identity.authorizationId, identity.billingAccountId, now()]);
+        identity.authorizationId, identity.billingAccountId, createdAt]);
+      await client.query(`INSERT INTO session_search_documents(turn_id,scope_key,session_id,search_text,updated_at)
+        VALUES ($1,$2,$3,LEFT(CONCAT_WS(' ',$4,$5),20000),$6)`,
+        [runId, key, sessionId, String(selectedSession.title), userMessage, Date.now()]);
       return { run: run(await this.#run(client, key, runId)), created: true };
     });
   }
@@ -304,6 +337,9 @@ export class PostgresCloudRepository implements CloudRepository {
       await client.query(`INSERT INTO cloud_runs(id,scope_key,session_id,request_id,input_hash,user_message,status,authorization_id,billing_account_id,created_at)
         VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$9)`, [runId, key, sessionId, input.operationId, digest(input.instruction), input.instruction,
         identity.authorizationId, identity.billingAccountId, createdAt]);
+      await client.query(`INSERT INTO session_search_documents(turn_id,scope_key,session_id,search_text,updated_at)
+        VALUES ($1,$2,$3,LEFT(CONCAT_WS(' ',$4,$5),20000),$6)`,
+        [runId, key, sessionId, `子任务 · ${input.nodeId}`, input.instruction, Date.now()]);
       await client.query(`INSERT INTO cloud_child_runs(parent_run_id,parent_session_id,operation_id,tool_call_id,node_id,child_run_id,child_session_id,scope_key,created_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [parentRunId, parentSessionId, input.operationId, input.toolCallId, input.nodeId, runId, sessionId, key, createdAt]);
       return { child: { parentRunId, parentSessionId, operationId: input.operationId, toolCallId: input.toolCallId, nodeId: input.nodeId,
@@ -319,6 +355,62 @@ export class PostgresCloudRepository implements CloudRepository {
       WHERE c.parent_run_id=$1 AND c.scope_key=$2 ORDER BY c.created_at,c.node_id LIMIT 8`, [parentRunId, key]);
     return result.rows.map((row) => ({ parentRunId: String(row.parent_run_id), parentSessionId: String(row.parent_session_id),
       toolCallId: String(row.tool_call_id), nodeId: String(row.node_id), operationId: String(row.operation_id), run: run(row) }));
+  }
+
+  async #sessionSearch(identity: ExecutionIdentity, rawQuery: string, limit = 8): Promise<SessionSearchHit[]> {
+    memoryPermission(identity, "memory.read");
+    const query = rawQuery.normalize("NFKC").replace(/\s+/gu, " ").trim();
+    if (query.length < 2 || query.length > 500 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+      throw new CloudError(400, "SESSION_QUERY_INVALID", "历史会话查询或条数无效。");
+    }
+    const key = executionScopeKey(identity);
+    const like = `%${query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+    const result = await this.pool.query<Row>(`SELECT d.session_id,d.turn_id,s.title,r.user_message,r.final_text,r.created_at,r.last_event_seq,
+        COALESCE((SELECT MIN(e.event_seq) FROM cloud_events e WHERE e.session_id=d.session_id AND e.turn_id=d.turn_id),0) AS first_event_seq,
+        GREATEST(similarity(d.search_text,$2),similarity(s.title,$2),
+          CASE WHEN d.search_text ILIKE $3 ESCAPE '\\' OR s.title ILIKE $3 ESCAPE '\\' THEN 1 ELSE 0 END) AS score
+      FROM session_search_documents d
+      JOIN cloud_runs r ON r.id=d.turn_id AND r.scope_key=d.scope_key
+      JOIN cloud_sessions s ON s.id=d.session_id AND s.scope_key=d.scope_key
+      WHERE d.scope_key=$1 AND s.deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM cloud_child_runs c JOIN cloud_sessions p ON p.id=c.parent_session_id
+          WHERE c.child_session_id=s.id AND p.deleted_at IS NOT NULL)
+        AND (d.search_text ILIKE $3 ESCAPE '\\' OR s.title ILIKE $3 ESCAPE '\\'
+          OR similarity(d.search_text,$2)>=0.12 OR similarity(s.title,$2)>=0.12)
+      ORDER BY score DESC,d.updated_at DESC,d.turn_id DESC LIMIT $4`, [key, query, like, limit]);
+    return result.rows.map((row) => ({
+      sessionId: String(row.session_id), turnId: String(row.turn_id), sessionTitle: String(row.title),
+      userMessage: String(row.user_message).slice(0, 900), assistantText: String(row.final_text).slice(0, 1_200),
+      eventSeqStart: asNumber(row.first_event_seq), eventSeqEnd: asNumber(row.last_event_seq), createdAt: String(row.created_at),
+      score: Math.round(asNumber(row.score) * 1000) / 1000,
+    }));
+  }
+
+  async #sessionRead(identity: ExecutionIdentity, sessionId: string, afterEventSeq = 0, limit = 40): Promise<SessionReadResult> {
+    memoryPermission(identity, "memory.read");
+    if (!Number.isSafeInteger(afterEventSeq) || afterEventSeq < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 80) {
+      throw new CloudError(400, "SESSION_READ_INVALID", "历史会话读取范围无效。");
+    }
+    const key = executionScopeKey(identity);
+    const selected = await this.#session(this.pool, key, sessionId);
+    const result = await this.pool.query<Row>(`SELECT body FROM cloud_events WHERE session_id=$1 AND event_seq>$2
+      AND (body::jsonb->>'type')<>'assistant.delta' ORDER BY event_seq LIMIT $3`, [sessionId, afterEventSeq, limit + 1]);
+    const hasMore = result.rows.length > limit;
+    const events = result.rows.slice(0, limit).map((row) => episodicEventPreview(JSON.parse(String(row.body)) as AgentEvent));
+    return { sessionId, title: String(selected.title), events, hasMore,
+      nextAfterEventSeq: hasMore && events.length ? events.at(-1)!.eventSeq : null };
+  }
+
+  async #sessionTrace(identity: ExecutionIdentity, turnId: string, limit = 80): Promise<SessionTraceResult> {
+    memoryPermission(identity, "memory.read");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 160) throw new CloudError(400, "SESSION_TRACE_INVALID", "历史任务追踪范围无效。");
+    const key = executionScopeKey(identity);
+    const selected = await this.#run(this.pool, key, turnId);
+    const result = await this.pool.query<Row>(`SELECT body FROM cloud_events WHERE session_id=$1 AND turn_id=$2
+      AND (body::jsonb->>'type')<>'assistant.delta' ORDER BY event_seq LIMIT $3`, [String(selected.session_id), turnId, limit]);
+    return { sessionId: String(selected.session_id), turnId, userMessage: String(selected.user_message).slice(0, 2_000),
+      finalText: String(selected.final_text).slice(0, 3_000), status: String(selected.status),
+      events: result.rows.map((row) => episodicEventPreview(JSON.parse(String(row.body)) as AgentEvent)) };
   }
 
   public async getRun(scope: ExecutionScope, runId: string): Promise<CloudRun> { return run(await this.#run(this.pool, executionScopeKey(scope), runId)); }
@@ -453,6 +545,10 @@ export class PostgresCloudRepository implements CloudRepository {
     if (Buffer.byteLength(body, "utf8") > 128_000) throw new CloudError(413, "EVENT_TOO_LARGE", "工具或模型结果超过事件存储上限。");
     await client.query("INSERT INTO cloud_events(session_id,event_seq,turn_id,event_id,body) VALUES ($1,$2,$3,$4,$5)",
       [event.sessionId, event.eventSeq, event.turnId, event.id, body]);
+    const indexText = episodicIndexText(event);
+    if (indexText) await client.query(`UPDATE session_search_documents
+      SET search_text=LEFT(CONCAT_WS(' ',search_text,$1),20000),updated_at=$2 WHERE turn_id=$3 AND scope_key=$4`,
+      [indexText, Date.now(), event.turnId, key]);
     let status: CloudRun["status"] = "running";
     let finalText = "";
     if (event.type === "turn.completed" || event.type === "turn.failed") { status = event.payload.status; finalText = event.payload.outcomeSummary; }

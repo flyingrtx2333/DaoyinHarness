@@ -1,5 +1,6 @@
 import type { AgentEvent, TurnStatus } from "@daoyin/harness-protocol";
 import type { CloudMemoryRepository } from "./memory-repository.js";
+import type { EpisodicMemoryRepository } from "./episodic-memory.js";
 import type { ExecutionIdentity, ExecutionScope, SessionCompactionStore, SessionEventStore } from "@daoyin/harness-contracts";
 
 export class CloudError extends Error {
@@ -65,6 +66,7 @@ export type MaybePromise<T> = T | Promise<T>;
 /** Every user-facing lookup is scoped. Implementations must atomically claim requests. */
 export interface CloudRepository {
   readonly memory?: CloudMemoryRepository;
+  readonly episodicMemory?: EpisodicMemoryRepository;
   /** Atomic child session/run/link admission; absent adapters cannot expose orchestration. */
   acceptChildRun?(identity: ExecutionIdentity, parentRunId: string, input: CloudChildInput): Promise<{ child: CloudChildRun; created: boolean }>;
   listChildRuns?(scope: ExecutionScope, parentRunId: string): Promise<CloudChildRun[]>;

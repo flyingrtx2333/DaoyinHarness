@@ -10,8 +10,11 @@ import {
   type MemorySource, type RecalledMemory,
 } from "./memory-policy.js";
 import type { MemoryPreparation, MemoryUse } from "./memory-runtime.js";
-import { agentSourceShape, verifyAgentSource, recallRelevance, rankMemoryHits, memoryContextText, matchesOwnInvalidation,
+import { agentSourceShape, verifyAgentSource, memoryContextText, matchesOwnInvalidation,
   type MemoryMutation, type MemoryInvalidation } from "./memory-agent-policy.js";
+import { LexicalMemoryRetriever } from "./memory-retrieval-lexical.js";
+import type { MemoryRetriever } from "./memory-retrieval.js";
+import type { MemoryEmbeddingStatus } from "./memory-repository.js";
 
 type Row = Record<string, unknown>;
 type Transaction = <T>(operation: (client: PoolClient) => Promise<T>) => Promise<T>;
@@ -38,6 +41,7 @@ function view(row: Row): DurableMemory {
 /** Called by the explicit cloud migration command within its owning transaction. */
 export async function migratePostgresMemory(client: PoolClient): Promise<void> {
   for (const statement of [
+    "CREATE EXTENSION IF NOT EXISTS vector",
     `CREATE TABLE IF NOT EXISTS durable_memories (
       id TEXT PRIMARY KEY, domain_key TEXT NOT NULL, owner_key TEXT NOT NULL, origin_app TEXT NOT NULL,
       created_by TEXT NOT NULL, root_key TEXT NOT NULL, fact_key TEXT NOT NULL, memory_scope TEXT NOT NULL,
@@ -45,6 +49,10 @@ export async function migratePostgresMemory(client: PoolClient): Promise<void> {
       revision INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','active','superseded','forgotten','rejected')),
       supersedes TEXT, replaces_revision INTEGER, created_at BIGINT NOT NULL, expires_at BIGINT
     )`,
+    "ALTER TABLE durable_memories ADD COLUMN IF NOT EXISTS embedding vector(512)",
+    "ALTER TABLE durable_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT",
+    "ALTER TABLE durable_memories ADD COLUMN IF NOT EXISTS embedding_version INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE durable_memories ADD COLUMN IF NOT EXISTS embedded_at BIGINT",
     "CREATE INDEX IF NOT EXISTS durable_memory_scope ON durable_memories(domain_key,owner_key,origin_app,state)",
     "CREATE UNIQUE INDEX IF NOT EXISTS durable_memory_active_key ON durable_memories(root_key) WHERE state='active'",
     `CREATE TABLE IF NOT EXISTS memory_requests (
@@ -72,7 +80,14 @@ export async function migratePostgresMemory(client: PoolClient): Promise<void> {
 
 /** PostgreSQL implementation of the reviewed, scoped memory contract. */
 export class PostgresMemoryRepository {
-  public constructor(private readonly pool: Pool, private readonly transaction: Transaction) {}
+  public constructor(private readonly pool: Pool, private readonly transaction: Transaction,
+    private readonly retriever: MemoryRetriever = new LexicalMemoryRetriever()) {}
+
+  async #indexActive(identity: ExecutionIdentity, memory: DurableMemory): Promise<void> {
+    if (memory.state !== "active" || this.retriever.index === undefined) return;
+    // Embedding is an auxiliary index. A provider outage must never roll back a committed memory fact.
+    await Promise.resolve(this.retriever.index(identity, memory)).catch(() => undefined);
+  }
 
   async #audit(client: PoolClient, identity: ExecutionIdentity, record: DurableMemory, action: MemoryAuditAction): Promise<void> {
     await client.query("INSERT INTO memory_audit(id,memory_id,revision,actor_id,action,created_at) VALUES ($1,$2,$3,$4,$5,$6)",
@@ -121,7 +136,9 @@ export class PostgresMemoryRepository {
   }
 
   public async remember(identity: ExecutionIdentity, raw: MemoryProposal, source: MemorySource): Promise<MemoryMutation> {
-    return this.#save(identity, raw, source, true);
+    const result = await this.#save(identity, raw, source, true);
+    await this.#indexActive(identity, result.memory);
+    return result;
   }
 
   async #save(identity: ExecutionIdentity, raw: MemoryProposal, source: MemorySource | undefined, automatic: boolean): Promise<MemoryMutation> {
@@ -201,7 +218,7 @@ export class PostgresMemoryRepository {
       const row = await this.#managed(client, identity, id, true);
       if (row.state !== "active" || number(row.revision) !== revision) throw conflict();
       const chain = await client.query<Row>("SELECT id,revision FROM durable_memories WHERE root_key=$1 AND state<>'forgotten' FOR UPDATE", [String(row.root_key)]);
-      await client.query("UPDATE durable_memories SET state='forgotten',content='',keywords='[]',revision=revision+1 WHERE root_key=$1 AND state<>'forgotten'", [String(row.root_key)]);
+      await client.query("UPDATE durable_memories SET state='forgotten',content='',keywords='[]',embedding=NULL,embedding_model=NULL,embedding_version=0,embedded_at=NULL,revision=revision+1 WHERE root_key=$1 AND state<>'forgotten'", [String(row.root_key)]);
       await client.query("UPDATE memory_shares SET revoked=TRUE WHERE memory_id IN (SELECT id FROM durable_memories WHERE root_key=$1)", [String(row.root_key)]);
       await client.query("INSERT INTO memory_requests(request_key,input_hash,memory_id) VALUES ($1,$2,$3)", [requestKey, fingerprint, id]);
       const memory = view(await this.#row(client, id, memoryDomain(identity)));
@@ -212,7 +229,7 @@ export class PostgresMemoryRepository {
   }
 
   public async confirm(identity: ExecutionIdentity, id: string, revision: number): Promise<DurableMemory> {
-    return this.transaction(async (client) => {
+    const result = await this.transaction(async (client) => {
       const row = await this.#managed(client, identity, id, true);
       if (row.state === "active" && number(row.revision) === revision + 1) return view(row);
       if (row.state !== "pending" || number(row.revision) !== revision || (row.expires_at !== null && number(row.expires_at) <= Date.now())) throw conflict();
@@ -224,10 +241,12 @@ export class PostgresMemoryRepository {
         await this.#audit(client, identity, view(await this.#row(client, String(old.id), memoryDomain(identity))), "superseded");
       }
       await client.query("UPDATE durable_memories SET state='active',revision=revision+1 WHERE id=$1", [id]);
-      const result = view(await this.#row(client, id, memoryDomain(identity)));
-      await this.#audit(client, identity, result, "confirmed");
-      return result;
+      const confirmed = view(await this.#row(client, id, memoryDomain(identity)));
+      await this.#audit(client, identity, confirmed, "confirmed");
+      return confirmed;
     });
+    await this.#indexActive(identity, result);
+    return result;
   }
 
   public async reject(identity: ExecutionIdentity, id: string, revision: number): Promise<DurableMemory> {
@@ -256,7 +275,7 @@ export class PostgresMemoryRepository {
       const row = await this.#managed(client, identity, id, true);
       if (row.state === "forgotten") return view(row);
       if (number(row.revision) !== revision) throw conflict();
-      await client.query("UPDATE durable_memories SET state='forgotten',content='',keywords='[]',revision=revision+1 WHERE root_key=$1 AND state<>'forgotten'", [String(row.root_key)]);
+      await client.query("UPDATE durable_memories SET state='forgotten',content='',keywords='[]',embedding=NULL,embedding_model=NULL,embedding_version=0,embedded_at=NULL,revision=revision+1 WHERE root_key=$1 AND state<>'forgotten'", [String(row.root_key)]);
       await client.query("UPDATE memory_shares SET revoked=TRUE WHERE memory_id IN (SELECT id FROM durable_memories WHERE root_key=$1)", [String(row.root_key)]);
       const result = view(await this.#row(client, id, memoryDomain(identity)));
       await this.#audit(client, identity, result, "forgotten_chain");
@@ -363,13 +382,10 @@ export class PostgresMemoryRepository {
     }
     const rows = await this.#visibleRows(client, identity);
     if (rows.length > 5_000) throw new CloudError(429, "MEMORY_CAPACITY", "记忆数量超过当前检索容量。");
-    const hits: RecalledMemory[] = [];
-    for (const row of rows) {
-      const memory = view(row);
-      const relevance = recallRelevance(memory, query, includeDefaults);
-      if (relevance !== null) hits.push({ memory, reference: await this.#reference(client, identity, row), ...relevance });
-    }
-    return rankMemoryHits(hits, limit);
+    const candidates = await Promise.all(rows.map(async (row) => ({
+      memory: view(row), reference: await this.#reference(client, identity, row),
+    })));
+    return this.retriever.recall({ identity, query, limit, includeDefaults, candidates });
   }
 
   public async prepare(identity: ExecutionIdentity, input: MemoryPreparation): Promise<MemoryContextSnapshot> {
@@ -466,6 +482,38 @@ export class PostgresMemoryRepository {
       const reference = { id: String(row.memory_id), revision: number(row.revision), grantId: row.grant_id ? String(row.grant_id) : null };
       return { ...reference, step: number(row.step), available: await this.validReference(identity, reference), reasons: JSON.parse(String(row.reasons)) as string[] };
     }));
+  }
+
+  public async embeddingStatus(identity: ExecutionIdentity): Promise<MemoryEmbeddingStatus> {
+    memoryPermission(identity, "memory.read");
+    const rows = await this.#visibleRows(this.pool, identity);
+    if (rows.length > 5_000) throw new CloudError(429, "MEMORY_CAPACITY", "记忆数量超过当前检索容量。");
+    const embeddedRows = rows.filter((row) => row.embedding !== null && row.embedding !== undefined && number(row.embedding_version) === 1);
+    const models = [...new Set(embeddedRows.map((row) => String(row.embedding_model ?? "")).filter(Boolean))];
+    return { retriever: this.retriever.id, active: rows.length, embedded: embeddedRows.length,
+      pending: rows.length - embeddedRows.length, model: models.length === 0 ? null : models.length === 1 ? models[0]! : "mixed",
+      embeddingVersion: 1 };
+  }
+
+  public async backfillEmbeddings(identity: ExecutionIdentity, limit = 32): Promise<{ attempted: number; embedded: number; failed: number; remaining: number }> {
+    memoryPermission(identity, "memory.write");
+    if (this.retriever.index === undefined) throw new CloudError(409, "MEMORY_EMBEDDING_DISABLED", "当前检索器未启用向量索引。");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw new CloudError(400, "MEMORY_BACKFILL_INVALID", "向量回填条数无效。");
+    const domain = memoryDomain(identity);
+    const owner = `user:${identity.actorUserId}`;
+    const rows = await this.pool.query<Row>(`SELECT * FROM durable_memories WHERE domain_key=$1 AND owner_key=$2 AND origin_app=$3
+      AND state='active' AND (expires_at IS NULL OR expires_at>$4) AND (embedding IS NULL OR embedding_version<>1)
+      ORDER BY created_at DESC,id DESC LIMIT $5`, [domain, owner, identity.appInstallationId, Date.now(), limit]);
+    let embedded = 0;
+    let failed = 0;
+    for (const row of rows.rows) {
+      try { await this.retriever.index(identity, view(row)); embedded++; }
+      catch { failed++; }
+    }
+    const remainingResult = await this.pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM durable_memories WHERE domain_key=$1 AND owner_key=$2 AND origin_app=$3
+      AND state='active' AND (expires_at IS NULL OR expires_at>$4) AND (embedding IS NULL OR embedding_version<>1)`,
+    [domain, owner, identity.appInstallationId, Date.now()]);
+    return { attempted: rows.rows.length, embedded, failed, remaining: number(remainingResult.rows[0]?.n ?? 0) };
   }
 
   public async audit(identity: ExecutionIdentity, id: string, offset = 0): Promise<{ items: MemoryAuditEntry[]; hasMore: boolean }> {

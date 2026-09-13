@@ -1,10 +1,14 @@
 import { createPlatformCloudServer } from "./platform-adapter.js";
+import { createConfiguredMemoryRetriever } from "./memory-retrieval-config.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
 import { loadRuntimeBuild } from "./runtime-health.js";
 
 const databaseUrl = process.env.DAOYIN_CLOUD_POSTGRES_URL ?? "";
 const port = Number(process.env.DAOYIN_CLOUD_PORT ?? "4700");
+const platformUrl = process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "";
 const appServiceToken = process.env.DAOYIN_CLOUD_APP_SERVICE_TOKEN;
+const vectorMinScoreRaw = process.env.DAOYIN_MEMORY_VECTOR_MIN_SCORE;
+const vectorMinScore = vectorMinScoreRaw === undefined ? undefined : Number(vectorMinScoreRaw);
 try {
   const url = new URL(databaseUrl);
   if (!["postgres:", "postgresql:"].includes(url.protocol)) throw new Error("unsupported protocol");
@@ -14,7 +18,15 @@ try {
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
   throw new Error("Set DAOYIN_CLOUD_POSTGRES_URL to a PostgreSQL connection URL and DAOYIN_CLOUD_PORT to a valid port.");
 }
-const repository = await PostgresCloudRepository.open(databaseUrl);
+if (vectorMinScore !== undefined && (!Number.isFinite(vectorMinScore) || vectorMinScore < -1 || vectorMinScore > 1)) {
+  throw new Error("DAOYIN_MEMORY_VECTOR_MIN_SCORE must be between -1 and 1.");
+}
+const repository = await PostgresCloudRepository.open(databaseUrl, {
+  memoryRetrieverFactory: (pool) => createConfiguredMemoryRetriever(pool, {
+    platformUrl, ...(appServiceToken === undefined ? {} : { appServiceToken }),
+    ...(vectorMinScore === undefined ? {} : { vectorMinScore }),
+  }),
+});
 let app: ReturnType<typeof createPlatformCloudServer> | undefined;
 let heartbeat: ReturnType<typeof setInterval> | undefined;
 let closing: Promise<void> | undefined;
@@ -44,7 +56,7 @@ try {
   // Validate platform config before acquiring ownership or touching prior task states.
   app = createPlatformCloudServer({ repository,
     buildInfo: await loadRuntimeBuild(new URL("./release.json", import.meta.url)),
-    platformUrl: process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "",
+    platformUrl,
     serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
     ...(appServiceToken ? { appServiceToken } : {}),
   });

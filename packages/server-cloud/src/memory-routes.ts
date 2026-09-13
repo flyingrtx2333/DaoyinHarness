@@ -22,21 +22,28 @@ export interface MemoryCapabilities {
   canWrite: boolean;
   canShare: boolean;
   sharingTargetCheckAvailable: boolean;
+  episodicSearchAvailable: boolean;
+  embeddingStatusAvailable: boolean;
+  embeddingBackfillAvailable: boolean;
   scopes: DurableMemoryScope[];
 }
 
-function capabilities(identity: ExecutionIdentity, storageAvailable: boolean, sharingTargetCheckAvailable: boolean): MemoryCapabilities {
-  const enabled = storageAvailable && identity.space.kind !== "public";
+function capabilities(identity: ExecutionIdentity, repository: CloudRepository, sharingTargetCheckAvailable: boolean): MemoryCapabilities {
+  const enabled = repository.memory !== undefined && identity.space.kind !== "public";
   const canRead = enabled && identity.permissions.includes("memory.read");
   const canWrite = enabled && identity.permissions.includes("memory.write");
   const canShare = enabled && identity.permissions.includes("memory.share") && sharingTargetCheckAvailable;
+  const episodicSearchAvailable = canRead && repository.episodicMemory !== undefined;
+  const embeddingStatusAvailable = canRead && repository.memory?.embeddingStatus !== undefined;
+  const embeddingBackfillAvailable = canWrite && repository.memory?.backfillEmbeddings !== undefined;
   const scopes: DurableMemoryScope[] = [];
   if (canWrite) {
     scopes.push("application");
     if (identity.space.kind === "personal") scopes.push("personal");
     if (identity.space.kind === "organization" && identity.permissions.includes("memory.organization.write")) scopes.push("organization");
   }
-  return { enabled, canRead, canWrite, canShare, sharingTargetCheckAvailable, scopes };
+  return { enabled, canRead, canWrite, canShare, sharingTargetCheckAvailable, episodicSearchAvailable,
+    embeddingStatusAvailable, embeddingBackfillAvailable, scopes };
 }
 
 /** User management only. These routes are never added to the model-facing tool registry. */
@@ -54,7 +61,7 @@ export function registerMemoryRoutes(app: FastifyInstance, options: MemoryRouteO
   app.get(`${prefix}/capabilities`, async (request) => {
     const identity = options.identityFor(request);
     await options.ensureActive(identity);
-    return capabilities(identity, options.repository.memory !== undefined, options.authorizeShareTarget !== undefined);
+    return capabilities(identity, options.repository, options.authorizeShareTarget !== undefined);
   });
 
   app.get<{ Querystring: { offset?: string } }>(prefix, { schema: { querystring: {
@@ -71,6 +78,22 @@ export function registerMemoryRoutes(app: FastifyInstance, options: MemoryRouteO
   } } }, async (request) => {
     const { identity, memory } = await scope(request);
     return { hits: await memory.search(identity, request.body.query, request.body.limit) };
+  });
+
+  app.get(`${prefix}/embeddings/status`, async (request) => {
+    const { identity, memory } = await scope(request);
+    memoryPermission(identity, "memory.read");
+    if (memory.embeddingStatus === undefined) return { available: false, retriever: "lexical-v1" };
+    return { available: true, ...(await memory.embeddingStatus(identity)) };
+  });
+
+  app.post<{ Body: { limit?: number } }>(`${prefix}/embeddings/backfill`, { schema: { body: {
+    type: "object", additionalProperties: false, properties: { limit: { type: "integer", minimum: 1, maximum: 64 } },
+  } } }, async (request) => {
+    const { identity, memory } = await scope(request);
+    memoryPermission(identity, "memory.write");
+    if (memory.backfillEmbeddings === undefined) throw new CloudError(409, "MEMORY_EMBEDDING_DISABLED", "当前运行环境未启用向量记忆索引。");
+    return await memory.backfillEmbeddings(identity, request.body.limit);
   });
 
   app.post<{ Body: MemoryProposal & { source?: Omit<MemorySource, "kind" | "requestId"> } }>(prefix, { schema: { body: {

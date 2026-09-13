@@ -7,6 +7,7 @@ import { CloudError, type CloudRun } from "./repository.js";
 import type { CloudMemoryRepository } from "./memory-repository.js";
 import { memoryId, type MemoryProposal, type MemoryReference, type MemorySource } from "./memory-policy.js";
 import { MEMORY_TOOL_NAMES, isMemoryToolName, memoryEvidenceText, memoryOperationId, type MemoryInvalidation, type MemoryToolName } from "./memory-agent-policy.js";
+import { buildMemoryQuery } from "./memory-query-builder.js";
 
 const text = (value: unknown, min: number, max: number): value is string => typeof value === "string" && value.trim().length >= min && value.length <= max;
 const revision = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 1_000_000;
@@ -79,9 +80,10 @@ export function createCloudMemoryRuntime(options: {
   identity: ExecutionIdentity;
   run: CloudRun;
   events: SessionEventStore;
+  profileId: string;
   ensureActive(identity: ExecutionIdentity, signal?: AbortSignal): Promise<void>;
 }): { provider: AgentMemoryProvider; bindings: CloudToolBinding[] } {
-  const { memory, identity, run, events, ensureActive } = options;
+  const { memory, identity, run, events, profileId, ensureActive } = options;
   const ownInvalidations = new Map<string, MemoryInvalidation>();
   const additionalReferences = new Map<string, MemoryReference>();
   let dirty = false;
@@ -91,13 +93,9 @@ export function createCloudMemoryRuntime(options: {
     if (request.turn.turnId !== run.id || request.turn.sessionId !== run.sessionId) throw new CloudError(403, "MEMORY_SCOPE_DENIED", "记忆请求不属于当前任务。");
     lastRequest = request;
     const history = [...request.inheritedEvents, ...request.priorEvents];
-    const query = request.turn.userMessage.trim();
-    // Resolve terse follow-ups only for retrieval; the actual user message is never replaced.
-    const previousQuestion = [...history].reverse().find((event) => event.type === "turn.started");
-    const contextualQuery = /^(继续|接着|按之前的|按之前那个方案|continue)[。.!！]?$/iu.test(query) && previousQuestion?.type === "turn.started"
-      ? previousQuestion.payload.userMessage : query;
+    const builtQuery = buildMemoryQuery({ userMessage: request.turn.userMessage, recentEvents: history, profileId, step: request.step });
     const snapshot = await memory.prepare(identity, { sessionId: run.sessionId, turnId: run.id, step: request.step,
-      query: contextualQuery, events: history, ownInvalidations: [...ownInvalidations.values()], additionalReferences: [...additionalReferences.values()] });
+      query: builtQuery.retrievalQuery, events: history, ownInvalidations: [...ownInvalidations.values()], additionalReferences: [...additionalReferences.values()] });
     return { ...snapshot, assertCurrent: async (signal) => { await ensureActive(identity, signal); await snapshot.assertCurrent(signal); } };
   };
   const provider: AgentMemoryProvider = { load, afterTool: async (request) => {
@@ -116,6 +114,28 @@ export function createCloudMemoryRuntime(options: {
     if (source === undefined || invocation === undefined || context.toolCallId === undefined) throw new CloudError(403, "MEMORY_SOURCE_DENIED", "找不到本轮对应的真实原文，不保存推断或虚构来源。");
     return { kind: "agent", requestId: memoryOperationId(run.id, context.toolCallId), sessionId: run.sessionId, turnId: run.id,
       eventId: source.id, toolEventId: invocation.id, basis: input.basis as "user_statement" | "tool_observation", excerpt };
+  };
+
+  const strongSimilarity = (reasons: readonly string[], score: number): number | null => {
+    for (const reason of reasons) {
+      const rerank = /^rerank:(-?\d+(?:\.\d+)?)$/u.exec(reason);
+      if (rerank && Number(rerank[1]) >= 0.82) return Number(rerank[1]);
+      const vector = /^vector:[^:]+:(-?\d+(?:\.\d+)?)$/u.exec(reason);
+      if (vector && Number(vector[1]) >= 0.88) return Number(vector[1]);
+    }
+    return reasons.includes("phrase") && score >= 10 ? 1 : null;
+  };
+
+  const assertNoSemanticDuplicate = async (proposal: MemoryProposal, signal: AbortSignal): Promise<void> => {
+    if (proposal.replaces !== undefined) return;
+    const query = [proposal.key, proposal.kind, proposal.content, ...(proposal.keywords ?? [])].join(" ").slice(0, 500);
+    const candidates = await memory.search(identity, query, 4);
+    signal.throwIfAborted();
+    const candidate = candidates.find((hit) => hit.memory.key !== proposal.key && strongSimilarity(hit.reasons, hit.score) !== null);
+    if (!candidate) return;
+    const similarity = strongSimilarity(candidate.reasons, candidate.score)!;
+    throw new CloudError(409, "MEMORY_SIMILAR_CANDIDATE",
+      `发现可能表达同一事实或存在冲突的记忆 ${candidate.memory.id} revision ${String(candidate.memory.revision)}（key=${candidate.memory.key}，相似度线索=${similarity.toFixed(3)}）。请先 memory_search 核对；应合并/更正时使用 memory_update，不会仅凭 embedding 自动覆盖。`);
   };
 
   const bindings = MEMORY_TOOL_NAMES.filter((name) => memoryToolAllowed(identity, name)).map<CloudToolBinding>((name) => ({
@@ -163,6 +183,8 @@ export function createCloudMemoryRuntime(options: {
               ...(expiresAt === null ? {} : { expiresAt }), replaces: { id: prior.id, revision: prior.revision } };
           }
           signal.throwIfAborted();
+          if (proposal !== undefined) await assertNoSemanticDuplicate(proposal, signal);
+          await ensureActive(identity, signal);
           const mutation = proposal === undefined ? await memory.forgetByAgent(identity, String(input.memoryId), Number(input.revision), source)
             : await memory.remember(identity, proposal, source);
           // Capture the committed outcome before checking cancellation. A cancelled caller must not undo a completed write.

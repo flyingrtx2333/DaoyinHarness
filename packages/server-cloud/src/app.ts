@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { AgentEngine, type ModelClient } from "@daoyin/harness-agent-core";
 import { createCloudMemoryRuntime } from "./memory-tools.js";
 import { AUTONOMOUS_MEMORY_INSTRUCTIONS, isMemoryToolName } from "./memory-agent-policy.js";
+import { createCloudEpisodicMemoryRuntime, EPISODIC_MEMORY_INSTRUCTIONS, isEpisodicMemoryToolName } from "./episodic-memory-tools.js";
 import { ToolRegistry, type ToolAuthorization, type ToolDefinition, type ToolRequest } from "@daoyin/harness-tools/registry";
 import { assertExecutionIdentity, ExecutionAccessError, sameExecutionScope, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import { CloudError, SESSION_ACTIONS, type BoundRunStores, type CloudRepository, type CloudRun, type SessionAction } from "./repository.js";
@@ -80,7 +81,6 @@ async function abortable<T>(operation: () => Promise<T>, signal: AbortSignal): P
   try { return await Promise.race([started, aborted]); }
   finally { if (listener !== undefined) signal.removeEventListener("abort", listener); }
 }
-
 const REVIEWED_STORY_MUTATIONS: Readonly<Record<string, string>> = Object.freeze({
   story_create_video: "story.generate",
   story_call: "story.write",
@@ -93,9 +93,11 @@ const REVIEWED_STORY_MUTATIONS: Readonly<Record<string, string>> = Object.freeze
   story_bind_segment_video_frame_reference: "story.write",
 });
 
+
 function checkedProfile(profile: CloudProfile): CloudProfile {
   // Catalog memory entries are descriptors only. Ignore their executors and install trusted, run-bound tools later.
-  const businessTools = profile.tools.filter((binding) => !isMemoryToolName(binding.definition.name) && !ORCHESTRATION_TOOLS.has(binding.definition.name));
+  const businessTools = profile.tools.filter((binding) => !isMemoryToolName(binding.definition.name) &&
+    !isEpisodicMemoryToolName(binding.definition.name) && !ORCHESTRATION_TOOLS.has(binding.definition.name));
   if (!/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.id) || !/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.version) ||
       !profile.instructions.trim() || profile.instructions.length > 10_000 || businessTools.length > 32 || profile.tools.length > 39) {
     throw new CloudError(503, "PROFILE_INVALID", "应用配置不可用。");
@@ -313,7 +315,9 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           }),
         } };
         const memoryRuntime = options.repository.memory === undefined || identity.space.kind === "public" ? undefined
-          : createCloudMemoryRuntime({ memory: options.repository.memory, identity, run, events: stores.events, ensureActive });
+          : createCloudMemoryRuntime({ memory: options.repository.memory, identity, run, events: stores.events, profileId: profile.id, ensureActive });
+        const episodicBindings = options.repository.episodicMemory === undefined || identity.space.kind === "public" ? []
+          : createCloudEpisodicMemoryRuntime({ episodicMemory: options.repository.episodicMemory, identity, run, ensureActive });
         let toolCalls = 0;
         const chargeTool = (): void => {
           if (toolCalls >= 24) throw new CloudError(409, "TOOL_TREE_LIMIT", "本轮及其子 Agent 已达到共享工具调用上限。");
@@ -321,7 +325,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         };
         const orchestrationAvailable = identity.space.kind !== "public" && options.repository.acceptChildRun !== undefined && options.repository.listChildRuns !== undefined;
         const projectBindings = createProjectTools(identity, run, ensureActive);
-        const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? []), ...projectBindings];
+        const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? []), ...episodicBindings, ...projectBindings];
         const bindings = new Map(runBindings.map((binding) => [binding.definition.name, binding]));
         const videoConfirmationTool = identity.space.kind === "public" ? undefined
           : videoInteractions.createTool(run, identity, stores.events, bindings, { suspendRunDeadline, resumeRunDeadline });
@@ -408,7 +412,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             }),
           };
         };
-        const childTools = new ToolRegistry(wrappedDefinitions.filter((definition) => definition.mutating === false && !isMemoryToolName(definition.name)), { authorize });
+        const childTools = new ToolRegistry(wrappedDefinitions.filter((definition) => definition.mutating === false &&
+          !isMemoryToolName(definition.name) && !isEpisodicMemoryToolName(definition.name)), { authorize });
         const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
           tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}`, signal: controller.signal,
           remainingModelCalls: () => maxModelCalls - modelCalls, chargeTool, createModel: createMeteredModel, ensureActive });
@@ -418,7 +423,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const engine = new AgentEngine({
           model, tools, events: stores.events, compactionStore: stores.compactions,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
-          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
+          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: maxModelCalls, maxToolCalls: 24,
         });
         await engine.runTurn({
