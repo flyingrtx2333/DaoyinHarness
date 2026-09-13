@@ -2,8 +2,9 @@
 .login-brand { position: absolute; z-index: 3; top: 110px; left: clamp(24px, 6.5vw, 100px); display: flex; align-items: center; gap: 12px; font-size: 20px; }
 .login-brand img { width: 36px; height: 36px; }
 .login-story { position: relative; display: flex; align-items: center; min-width: 0; overflow: visible; padding: 84px clamp(36px, 6.5vw, 100px) 72px; background: #f9fbff; }
-.login-story::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 128%; background: url("../../public/assets/login-hero-ribbon-v2.png") center / 100% 100% no-repeat; opacity: .70; pointer-events: none; }
-.login-story-video { position: absolute; z-index: 1; inset: 0 auto 0 0; width: 128%; height: 100%; object-fit: fill; opacity: .70; pointer-events: none; }
+.login-story::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 128%; background: url("../../public/assets/login-hero-ribbon-v2.png") center / 100% 100% no-repeat; opacity: .70; transition: opacity 360ms ease; pointer-events: none; }
+.login-story-video-ready::before { opacity: .06; }
+.login-story-video { position: absolute; z-index: 1; inset: 0 auto 0 0; width: 128%; height: 100%; object-fit: fill; opacity: .86; pointer-events: none; }
 .login-story-copy { position: relative; z-index: 2; width: min(620px, 100%); transform: translateY(-116px); }
 .login-story h1 { margin: 0; max-width: 560px; color: #13213c; font-size: 48px; font-weight: 680; line-height: 1.25; letter-spacing: -1.5px; }
 .login-story-copy > p { margin: 24px 0 0; color: #526178; font-size: 16px; line-height: 1.6; }

@@ -40,7 +40,8 @@ export function LoginGateway(): React.JSX.Element {
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [motionEnabled, setMotionEnabled] = useState(false);
+  const [motionEnabled, setMotionEnabled] = useState(true);
+  const [videoReady, setVideoReady] = useState(false);
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -52,8 +53,8 @@ export function LoginGateway(): React.JSX.Element {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
     const syncMotion = (): void => setMotionEnabled(!preference.matches);
     syncMotion();
-    preference.addEventListener("change", syncMotion);
-    return () => preference.removeEventListener("change", syncMotion);
+    preference.addEventListener?.("change", syncMotion);
+    return () => preference.removeEventListener?.("change", syncMotion);
   }, []);
 
   async function sendCode(): Promise<void> {
@@ -107,7 +108,7 @@ export function LoginGateway(): React.JSX.Element {
 
   return <main className="login-gateway">
     <header className="login-brand"><HarnessLogo aria-hidden="true" /><strong>道引 Harness</strong></header>
-    <section className="login-story" aria-labelledby="login-story-title">
+    <section className={`login-story${videoReady ? " login-story-video-ready" : ""}`} aria-labelledby="login-story-title">
       <video
         className="login-story-video"
         src={motionEnabled ? HERO_VIDEO : undefined}
@@ -117,6 +118,8 @@ export function LoginGateway(): React.JSX.Element {
         loop
         playsInline
         preload="metadata"
+        onPlaying={() => setVideoReady(true)}
+        onPause={() => setVideoReady(false)}
         aria-hidden="true"
         tabIndex={-1}
       />
