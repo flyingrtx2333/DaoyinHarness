@@ -10,6 +10,7 @@ const HERO_IMAGE = heroImage;
 const HERO_VIDEO = heroVideo;
 
 type JsonRecord = Record<string, unknown>;
+type LoginMethod = "sms" | "password";
 
 function record(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -32,8 +33,11 @@ async function json(response: Response): Promise<unknown> {
 }
 
 export function LoginGateway(): React.JSX.Element {
+  const [method, setMethod] = useState<LoginMethod>("sms");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
   const [countdown, setCountdown] = useState(0);
   const [sending, setSending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -86,28 +90,38 @@ export function LoginGateway(): React.JSX.Element {
     } finally { setSending(false); }
   }
 
+  async function establishAccountSession(endpoint: string, body: JsonRecord, failureMessage: string): Promise<void> {
+    const loginResponse = await fetch(endpoint, {
+      method: "POST", credentials: "include", cache: "no-store", redirect: "error",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    const loginResult = await json(loginResponse);
+    if (!loginResponse.ok) throw new Error(publicAuthError(loginResult, failureMessage));
+    const accessToken = record(loginResult) && typeof loginResult.access_token === "string" && loginResult.access_token.length <= 8192
+      ? loginResult.access_token : "";
+    if (!accessToken) throw new Error("登录结果无效，请重新登录。");
+    const sessionResponse = await fetch(`${API}/auth/account-session`, {
+      method: "POST", credentials: "include", cache: "no-store", redirect: "error",
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+    });
+    if (!sessionResponse.ok) throw new Error(publicAuthError(await json(sessionResponse), "账号连接未完成，请重新登录。"));
+  }
+
   async function login(): Promise<void> {
     if (submitting) return;
-    if (!validMainlandPhone(phone)) { setError("请输入有效的中国大陆手机号"); return; }
-    if (!/^\d{6}$/u.test(code)) { setError("请输入 6 位短信验证码"); return; }
+    if (method === "sms" && !validMainlandPhone(phone)) { setError("请输入有效的中国大陆手机号"); return; }
+    if (method === "sms" && !/^\d{6}$/u.test(code)) { setError("请输入 6 位短信验证码"); return; }
+    if (method === "password" && !identifier.trim()) { setError("请输入账号或手机号"); return; }
+    if (method === "password" && !password) { setError("请输入密码"); return; }
     if (!agreed) { setError("请先确认使用道引统一账号登录"); return; }
     setSubmitting(true); setError(""); setNotice("");
     try {
-      const loginResponse = await fetch(`${API}/auth/sms-login`, {
-        method: "POST", credentials: "include", cache: "no-store", redirect: "error",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ phone: phone.trim(), sms_code: code }),
-      });
-      const loginResult = await json(loginResponse);
-      if (!loginResponse.ok) throw new Error(publicAuthError(loginResult, "登录失败，请检查验证码后重试。"));
-      const accessToken = record(loginResult) && typeof loginResult.access_token === "string" && loginResult.access_token.length <= 8192
-        ? loginResult.access_token : "";
-      if (!accessToken) throw new Error("登录结果无效，请重新获取验证码。");
-      const sessionResponse = await fetch(`${API}/auth/account-session`, {
-        method: "POST", credentials: "include", cache: "no-store", redirect: "error",
-        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-      });
-      if (!sessionResponse.ok) throw new Error(publicAuthError(await json(sessionResponse), "账号连接未完成，请重新登录。"));
+      if (method === "sms") {
+        await establishAccountSession(`${API}/auth/sms-login`, { phone: phone.trim(), sms_code: code }, "登录失败，请检查验证码后重试。");
+      } else {
+        await establishAccountSession(`${API}/auth/login`, { user_name: identifier.trim(), password }, "登录失败，请检查账号和密码。");
+      }
       setNotice("登录成功，正在进入 Harness…");
       window.location.replace("/");
     } catch (cause) {
@@ -146,12 +160,22 @@ export function LoginGateway(): React.JSX.Element {
     <section className="login-panel" aria-labelledby="login-title">
       <div className="login-card">
         <h2 id="login-title">登录 Harness</h2>
+        <div className="login-method" aria-label="选择登录方式">
+          <button type="button" aria-pressed={method === "sms"} aria-controls="sms-login-fields" onClick={() => { setMethod("sms"); setError(""); setNotice(""); }}>手机号一键登录</button>
+          <button type="button" aria-pressed={method === "password"} aria-controls="password-login-fields" onClick={() => { setMethod("password"); setError(""); setNotice(""); }}>账号密码登录</button>
+        </div>
         {error && <div className="login-message login-error" role="alert">{error}</div>}
         {notice && <div className="login-message login-notice" role="status">{notice}</div>}
         <form onSubmit={event => { event.preventDefault(); void login(); }}>
-          <label className="login-field"><span>手机号</span><span className="login-phone"><b>+86</b><input value={phone} onChange={event => setPhone(event.target.value.replace(/\D/gu, "").slice(0, 11))} type="tel" inputMode="numeric" autoComplete="tel" placeholder="请输入手机号" disabled={submitting} /></span></label>
-          <label className="login-field"><span>验证码</span><span className="login-code"><input value={code} onChange={event => setCode(event.target.value.replace(/\D/gu, "").slice(0, 6))} type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="请输入短信验证码" disabled={submitting} /><button type="button" onClick={() => { void sendCode(); }} disabled={sending || submitting || countdown > 0}>{sending ? "发送中…" : countdown > 0 ? `${countdown} 秒后重试` : "获取验证码"}</button></span></label>
-          <button className="login-submit" type="submit" disabled={submitting}>{submitting ? "正在登录…" : "登录并进入 Harness"}</button>
+          <div className="login-fields" id="sms-login-fields" hidden={method !== "sms"}>
+            <label className="login-field"><span>手机号</span><span className="login-phone"><b>+86</b><input value={phone} onChange={event => setPhone(event.target.value.replace(/\D/gu, "").slice(0, 11))} type="tel" inputMode="numeric" autoComplete="tel" placeholder="请输入手机号" disabled={submitting} /></span></label>
+            <label className="login-field"><span>验证码</span><span className="login-code"><input value={code} onChange={event => setCode(event.target.value.replace(/\D/gu, "").slice(0, 6))} type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="请输入短信验证码" disabled={submitting} /><button type="button" onClick={() => { void sendCode(); }} disabled={sending || submitting || countdown > 0}>{sending ? "发送中…" : countdown > 0 ? `${countdown} 秒后重试` : "获取验证码"}</button></span></label>
+          </div>
+          <div className="login-fields" id="password-login-fields" hidden={method !== "password"}>
+            <label className="login-field"><span>账号或手机号</span><span className="login-input"><input value={identifier} onChange={event => setIdentifier(event.target.value.slice(0, 64))} autoComplete="username" placeholder="请输入账号或手机号" disabled={submitting} /></span></label>
+            <label className="login-field"><span>密码</span><span className="login-input"><input type="password" value={password} onChange={event => setPassword(event.target.value.slice(0, 128))} autoComplete="current-password" placeholder="请输入密码" disabled={submitting} /></span></label>
+          </div>
+          <button className="login-submit" type="submit" disabled={submitting}>{submitting ? "正在登录…" : method === "sms" ? "手机号一键登录" : "账号密码登录"}</button>
           <label className="login-agreement"><input type="checkbox" checked={agreed} onChange={event => setAgreed(event.target.checked)} disabled={submitting} /><span>我已了解并同意使用道引统一账号完成登录</span></label>
         </form>
         <p className="login-register">还没有道引账号？<a href={REGISTER_URL}>注册账号</a></p>

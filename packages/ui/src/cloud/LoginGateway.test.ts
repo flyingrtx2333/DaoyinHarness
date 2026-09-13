@@ -17,14 +17,17 @@ describe("Harness unified-account login gateway", () => {
     expect(publicAuthError({ detail: [] }, "请求未完成")).toBe("请求未完成");
   });
 
-  it("renders real SMS controls without a password or a second account system", () => {
+  it("renders SMS and unified-account password login without a second account system", () => {
     const html = renderToStaticMarkup(createElement(LoginGateway));
     expect(html).toContain("登录 Harness");
     expect(html).toContain("获取验证码");
-    expect(html).toContain("登录并进入 Harness");
+    expect(html).toContain("手机号一键登录");
+    expect(html).toContain("账号密码登录");
     expect(html).toContain("道引统一账号");
     expect(html).toContain('autoComplete="one-time-code"');
-    expect(html).not.toContain('type="password"');
+    expect(html).toContain('autoComplete="username"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain('autoComplete="current-password"');
     expect(html).not.toContain("Harness 账号注册");
     expect(html).not.toContain("内容创作");
     expect(html).not.toContain("使用主平台登录页");
