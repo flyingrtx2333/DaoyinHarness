@@ -368,11 +368,17 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                   ["AUTHORIZATION_REVOKED", "AUTHENTICATION_REQUIRED", "APP_ACCESS_DENIED", "RUN_IDENTITY_MISMATCH"].includes(error.code) ||
                   (error.code === "PLATFORM_BRIDGE_REJECTED" && [401, 403].includes(error.statusCode))
                 )) {
-                  throw Object.assign(new Error("登录或执行授权已失效，本轮未执行任何工具；请重新连接工作台。"), {
+                  const message = toolCalls === 0
+                    ? "登录或执行授权已失效，本轮尚未执行任何业务工具；请重新连接工作台。"
+                    : `登录或执行授权已失效；本轮此前已完成 ${String(toolCalls)} 次业务工具调用，请保留已显示结果并重新连接工作台。`;
+                  throw Object.assign(new Error(message), {
                     code: "MODEL_AUTHORIZATION_FAILED",
                   });
                 }
-                throw Object.assign(new Error("模型服务本次未完成响应，本轮尚未执行任何工具；请重试。"), {
+                const message = toolCalls === 0
+                  ? "模型服务本次未完成响应，本轮尚未执行任何业务工具；请重试。"
+                  : `模型服务本次未完成响应；本轮此前已完成 ${String(toolCalls)} 次业务工具调用，请保留已显示结果后重试。`;
+                throw Object.assign(new Error(message), {
                   code: "MODEL_PROVIDER_REQUEST_FAILED",
                 });
               }
