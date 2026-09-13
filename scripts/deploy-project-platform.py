@@ -7,13 +7,13 @@ stage.mkdir(parents=True,exist_ok=False)
 def run(args,**kw):return subprocess.run(args,check=True,text=True,capture_output=True,**kw)
 before=json.loads(run(["docker","inspect","daoyintech-backend"]).stdout)[0]
 image=before["Image"]
-files=["services/agent_app_access.py","services/saishi_agent_bridge.py","routes/agent_apps.py"]
+files=["services/agent_app_access.py","services/saishi_agent_bridge.py","routes/agent_apps.py","services/harness_agent_bridge.py"]
 for name in files:
  p=stage/name;p.parent.mkdir(parents=True,exist_ok=True)
  p.write_text(run(["docker","exec","daoyintech-backend","cat","/app/"+name]).stdout)
 run(["python3",str(root/"scripts/patch-project-platform.py"),str(stage)])
-for name in ["services/harness_projects.py","services/harness_project_tools.json"]:
- (stage/name).write_bytes((source/name).read_bytes())
+for name,origin in [("services/harness_projects.py",root/"deployment/projects/platform/harness_projects.py"),("services/harness_project_tools.json",root/"deployment/projects/tool-schemas.json")]:
+ (stage/name).write_bytes(origin.read_bytes())
 config={"allowedUsers":["1","3"]}
 (stage/"services/harness_project_admission.json").write_text(json.dumps(config))
 for name in files+["services/harness_projects.py"]:

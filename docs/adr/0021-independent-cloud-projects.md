@@ -25,3 +25,7 @@ The pilot account adapter validates real account sessions and active tenant memb
 Build and development share one slot. A build may suspend its own preview but never its published application; another project's active development queues it. Immutable completed artifacts can be reused without allocating a build sandbox. Completion markers are root-owned outside writable artifacts. Published containers restart independently; interrupted operations are recorded and unfinished candidates are stopped on service recovery.
 
 The workbench CSP explicitly permits preview iframe origins. User code receives neither parent-domain cookies nor platform authorization headers. The gateway controls response security headers and cookie forwarding; the app origin itself is never treated as a trusted platform origin.
+
+Writable build outputs use a 32 MiB tmpfs and runtime socket directories use a 1 MiB tmpfs. Code and verified artifacts are read-only in every user container; /tmp is separately bounded. Root copies verified completed outputs into immutable storage only after the build container stops. These mounts are restored for existing instances after startup.
+
+Gateway and health connections pin the Unix socket inode using Linux O_PATH plus O_NOFOLLOW, reject symlinks and non-sockets, and connect through the pinned descriptor. HTTP connection pooling is disabled on descriptor paths because descriptor numbers are reusable. Real acceptance alternates preview and production requests and verifies that development cannot change the online page.

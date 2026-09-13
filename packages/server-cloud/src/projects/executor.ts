@@ -1,10 +1,10 @@
 import { registerDomain } from "./domains.js";
 import http from "node:http";
-import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile, lstat, readdir, chmod, chown, unlink, symlink, rename, rm } from "node:fs/promises";
+import { spawn, execFile } from "node:child_process";
+import { mkdir, readFile, writeFile, lstat, readdir, chmod, chown, unlink, symlink, rename, rm, cp, statfs } from "node:fs/promises";
 import path from "node:path";
 import { ProjectError, identifier, checkedFiles, type ExecutorRequest } from "./contracts.js";
-import { unixJson } from "./wire.js";
+import { unixJson, pinAppSocket } from "./wire.js";
 const ROOT="/var/lib/daoyin-projects";
 const IMAGE=process.env.HARNESS_PROJECT_IMAGE??"daoyin-harness-app:20260913";
 const RUNTIME="harness-runsc";
@@ -13,6 +13,15 @@ const gid=Number(process.env.HARNESS_PROJECT_GID);
 if(!Number.isSafeInteger(gid)||gid<1||process.getuid?.()!==0)throw new Error("Executor requires root and a dedicated project service group.");
 let ready=false;
 let buildBusy=false;
+async function boundedMount(target:string,mib:number,remove=false):Promise<void>{
+ if(!new RegExp("^"+ROOT+"/(?:builds/prj_[a-f0-9]{24}/ver_[a-f0-9]{24}|instances/hp-[a-f0-9]{24}-(?:development|production)-[a-f0-9]{8})$","u").test(target))throw new Error("Invalid private mount");
+ await new Promise<void>((resolve,reject)=>{
+  execFile(remove?"/usr/bin/umount":"/usr/bin/mount",remove?[target]:["-t","tmpfs","-o","size="+mib+"m,uid=1000,gid=1000,mode=0711,nosuid,nodev,noexec","harness-project-private",target],{timeout:15000,maxBuffer:65536},error=>error?reject(error):resolve());
+ });
+}
+async function mounted(target:string):Promise<boolean>{
+ return (await readFile("/proc/self/mountinfo","utf8")).split("\n").some(line=>line.split(" ")[4]===target);
+}
 async function command(args:string[],timeout=600000):Promise<string>{
   return new Promise((resolve,reject)=>{
     const proc=spawn("/usr/bin/docker",args,{cwd:ROOT,env:{PATH:"/usr/bin:/bin",HOME:"/nonexistent"},stdio:["ignore","pipe","pipe"]});
@@ -38,9 +47,10 @@ const baseArgs=(name:string,memory:string,cpu:string):string[]=>[
   "--env","NODE_ENV=production"
 ];
 async function safeTree(root:string,writeMode=false):Promise<number>{
-  let total=0;
+  let total=0,entries=0;
   const walk=async(dir:string):Promise<void>=>{
     for(const name of await readdir(dir)){
+      if(++entries>10000)throw new ProjectError("PROJECT_ARTIFACT_QUOTA","构建产物文件数量超过限制。",413);
       const p=path.join(dir,name),s=await lstat(p);
       if(s.isSymbolicLink()||(!s.isFile()&&!s.isDirectory())||(s.isFile()&&s.nlink>1))throw new ProjectError("PROJECT_ARTIFACT_INVALID","构建产物包含不允许的链接或设备。",422);
       if(s.isDirectory())await walk(p);else{total+=s.size;if(total>20971520)throw new ProjectError("PROJECT_ARTIFACT_QUOTA","构建产物超过 20 MB。",413);}
@@ -67,6 +77,7 @@ async function build(input:ExecutorRequest):Promise<string>{
   const id=identifier(input.projectId,"prj"),version=identifier(input.versionId,"ver");
   const name="hp-build-"+id.slice(4)+"-"+version.slice(4,12);
   const output=path.join(ROOT,"artifacts",id,version);
+  const scratch=path.join(ROOT,"builds",id,version);
   buildBusy=true;
   try{
     try{await lstat(output+".complete");return output;}catch{/* Build once. */}
@@ -76,20 +87,23 @@ async function build(input:ExecutorRequest):Promise<string>{
       else throw new ProjectError("PROJECT_CAPACITY_WAIT","开发或构建环境正在使用；空闲后继续执行。",429);
     }
     await headroom(1536);
+    const disk=await statfs(ROOT);if(disk.bavail*disk.bsize<268435456)throw new ProjectError("PROJECT_CAPACITY_WAIT","服务器存储余量不足，正在等待资源。",429);
     const root=await prepare(input);
     // A failed build directory is never reused as a successful artifact.
     try{const old=await lstat(output);if(!old.isDirectory()||old.isSymbolicLink())throw new Error("Unsafe artifact directory");await rm(output,{recursive:true});}catch(e){if(!(e instanceof Error)||!("code" in e)||e.code!=="ENOENT")throw e;}
-    await mkdir(output,{recursive:true,mode:0o755});await chown(output,1000,1000);
+    await mkdir(scratch,{recursive:true,mode:0o755});
+    if(await mounted(scratch))await boundedMount(scratch,32,true);
+    await boundedMount(scratch,32);
     const args=[...baseArgs(name,"1536m","1"),"--mount","type=bind,src="+root+",dst=/app,readonly",
-      "--mount","type=bind,src="+output+",dst=/output",IMAGE,"node","/opt/harness/build.mjs"];
+      "--mount","type=bind,src="+scratch+",dst=/output",IMAGE,"node","/opt/harness/build.mjs"];
     await command(args);
     await command(["rm",name],30000);
-    await safeTree(output,true);await chown(output,0,0);await chmod(output,0o755);
+    await safeTree(scratch,true);await cp(scratch,output,{recursive:true,force:false,errorOnExist:true});await chown(output,0,0);await chmod(output,0o755);
     await writeFile(output+".complete",version,{mode:0o444});
     return output;
   }finally{
     await command(["rm","-f",name],30000).catch(()=>undefined);
-    buildBusy=false;
+    try{if(await mounted(scratch))await boundedMount(scratch,32,true);}finally{buildBusy=false;}
   }
 }
 function instance(input:ExecutorRequest):{name:string;root:string;socket:string}{
@@ -100,11 +114,12 @@ function instance(input:ExecutorRequest):{name:string;root:string;socket:string}
   return {name,root,socket:path.join(root,"app.sock")};
 }
 async function healthy(socket:string):Promise<void>{
-  await unixJson(socket,"/health",{},undefined,3000);
+  const pinned=await pinAppSocket(socket);
+  try{await unixJson(pinned.path,"/health",{},undefined,3000);}finally{await pinned.close();}
 }
 async function start(input:ExecutorRequest):Promise<Record<string,unknown>>{
   const production=input.mode==="production",target=instance(input);
-  try{await healthy(target.socket);return{...target,reused:true};}catch{/* Start or recover. */}
+  try{if(!await mounted(target.root))throw new Error("Private mount required");await healthy(target.socket);return{...target,reused:true};}catch{/* Start or recover. */}
   if(production){
     const all=(await command(["ps","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n");
     const projects=new Set(all.filter(n=>n.includes("-production-")).map(n=>n.split("-production-")[0]));
@@ -114,13 +129,14 @@ async function start(input:ExecutorRequest):Promise<Record<string,unknown>>{
     const all=(await command(["ps","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n");
     const others=all.filter(n=>n.includes("-development-"));
     for(const n of others){
-      if(n.startsWith("hp-"+input.projectId.slice(4)+"-"))await command(["rm","-f",n],30000);
+      if(n.startsWith("hp-"+input.projectId.slice(4)+"-")){await command(["rm","-f",n],30000);const dir=path.join(ROOT,"instances",n);if(await mounted(dir))await boundedMount(dir,1,true);}
       else throw new ProjectError("PROJECT_CAPACITY_WAIT","另一个项目正在预览；空闲后将自动释放环境。",429);
     }
   }
   const artifact=await build(input);
   await headroom(production?512:1536);
-  await mkdir(target.root,{recursive:true,mode:0o711});await chown(target.root,1000,1000);
+  await mkdir(target.root,{recursive:true,mode:0o711});
+  if(!await mounted(target.root))await boundedMount(target.root,1);
   await unlink(target.socket).catch(()=>undefined);
   await command(["rm","-f",target.name],30000).catch(()=>undefined);
   const source=path.join(ROOT,"versions",input.projectId,input.versionId!);
@@ -153,7 +169,7 @@ async function dispatch(input:ExecutorRequest):Promise<unknown>{
   if(input.action==="stop"){
     const prefix="hp-"+input.projectId.slice(4)+"-"+(input.mode==="production"?"production":"development")+"-";
     const names=(await command(["ps","-a","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n");
-    for(const name of names)if((name.startsWith("hp-build-"+input.projectId.slice(4)+"-")&&(!input.versionId||name.endsWith("-"+input.versionId.slice(4,12))))||name.startsWith(prefix)&&(!input.versionId||name===instance(input).name))await command(["rm","-f",name],30000);
+    for(const name of names)if((name.startsWith("hp-build-"+input.projectId.slice(4)+"-")&&(!input.versionId||name.endsWith("-"+input.versionId.slice(4,12))))||name.startsWith(prefix)&&(!input.versionId||name===instance(input).name)){await command(["rm","-f",name],30000);const dir=path.join(ROOT,"instances",name);if(await mounted(dir))await boundedMount(dir,1,true);}
     return{stopped:true};
   }
   throw new ProjectError("PROJECT_EXECUTOR_OPERATION_DENIED","不允许的执行操作。",403);
@@ -163,8 +179,20 @@ await mkdir(path.dirname(SOCKET),{recursive:true,mode:0o750});
 await chown(path.dirname(SOCKET),0,gid);
 await unlink(SOCKET).catch(()=>undefined);
 try{
+  const orphaned=(await command(["ps","-a","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n").filter(name=>/^hp-build-[a-f0-9]{24}-[a-f0-9]{8}$/u.test(name));
+  for(const name of orphaned)await command(["rm","-f",name],30000);
+  for(const line of (await readFile("/proc/self/mountinfo","utf8")).split("\n")){
+   const mount=line.split(" ")[4]??"";
+   if(new RegExp("^"+ROOT+"/builds/prj_[a-f0-9]{24}/ver_[a-f0-9]{24}$","u").test(mount))await boundedMount(mount,32,true);
+  }
   const info=JSON.parse(await command(["info","--format","{{json .Runtimes}}"],15000)) as Record<string,unknown>;
   if(!info[RUNTIME])throw new Error("Missing isolated runtime");
+  const persisted=(await command(["ps","-a","--filter","label=daoyin.harness.project=1","--format","{{.Names}}"])).trim().split("\n");
+  for(const name of persisted.filter(name=>/^hp-[a-f0-9]{24}-(?:development|production)-[a-f0-9]{8}$/u.test(name))){
+   const dir=path.join(ROOT,"instances",name);
+   if(!await mounted(dir)){await mkdir(dir,{recursive:true,mode:0o711});await boundedMount(dir,1);await command(["restart",name],30000);}
+  }
+
   await command([...baseArgs("hp-probe","128m","0.2"),"--rm",IMAGE,"node","-e","process.stdout.write('isolated-node-ok')"],30000);
   ready=true;
 }catch{process.stderr.write("Project isolation probe unavailable; execution remains disabled.\n");}

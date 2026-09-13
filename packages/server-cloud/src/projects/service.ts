@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { ProjectRepository, digest, newId } from "./repository.js";
 import { ProjectBrokers } from "./broker.js";
 import { ProjectError, identifier, type ProjectOwner, type ExecutorRequest } from "./contracts.js";
-import { unixJson } from "./wire.js";
+import { unixJson, pinAppSocket } from "./wire.js";
 const socket="/run/daoyin-projects/control.sock";
 const executor="/run/daoyin-project-executor/control.sock";
 const database=process.env.HARNESS_PROJECTS_DATABASE_URL;
@@ -183,7 +183,9 @@ const gateway=http.createServer((req,res)=>{void(async()=>{
     // No parent-domain/platform cookies, authorization, forwarding headers or preview credentials enter user code.
     const userCookie=cookie(req.headers.cookie,"__Host-hp-user");if(userCookie)headers.cookie="__Host-hp-user="+userCookie;
     for(const h of ["content-type","content-length","accept","origin","if-none-match"])if(req.headers[h]!==undefined)headers[h]=req.headers[h];
-    const upstream=http.request({socketPath,path:req.url,method:req.method,headers},remote=>{
+    // File descriptor numbers can be reused; never pool HTTP connections by /proc/self/fd/N.
+    const pinned=await pinAppSocket(socketPath);
+    const upstream=http.request({agent:false,socketPath:pinned.path,path:req.url,method:req.method,headers},remote=>{
       const safe:http.OutgoingHttpHeaders={};
       for(const h of ["content-type","content-length","cache-control","etag","content-disposition","location"])if(remote.headers[h]!==undefined)safe[h]=remote.headers[h];
       const cookies=remote.headers["set-cookie"]?.filter(v=>v.startsWith("__Host-hp-user=")&&!/;\s*domain=/iu.test(v)&&/;\s*secure(?:;|$)/iu.test(v)&&/;\s*path=\/(?:;|$)/iu.test(v));
@@ -191,6 +193,7 @@ const gateway=http.createServer((req,res)=>{void(async()=>{
       if(preview)safe["cache-control"]="no-store";
       res.writeHead(remote.statusCode??502,safe);remote.pipe(res);remote.on("error",()=>res.destroy());
     });
+    upstream.once("close",()=>{void pinned.close();});
     upstream.setTimeout(30000,()=>upstream.destroy());upstream.on("error",()=>gatewayError(res,new ProjectError("PROJECT_SITE_SLEEPING",preview?"预览已休眠，请从工作台重新启动。":"网站正在恢复，请稍后重试。",503)));
     req.on("aborted",()=>upstream.destroy());req.pipe(upstream);
   }catch(e){gatewayError(res,e);}

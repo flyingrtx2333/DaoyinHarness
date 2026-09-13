@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 root=Path(sys.argv[1])
+(root/"services/harness_projects.py").write_bytes((Path(__file__).resolve().parent.parent/"deployment/projects/platform/harness_projects.py").read_bytes())
 access=root/"services/agent_app_access.py"
 s=access.read_text()
 marker="# Independent Harness cloud projects"
@@ -50,3 +51,20 @@ if "project_only = require_account_access" not in s:
 s=access.read_text()
 s=s.replace('f"daoyin-workbench:{row[\'tenant_id\']}:independent-projects-v1"', 'f"daoyin-projects:{row[\'tenant_id\']}:{digest(\'independent-project-account-v1\')[:24]}"')
 access.write_text(s)
+
+# Independent project-only accounts do not load unrelated business catalogs for model calls.
+s=bridge.read_text()
+needle='    catalog = (profile_loader or profile)(grant)'
+if needle in s:
+    s=s.replace(needle,'    catalog = {"id":"daoyin-workbench","version":"1","tools":[],"instructions":"Use the authenticated independent Harness project tools; never request host access or platform secrets."} if grant.get("project_only") else (profile_loader or profile)(grant)',1)
+bridge.write_text(s)
+
+# The browser bootstrap must also avoid unrelated business catalogs.
+account_bridge=root/"services/harness_agent_bridge.py"
+if account_bridge.exists():
+    s=account_bridge.read_text()
+    needle="def profile(grant):\n"
+    if 'if grant.get("project_only"):' not in s:
+        assert needle in s
+        s=s.replace(needle,needle+'    if grant.get("project_only"):\n        return {"id":PROFILE,"version":"1","instructions":"Independent account-scoped cloud application development.","tools":[],"credits":None}\n',1)
+        account_bridge.write_text(s)

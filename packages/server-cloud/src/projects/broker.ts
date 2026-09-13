@@ -20,7 +20,7 @@ export async function publicRequest(raw:string,method="GET",body?:string):Promis
   if(!addresses.length||addresses.some(a=>isIP(a.address)!==4||blocked.check(a.address,"ipv4")))throw new ProjectError("PROJECT_EGRESS_DENIED","禁止访问内网或云元数据地址。",403);
   const address=addresses[0]!.address;
   return new Promise((resolve,reject)=>{
-    const req=https.request(url,{method,headers:{"Content-Type":"application/json","User-Agent":"DaoyinHarnessProject/1"},
+    const req=https.request(url,{method,family:4,headers:{"Content-Type":"application/json","User-Agent":"DaoyinHarnessProject/1"},
       lookup:(_host,_options,callback)=>callback(null,address,4)},res=>{
       let value="";res.on("data",(b:Buffer)=>{value+=b.toString();if(Buffer.byteLength(value)>1048576)res.destroy(new Error("Response limit"));});
       res.on("error",reject);res.on("end",()=>resolve({status:res.statusCode??502,body:value,contentType:String(res.headers["content-type"]??"text/plain")}));

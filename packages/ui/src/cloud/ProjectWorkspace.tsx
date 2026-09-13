@@ -49,7 +49,7 @@ export function ProjectWorkspace({client,ready,onDevelop}:{client:WorkbenchClien
   await client.project({action:kind,projectId:project.id,requestId:crypto.randomUUID()});await inspect(project.id);
  });
  return <section className="project-workspace" aria-label="云端项目">
-  <header className="project-heading"><h1>云端项目</h1><button disabled={!enabled||busy} onClick={()=>void perform(refresh)}>刷新</button></header>
+  <header className="project-heading"><h1>云端项目</h1><button disabled={!enabled||busy} onClick={()=>void perform(async()=>{await refresh();if(selected)await inspect(selected);})}>刷新</button></header>
   {error&&<p className="project-error" role="alert">{error}</p>}
   {!ready?<p>请先登录道引账号。</p>:!enabled?<p>云端开发正在限额试运行。</p>:<>
    {!sandboxReady&&<p role="status">隔离环境尚未就绪，项目代码仍可保存。</p>}
