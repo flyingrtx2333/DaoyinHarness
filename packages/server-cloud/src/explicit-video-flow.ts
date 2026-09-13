@@ -56,11 +56,17 @@ export function createExplicitVideoFlow(run: CloudRun): ModelClient | undefined 
     }
     if (stage === 0) { stage = 1; return call("video_options", "story_video_options", {}); }
     if (stage === 1) {
+      const options = toolResult(request, "story_video_options");
+      if (options?.ok !== true) return { kind: "assistant", content: text(options?.message) ?? "当前未能读取可用视频模型，本轮未提交生成任务。" };
       input = defaults(request, run.userMessage, requestKey); stage = 2;
       return call("video_estimate", "story_estimate_video", { modelName: input.modelName!, resolution: input.resolution!,
         durationSeconds: input.durationSeconds!, hasVideoInput: false });
     }
-    if (stage === 2) { stage = 3; return call("video_confirmation", "request_video_confirmation", { operation: "story_create_video", input: input! }); }
+    if (stage === 2) {
+      const estimate = toolResult(request, "story_estimate_video");
+      if (estimate?.ok !== true) return { kind: "assistant", content: text(estimate?.message) ?? "当前未能完成费用估算，本轮未提交生成任务。" };
+      stage = 3; return call("video_confirmation", "request_video_confirmation", { operation: "story_create_video", input: input! });
+    }
     if (stage === 3) {
       const confirmation = toolResult(request, "request_video_confirmation");
       const confirmed = record(confirmation?.result) && confirmation.result.operation === "story_create_video" && record(confirmation.result.input)
