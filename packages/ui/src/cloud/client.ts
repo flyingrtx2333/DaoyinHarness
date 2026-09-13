@@ -253,4 +253,10 @@ export class WorkbenchClient {
     return result.run;
   }
   public async cancel(runId: string): Promise<void> { await this.#request(`/runs/${encodeURIComponent(runId)}/cancel`, {}); }
+  public async respondInteraction(runId: string, interactionId: string, resolution: "confirmed" | "cancelled",
+    input?: Record<string, unknown>): Promise<void> {
+    if (!identifier(runId) || !identifier(interactionId)) throw new WorkbenchError("确认请求标识无效。");
+    await this.#request(`/runs/${encodeURIComponent(runId)}/interactions/${encodeURIComponent(interactionId)}/respond`,
+      { resolution, ...(resolution === "confirmed" && input !== undefined ? { input } : {}) });
+  }
 }

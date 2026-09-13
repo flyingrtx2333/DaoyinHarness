@@ -5,6 +5,13 @@ export interface PublicSource { id: string; title: string; location: string; con
 export interface EventImage { id: number; eventId: number; kind: "material" | "highlight" | "video_preview"; title: string }
 export interface ToolView { id: string; status: "running" | "completed" | "failed"; text: string; startedAt: string; finishedAt?: string }
 export interface TurnView { run: CloudRun; text: string; tools: ToolView[]; sources: PublicSource[]; images: EventImage[]; assistantOccurredAt: string }
+export interface PendingVideoInteraction {
+  interactionId: string;
+  runId: string;
+  operation: "story_create_video" | "story_create_production";
+  input: Record<string, unknown>;
+  estimate?: unknown;
+}
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const toolLabels: Record<string, string> = {
   search_company_knowledge: "检索公开资料", saishi_list_events: "查询赛事列表", saishi_get_event: "查询赛事详情",
@@ -13,7 +20,18 @@ const toolLabels: Record<string, string> = {
   saishi_list_images: "查找赛事图片",
   story_video_options: "查询视频模型", story_recent_videos: "查询历史视频", story_get_video: "查询视频状态",
   story_estimate_video: "估算视频费用", story_create_video: "提交视频生成",
+  request_video_confirmation: "等待视频确认",
 };
+
+export function pendingVideoInteraction(events: AgentEvent[], sessionId: string): PendingVideoInteraction | undefined {
+  const resolved = new Set(events.filter((event) => event.sessionId === sessionId && event.type === "interaction.resolved")
+    .map((event) => event.type === "interaction.resolved" ? event.payload.interactionId : ""));
+  const requested = [...events].reverse().find((event) => event.sessionId === sessionId && event.type === "interaction.requested" &&
+    event.payload.kind === "video_confirmation" && !resolved.has(event.payload.interactionId));
+  if (requested?.type !== "interaction.requested" || !record(requested.payload.input)) return undefined;
+  return { interactionId: requested.payload.interactionId, runId: requested.turnId, operation: requested.payload.operation,
+    input: structuredClone(requested.payload.input), ...(requested.payload.estimate === undefined ? {} : { estimate: requested.payload.estimate }) };
+}
 
 export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[] {
   const turns = [...runs].reverse().map((run) => ({ run, text: "", tools: [] as ToolView[], sources: [] as PublicSource[], images: [] as EventImage[], assistantOccurredAt: run.createdAt }));

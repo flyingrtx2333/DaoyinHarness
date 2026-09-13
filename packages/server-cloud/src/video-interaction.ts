@@ -1,0 +1,152 @@
+import type { ExecutionIdentity, SessionEventStore } from "@daoyin/harness-contracts";
+import type { AgentEvent, JsonValue } from "@daoyin/harness-protocol";
+import type { ToolDefinition, ToolExecutionContext } from "@daoyin/harness-tools/registry";
+import { sameExecutionScope } from "@daoyin/harness-contracts";
+import type { CloudToolBinding } from "./app.js";
+import { CloudError, type CloudRun } from "./repository.js";
+
+export const VIDEO_CONFIRMATION_TOOL = "request_video_confirmation";
+export const VIDEO_GENERATION_OPERATIONS = new Set(["story_create_video", "story_create_production"]);
+export const VIDEO_CONFIRMATION_INSTRUCTIONS = `付费创建视频前必须先调用 request_video_confirmation，并传入将要执行的业务工具名和完整、精确的业务参数。
+仅在用户确实要求创建视频且必要参数已经齐全时调用；咨询、排错、查询进度、取消或仅修改文案时不得调用。
+如有 story_estimate_video，应先调用它；确认窗口会直接展示其最近一次可信结果。
+确认工具返回后，必须使用返回的 operation 和 input 原样调用对应生成工具，不得自行改动参数或再次提交。`;
+
+type VideoOperation = "story_create_video" | "story_create_production";
+interface Resolution { resolution: "confirmed" | "cancelled"; input?: Record<string, unknown> }
+interface Pending {
+  run: CloudRun;
+  identity: ExecutionIdentity;
+  toolCallId: string;
+  operation: VideoOperation;
+  requestedInput: Record<string, unknown>;
+  binding: CloudToolBinding;
+  events: SessionEventStore;
+  signal: AbortSignal;
+  accountId: string;
+  scopeId: string;
+  settle(value: Resolution): void;
+  settled: boolean;
+  resolving: boolean;
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+function inputRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function latestEstimate(events: AgentEvent[], runId: string): JsonValue | undefined {
+  const event = events.findLast((item) => item.turnId === runId && item.type === "tool.completed" && item.payload.toolName === "story_estimate_video");
+  return event?.type === "tool.completed" ? event.payload.evidence.result : undefined;
+}
+
+export class VideoInteractionCoordinator {
+  readonly #pending = new Map<string, Pending>();
+  readonly #approvals = new Set<string>();
+
+  public createTool(run: CloudRun, identity: ExecutionIdentity, events: SessionEventStore,
+    bindings: ReadonlyMap<string, CloudToolBinding>): ToolDefinition | undefined {
+    const operations = [...VIDEO_GENERATION_OPERATIONS].filter((name) => bindings.has(name)) as VideoOperation[];
+    if (!operations.length) return undefined;
+    return {
+      name: VIDEO_CONFIRMATION_TOOL,
+      description: "在真实创建视频或一键短剧前，向当前用户展示精确参数与可信费用估算并等待确认。咨询问题不要调用。",
+      category: "extension", mutating: false,
+      inputSchema: { type: "object", additionalProperties: false, required: ["operation", "input"], properties: {
+        operation: { type: "string", enum: operations }, input: { type: "object", maxProperties: 32 },
+      } },
+      auditInput: (input) => ({ operation: input.operation }),
+      execute: async (input, signal, context) => this.#request(run, identity, events, bindings, input, signal, context),
+    };
+  }
+
+  async #request(run: CloudRun, identity: ExecutionIdentity, events: SessionEventStore,
+    bindings: ReadonlyMap<string, CloudToolBinding>, value: Record<string, unknown>, signal: AbortSignal,
+    context: ToolExecutionContext) {
+    const operation = value.operation;
+    const requestedInput = value.input;
+    const binding = typeof operation === "string" ? bindings.get(operation) : undefined;
+    if (!VIDEO_GENERATION_OPERATIONS.has(String(operation)) || binding === undefined || !inputRecord(requestedInput) ||
+        !binding.validateInput(requestedInput) || !context.toolCallId) {
+      return { ok: false as const, code: "VIDEO_CONFIRMATION_INVALID", message: "视频生成参数尚未完整，未打开确认窗口。", retryable: false };
+    }
+    const interactionId = `interaction_${crypto.randomUUID()}`;
+    const estimate = latestEstimate(await events.read(run.sessionId), run.id);
+    await events.append({ type: "interaction.requested", accountId: context.accountId, scopeId: context.scopeId,
+      sessionId: run.sessionId, turnId: run.id, payload: { interactionId, toolCallId: context.toolCallId,
+        kind: "video_confirmation", operation: operation as VideoOperation, input: structuredClone(requestedInput) as JsonValue,
+        ...(estimate === undefined ? {} : { estimate }) } });
+    const resolution = await new Promise<Resolution>((resolve) => {
+      const pending: Pending = { run, identity, events, signal, accountId: context.accountId, scopeId: context.scopeId,
+        toolCallId: context.toolCallId!, operation: operation as VideoOperation,
+        requestedInput: structuredClone(requestedInput), binding, settle: resolve, settled: false, resolving: false };
+      this.#pending.set(interactionId, pending);
+      const abort = (): void => {
+        if (pending.settled || pending.resolving) return;
+        pending.settled = true; this.#pending.delete(interactionId); resolve({ resolution: "cancelled" });
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+    });
+    if (resolution.resolution === "cancelled" || resolution.input === undefined) {
+      return { ok: false as const, code: "VIDEO_CONFIRMATION_CANCELLED", message: "用户取消了本次视频生成，未产生生成费用。", retryable: false };
+    }
+    return { ok: true as const, summary: "用户已确认视频生成参数",
+      evidence: { schemaVersion: 1 as const, toolName: VIDEO_CONFIRMATION_TOOL,
+        result: { operation, input: resolution.input } as JsonValue, artifacts: [], diagnostics: [] } };
+  }
+
+  public async resolve(identity: ExecutionIdentity, runId: string, interactionId: string, resolution: Resolution): Promise<void> {
+    const pending = this.#pending.get(interactionId);
+    if (pending === undefined || pending.run.id !== runId || pending.settled || pending.resolving || !sameExecutionScope(identity, pending.identity) ||
+        identity.authorizationId !== pending.identity.authorizationId) {
+      throw new CloudError(409, "INTERACTION_NOT_PENDING", "该确认请求已处理、已失效或不属于当前任务。");
+    }
+    const confirmedInput = resolution.input ?? pending.requestedInput;
+    if (resolution.resolution === "confirmed" && (!inputRecord(confirmedInput) || !pending.binding.validateInput(confirmedInput))) {
+      throw new CloudError(400, "VIDEO_CONFIRMATION_INVALID", "视频参数不完整或不受当前模型支持，请修改后再确认。");
+    }
+    pending.resolving = true;
+    try {
+      await pending.events.append({ type: "interaction.resolved", accountId: pending.accountId, scopeId: pending.scopeId,
+        sessionId: pending.run.sessionId, turnId: pending.run.id, payload: { interactionId,
+          toolCallId: pending.toolCallId, resolution: resolution.resolution,
+          ...(resolution.resolution === "confirmed" ? { input: structuredClone(confirmedInput) as JsonValue } : {}) } });
+      pending.settled = true;
+      this.#pending.delete(interactionId);
+      if (resolution.resolution === "confirmed") this.#approvals.add(this.#approvalKey(runId, pending.operation, confirmedInput));
+      pending.settle(resolution.resolution === "confirmed" ? { resolution: "confirmed", input: structuredClone(confirmedInput) } : { resolution: "cancelled" });
+    } catch (error) {
+      pending.resolving = false;
+      if (pending.signal.aborted && !pending.settled) {
+        pending.settled = true; this.#pending.delete(interactionId); pending.settle({ resolution: "cancelled" });
+      }
+      throw error;
+    }
+  }
+
+  public consume(runId: string, operation: string, input: Record<string, unknown>): boolean {
+    const key = this.#approvalKey(runId, operation, input);
+    if (!this.#approvals.delete(key)) return false;
+    return true;
+  }
+
+  public clear(runId: string): void {
+    for (const [interactionId, pending] of this.#pending) {
+      if (pending.run.id !== runId) continue;
+      pending.settled = true; this.#pending.delete(interactionId); pending.settle({ resolution: "cancelled" });
+    }
+    const prefix = `${runId}\n`;
+    for (const key of this.#approvals) if (key.startsWith(prefix)) this.#approvals.delete(key);
+  }
+
+  #approvalKey(runId: string, operation: string, input: Record<string, unknown>): string {
+    return `${runId}\n${operation}\n${canonical(input)}`;
+  }
+}

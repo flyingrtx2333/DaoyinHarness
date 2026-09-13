@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { CloudRun } from "./client.js";
-import { projectTurns } from "./projection.js";
+import { pendingVideoInteraction, projectTurns } from "./projection.js";
 
 const run: CloudRun = { id: "run_1", sessionId: "session_1", requestId: "request_1", userMessage: "问题", status: "completed", finalText: "最终回答", lastEventSeq: 4, cancelRequested: false, authorizationId: "grant_1", billingAccountId: "payer_1", createdAt: "2026-09-05T12:00:00Z" };
 const event = (eventSeq: number, type: string, payload: unknown, occurredAt = run.createdAt): AgentEvent => ({ id: `event_${eventSeq}`, eventSeq, type, payload, sessionId: run.sessionId, turnId: run.id, accountId: "visitor_1", scopeId: "scope_1", occurredAt }) as AgentEvent;
@@ -54,5 +54,16 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
     const foreign = { ...event(1, "assistant.delta", { delta: "foreign", contentBlockId: "block" }), turnId: "foreign" };
     const result = projectTurns([{ ...run, status: "queued", finalText: "" }], [foreign])[0];
     expect(result?.text).toBe("");
+  });
+  it("replays one pending video interaction until its matching resolution is persisted", () => {
+    const requested = event(1, "interaction.requested", { interactionId: "interaction_1", toolCallId: "confirm_1",
+      kind: "video_confirmation", operation: "story_create_video", input: { prompt: "追逐", durationSeconds: 10 },
+      estimate: { estimated_balance_consumption_credits: "12.5" } });
+    expect(pendingVideoInteraction([requested], run.sessionId)).toEqual({ interactionId: "interaction_1", runId: run.id,
+      operation: "story_create_video", input: { prompt: "追逐", durationSeconds: 10 },
+      estimate: { estimated_balance_consumption_credits: "12.5" } });
+    const resolved = event(2, "interaction.resolved", { interactionId: "interaction_1", toolCallId: "confirm_1", resolution: "confirmed", input: { prompt: "追逐" } });
+    expect(pendingVideoInteraction([requested, resolved], run.sessionId)).toBeUndefined();
+    expect(pendingVideoInteraction([{ ...requested, sessionId: "foreign" }], run.sessionId)).toBeUndefined();
   });
 });

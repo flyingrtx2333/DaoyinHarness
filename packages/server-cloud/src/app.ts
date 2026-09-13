@@ -13,6 +13,7 @@ import { withCommittedSessionEvents } from "./event-repository.js";
 import { eventPage } from "./history-policy.js";
 import { ReadinessProbe, runtimeBuild, type RuntimeBuild } from "./runtime-health.js";
 import { describeRun, RunMeasurements } from "./run-diagnostics.js";
+import { VIDEO_CONFIRMATION_INSTRUCTIONS, VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS, VideoInteractionCoordinator } from "./video-interaction.js";
 
 export interface CloudToolBinding {
   definition: ToolDefinition;
@@ -133,6 +134,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   let closing = false;
   let storageFault = false;
   const measurements = new RunMeasurements();
+  const videoInteractions = new VideoInteractionCoordinator();
   const buildInfo = runtimeBuild(options.buildInfo);
   const readiness = new ReadinessProbe(async (signal) => {
     if (!options.repository.checkReadiness || !options.checkPlatform) throw new Error("Readiness adapters are missing.");
@@ -299,6 +301,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const orchestrationAvailable = identity.space.kind !== "public" && options.repository.acceptChildRun !== undefined && options.repository.listChildRuns !== undefined;
         const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? [])];
         const bindings = new Map(runBindings.map((binding) => [binding.definition.name, binding]));
+        const videoConfirmationTool = identity.space.kind === "public" ? undefined
+          : videoInteractions.createTool(run, identity, stores.events, bindings);
         const wrappedDefinitions = runBindings.map<ToolDefinition>((binding) => ({
           ...binding.definition,
           execute: (input, signal, context) => measurements.measure(run.id, "tool_inclusive", async () => {
@@ -318,13 +322,21 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             await ensureActive(identity, controller.signal);
             return true;
           }
+          if (tool.name === VIDEO_CONFIRMATION_TOOL) {
+            if (videoConfirmationTool === undefined || context.turnId !== run.id || context.sessionId !== run.sessionId ||
+                !current.permissions.includes("agent.use")) return false;
+            await ensureActive(identity, controller.signal);
+            return true;
+          }
           const binding = bindings.get(tool.name);
           if (binding === undefined || !current.allowedTools.includes(tool.name) ||
               !binding.requiredPermissions.every((permission) => current.permissions.includes(permission))) return false;
           if (request === undefined) return true;
           if (Object.keys(request.input).some((key) => forbiddenIdentityKeys.has(key)) || !binding.validateInput(request.input)) return false;
           await ensureActive(identity, controller.signal);
-          return abortable(() => binding.authorizeResource(request, identity, controller.signal), controller.signal);
+          const resourceAllowed = await abortable(() => binding.authorizeResource(request, identity, controller.signal), controller.signal);
+          if (!resourceAllowed) return false;
+          return !VIDEO_GENERATION_OPERATIONS.has(tool.name) || videoInteractions.consume(run.id, tool.name, request.input);
         };
         await ensureActive(identity, controller.signal);
         // One gateway client and operation sequence for the complete tree: accounting stays on the root Run.
@@ -361,13 +373,13 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
           tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}`, signal: controller.signal,
           remainingModelCalls: () => maxModelCalls - modelCalls, chargeTool, createModel: createMeteredModel, ensureActive });
-        const tools = new ToolRegistry([...wrappedDefinitions, ...orchestrationDefinitions], { authorize });
+        const tools = new ToolRegistry([...wrappedDefinitions, ...(videoConfirmationTool === undefined ? [] : [videoConfirmationTool]), ...orchestrationDefinitions], { authorize });
         const model = await createMeteredModel(run, controller.signal);
         // Keep the provider even without memory.read: revoked dependencies cannot re-enter through history.
         const engine = new AgentEngine({
           model, tools, events: stores.events, compactionStore: stores.compactions,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
-          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
+          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: maxModelCalls, maxToolCalls: 24,
         });
         await engine.runTurn({
@@ -404,6 +416,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           }
         } catch { storageFault = true; }
         clearTimeout(deadline);
+        videoInteractions.clear(run.id);
         active.delete(run.id);
       }
     })();
@@ -447,6 +460,18 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     }
     return { run, cancellationRequested: run.cancelRequested };
   });
+
+  app.post<{ Params: { runId: string; interactionId: string }; Body: { resolution: "confirmed" | "cancelled"; input?: Record<string, unknown> } }>(
+    "/api/v1/cloud/runs/:runId/interactions/:interactionId/respond", {
+      schema: { params: { type: "object", required: ["runId", "interactionId"], additionalProperties: false,
+        properties: { runId: idSchema, interactionId: idSchema } }, body: { type: "object", required: ["resolution"], additionalProperties: false,
+        properties: { resolution: { type: "string", enum: ["confirmed", "cancelled"] }, input: { type: "object", maxProperties: 32 } } } },
+    }, async (request) => {
+      const identity = identityFor(request);
+      await options.repository.getRun(identity, request.params.runId);
+      await videoInteractions.resolve(identity, request.params.runId, request.params.interactionId, request.body);
+      return { accepted: true };
+    });
 
   const authorizeMemoryShare = options.authorizeMemoryShare;
   registerMemoryRoutes(app, { repository: options.repository, identityFor, ensureActive,

@@ -111,6 +111,12 @@ button.primary:hover:enabled { background: #174bcb; }
 .video-field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--ui-space-3); }
 .video-field-grid-wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .video-creation-note { margin: 0; color: var(--ui-muted); font-size: var(--ui-font-caption); }
+.video-creation-note strong { color: var(--ui-ink); }
+.video-creation-meta { margin: 0; color: var(--ui-muted); font-size: var(--ui-font-caption); }
+.video-confirm-checks { display: flex; flex-wrap: wrap; gap: var(--ui-space-4); }
+.video-confirm-checks label { display: inline-flex; align-items: center; gap: var(--ui-space-2); font-size: var(--ui-font-control); }
+.video-confirm-checks input { width: 16px; height: 16px; }
+.video-creation-error { margin: 0; color: #a33b28; font-size: var(--ui-font-control); }
 .video-creation-dialog footer { display: flex; justify-content: flex-end; gap: var(--ui-space-2); padding-top: var(--ui-space-1); }
 .video-creation-dialog footer button { min-height: var(--ui-control-height); padding: 0 var(--ui-space-4); }
 @media (max-width: 640px) {

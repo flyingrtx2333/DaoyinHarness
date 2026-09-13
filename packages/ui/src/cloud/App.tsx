@@ -3,7 +3,7 @@ import type { AgentEvent } from "@daoyin/harness-protocol";
 import { MarkdownMessage } from "../MarkdownMessage.js";
 import { WorkbenchClient, WorkbenchError, type AccountProfile, type CloudRun, type CloudSession, type SessionAction } from "./client.js";
 import { SessionHistory } from "./SessionHistory.js";
-import { projectTurns } from "./projection.js";
+import { pendingVideoInteraction, projectTurns } from "./projection.js";
 import { watchCloudSession } from "./event-feed.js";
 import { PluginWorkspace } from "./PluginWorkspace.js";
 import { HarnessLogo } from "./HarnessLogo.js";
@@ -17,7 +17,6 @@ import { StoryUpload, type StoryReference } from "./StoryUpload.js";
 import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
 import { VideoCreationDialog } from "./VideoCreationDialog.js";
-import { isVideoCreationIntent } from "./video-creation-intent.js";
 
 const APPLICATION = "saishi" as const;
 const entryUrl = new URL(window.location.href);
@@ -71,7 +70,8 @@ export function App(): React.JSX.Element {
   const [runs, setRuns] = useState<CloudRun[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [draft, setDraft] = useState("");
-  const [videoRequest, setVideoRequest] = useState("");
+  const [interactionBusy, setInteractionBusy] = useState(false);
+  const [interactionError, setInteractionError] = useState("");
   const [error, setError] = useState("");
   const [loginUrl, setLoginUrl] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
@@ -97,6 +97,7 @@ export function App(): React.JSX.Element {
   const active = runs.find((run) => run.status === "running" || run.status === "queued");
   const pending = selected ? client.pending(selected) : undefined;
   const turns = projectTurns(runs, events);
+  const videoInteraction = selected ? pendingVideoInteraction(events, selected) : undefined;
   const session = sessions.find((item) => item.id === selected);
   const authorizedProfiles = phase === "ready" ? ["daoyin-workbench", "company-public", "saishi-readonly", "story-quick"] : [];
   const plugin = { id: "all", name: "全部插件", profileId: "daoyin-workbench" };
@@ -188,6 +189,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (preferences.autoScroll && nearBottom.current) bottom.current?.scrollIntoView({ block: "end" });
   }, [events.length, runs.length, sendingMessage, preferences.autoScroll]);
+  useEffect(() => { setInteractionBusy(false); setInteractionError(""); }, [videoInteraction?.interactionId]);
 
   function savePreferences(value: WorkbenchPreferences): void {
     setPreferences(value);
@@ -245,12 +247,11 @@ export function App(): React.JSX.Element {
     void id; setView("chat"); setSidebar(false); setError("");
     if (focusComposer) window.requestAnimationFrame(() => document.getElementById("message")?.focus());
   }
-  async function send(message?: string, skipVideoDialog = false, sessionTitle?: string): Promise<void> {
+  async function send(message?: string, sessionTitle?: string): Promise<void> {
     const visibleMessage = message === undefined ? draft.trim() : visibleUserMessage(message);
     const submittedMessage = references.length
       ? `${message ?? visibleMessage}\n\n${references.map(referenceLine).join("\n")}` : message ?? visibleMessage;
     if (uploading || !visibleMessage || submission.current || sessionMutation.current || active || phase !== "ready" || loading) return;
-    if (!skipVideoDialog && isVideoCreationIntent(visibleMessage)) { setVideoRequest(visibleMessage); return; }
     if (session?.archivedAt) { setError("请先恢复已归档的会话，或新建会话。"); return; }
     if (!plugin?.profileId) { setError("当前会话的插件尚未支持，请新建会话并选择可用插件。"); return; }
     setSubmitting(true); setSendingMessage(visibleMessage); setError(""); nearBottom.current = true;
@@ -283,6 +284,17 @@ export function App(): React.JSX.Element {
       setRevision((value) => value + 1);
     } catch (cause) { fail(cause); }
     finally { setCancelling(false); }
+  }
+  async function respondVideoInteraction(resolution: "confirmed" | "cancelled", input?: Record<string, unknown>): Promise<void> {
+    if (!videoInteraction || interactionBusy) return;
+    setInteractionBusy(true); setInteractionError("");
+    try {
+      await client.respondInteraction(videoInteraction.runId, videoInteraction.interactionId, resolution, input);
+      setRevision((value) => value + 1);
+    } catch (cause) {
+      setInteractionBusy(false);
+      setInteractionError(cause instanceof WorkbenchError ? cause.message : "确认结果未提交，请重试。");
+    }
   }
 
   return <div className="workbench">
@@ -336,7 +348,9 @@ export function App(): React.JSX.Element {
       </div>
     </main>
     {settingsOpen && <SettingsDialog preferences={preferences} onChange={savePreferences} onClose={closeSettings} saveError={preferenceError} />}
-    {videoRequest && <VideoCreationDialog initialRequest={videoRequest} onClose={() => setVideoRequest("")}
-      onConfirm={(message) => { const title = videoRequest; setVideoRequest(""); void send(message, true, title); }} />}
+    {videoInteraction && <VideoCreationDialog key={videoInteraction.interactionId} interaction={videoInteraction}
+      busy={interactionBusy} error={interactionError}
+      onCancel={() => { void respondVideoInteraction("cancelled"); }}
+      onConfirm={(input) => { void respondVideoInteraction("confirmed", input); }} />}
   </div>;
 }

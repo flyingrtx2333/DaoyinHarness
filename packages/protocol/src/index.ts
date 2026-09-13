@@ -159,6 +159,20 @@ export interface AgentEventPayloads {
     retryable: boolean;
     details?: JsonValue;
   };
+  "interaction.requested": {
+    interactionId: string;
+    toolCallId: string;
+    kind: "video_confirmation";
+    operation: "story_create_video" | "story_create_production";
+    input: JsonValue;
+    estimate?: JsonValue;
+  };
+  "interaction.resolved": {
+    interactionId: string;
+    toolCallId: string;
+    resolution: "confirmed" | "cancelled";
+    input?: JsonValue;
+  };
   "turn.completed": {
     status: "completed";
     assistantMessageId: string;

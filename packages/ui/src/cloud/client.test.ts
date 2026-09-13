@@ -200,4 +200,15 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
     const reading = slow.sessions(controller.signal); controller.abort();
     await expect(reading).rejects.toMatchObject({ name: "AbortError" });
   });
+  it("returns a structured video confirmation through the protected BFF", async () => {
+    const client = new WorkbenchClient(memory(), async (url, init) => {
+      if (String(url).endsWith("/bootstrap")) return json({ csrfToken: "csrf", expiresAt: Date.now() + 1800000 });
+      expect(String(url)).toBe("/api/company-assistant/agent/runs/run_1/interactions/interaction_1/respond");
+      expect(init?.headers).toHaveProperty("x-agent-csrf", "csrf");
+      expect(JSON.parse(String(init?.body))).toEqual({ resolution: "confirmed", input: { prompt: "追逐" } });
+      return json({ accepted: true });
+    });
+    await client.bootstrap();
+    await client.respondInteraction("run_1", "interaction_1", "confirmed", { prompt: "追逐" });
+  });
 });

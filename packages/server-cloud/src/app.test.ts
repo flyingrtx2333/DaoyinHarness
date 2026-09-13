@@ -102,6 +102,67 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
     expect(seen).toHaveLength(2);
   });
 
+  it("waits for a persisted video confirmation and only permits the exact confirmed generation input", async () => {
+    const input = { modelName: "Seedance", resolution: "720p", durationSeconds: 10, prompt: "雨中追逐",
+      aspectRatio: "16:9", target: "new", request_key: "request_video_001" };
+    const execute = vi.fn(async (): Promise<ToolSuccess> => ({ ok: true, summary: "视频任务已创建",
+      evidence: { schemaVersion: 1, toolName: "story_create_video", result: { video_id: "video-1" }, artifacts: [], diagnostics: [] } }));
+    const video: CloudToolBinding = { definition: { name: "story_create_video", description: "创建视频",
+      inputSchema: { type: "object" }, category: "extension", mutating: true, execute }, requiredPermissions: ["story.generate"],
+      validateInput: (value) => JSON.stringify(value) === JSON.stringify(input), authorizeResource: async () => true };
+    let call = 0;
+    const current = fixture({ resolveProfile: async () => ({ id: "story-quick", version: "1", instructions: "创建视频前确认。", tools: [video] }),
+      createModel: async () => ({ complete: async (request) => {
+        call += 1;
+        if (call === 1) {
+          expect(request.tools.map((tool) => tool.name)).toContain("request_video_confirmation");
+          return { kind: "tool_calls", calls: [{ id: "confirm-1", name: "request_video_confirmation",
+            input: { operation: "story_create_video", input } }] };
+        }
+        if (call === 2) return { kind: "tool_calls", calls: [{ id: "create-1", name: "story_create_video", input }] };
+        return { kind: "assistant", content: "视频任务已提交。" };
+      } }) });
+    current.tokens.set("owner", identity({ permissions: ["agent.use", "story.generate"], allowedTools: ["story_create_video"] }));
+    const sessionId = await createSession(current.app);
+    const accepted = await submit(current.app, sessionId, "video-request", "帮我生成追逐视频");
+    const runId = accepted.json<{ run: CloudRun }>().run.id;
+    let requested: Extract<AgentEvent, { type: "interaction.requested" }> | undefined;
+    for (let attempt = 0; attempt < 100 && requested === undefined; attempt += 1) {
+      requested = (await current.repository.readEvents(current.tokens.get("owner")!, sessionId, 0, 100))
+        .find((event): event is Extract<AgentEvent, { type: "interaction.requested" }> => event.type === "interaction.requested");
+      if (requested === undefined) await delay(5);
+    }
+    expect(requested).toBeDefined();
+    expect(execute).not.toHaveBeenCalled();
+    const response = await current.app.inject({ method: "POST",
+      url: `/api/v1/cloud/runs/${runId}/interactions/${requested!.payload.interactionId}/respond`, headers: headers(),
+      payload: { resolution: "confirmed", input } });
+    expect(response.statusCode).toBe(200);
+    expect((await terminal(current.repository, current.tokens.get("owner")!, runId)).status).toBe("completed");
+    expect(execute).toHaveBeenCalledOnce();
+    expect((await current.repository.readEvents(current.tokens.get("owner")!, sessionId, 0, 100)).map((event) => event.type))
+      .toEqual(["turn.started", "tool.started", "interaction.requested", "interaction.resolved", "tool.completed",
+        "tool.started", "tool.completed", "assistant.delta", "turn.completed"]);
+  });
+
+  it("denies a video generation tool call when the model skips user confirmation", async () => {
+    const execute = vi.fn(async (): Promise<ToolSuccess> => ({ ok: true, summary: "不应执行",
+      evidence: { schemaVersion: 1, toolName: "story_create_video", result: {}, artifacts: [], diagnostics: [] } }));
+    const video: CloudToolBinding = { definition: { name: "story_create_video", description: "创建视频",
+      inputSchema: { type: "object" }, category: "extension", mutating: true, execute }, requiredPermissions: ["story.generate"],
+      validateInput: () => true, authorizeResource: async () => true };
+    let call = 0;
+    const current = fixture({ resolveProfile: async () => ({ id: "story-quick", version: "1", instructions: "创建视频前确认。", tools: [video] }),
+      createModel: async () => ({ complete: async () => ++call === 1
+        ? { kind: "tool_calls", calls: [{ id: "create", name: "story_create_video", input: { prompt: "skip" } }] }
+        : { kind: "assistant", content: "未提交。" } }) });
+    current.tokens.set("owner", identity({ permissions: ["agent.use", "story.generate"], allowedTools: ["story_create_video"] }));
+    const sessionId = await createSession(current.app);
+    const accepted = await submit(current.app, sessionId, "skip-confirm", "生成视频");
+    await terminal(current.repository, current.tokens.get("owner")!, accepted.json<{ run: CloudRun }>().run.id);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("requires real adapter authentication and rejects bearer/expiry/origin/entitlement failures", async () => {
     const { app, complete } = fixture();
     for (const token of ["unknown", "expired"]) {
