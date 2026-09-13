@@ -301,7 +301,7 @@ export function App(): React.JSX.Element {
   }
 
   if ((phase === "error" || phase === "expired") && loginUrl) {
-    return <LoginGateway fallbackLoginUrl={loginUrl} workbenchError={error} />;
+    return <LoginGateway fallbackLoginUrl={loginUrl} />;
   }
 
   return <div className="workbench">

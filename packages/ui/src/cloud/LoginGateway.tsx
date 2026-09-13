@@ -28,7 +28,7 @@ async function json(response: Response): Promise<unknown> {
   return response.json().catch(() => null);
 }
 
-export function LoginGateway({ fallbackLoginUrl, workbenchError = "" }: { fallbackLoginUrl: string; workbenchError?: string }): React.JSX.Element {
+export function LoginGateway({ fallbackLoginUrl }: { fallbackLoginUrl: string }): React.JSX.Element {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [countdown, setCountdown] = useState(0);
@@ -114,7 +114,7 @@ export function LoginGateway({ fallbackLoginUrl, workbenchError = "" }: { fallba
         <div className="login-card-brand"><HarnessLogo aria-hidden="true" /><span>道引 Harness</span></div>
         <h2 id="login-title">欢迎使用道引</h2>
         <p className="login-subtitle">使用道引统一账号登录 Harness</p>
-        {(error || (!notice && workbenchError)) && <div className="login-message login-error" role="alert">{error || workbenchError}</div>}
+        {error && <div className="login-message login-error" role="alert">{error}</div>}
         {notice && <div className="login-message login-notice" role="status">{notice}</div>}
         <form onSubmit={event => { event.preventDefault(); void login(); }}>
           <label className="login-field"><span>手机号</span><span className="login-phone"><b>+86</b><input value={phone} onChange={event => setPhone(event.target.value.replace(/\D/gu, "").slice(0, 11))} type="tel" inputMode="numeric" autoComplete="tel" placeholder="请输入手机号" disabled={submitting} /></span></label>
