@@ -33,8 +33,9 @@ export function VideoCreationDialog({ interaction, busy, error, onCancel, onConf
   const firstField = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const [input, setInput] = useState<Record<string, unknown>>(() => structuredClone(interaction.input));
   const production = interaction.operation === "story_create_production";
+  const productionV2 = production && input.workflowVersion === 2;
   const continuation = input.target === "continue";
-  const estimated = findCredit(interaction.estimate, "estimated_balance_consumption_credits");
+  const estimated = findCredit(interaction.estimate, productionV2 ? "estimatedCredits" : "estimated_balance_consumption_credits");
   const reserved = findCredit(interaction.estimate, "reserve_amount_credits");
   useEffect(() => {
     const previous = document.activeElement;
@@ -56,25 +57,33 @@ export function VideoCreationDialog({ interaction, busy, error, onCancel, onConf
         <textarea ref={production ? undefined : firstField as React.RefObject<HTMLTextAreaElement>} required maxLength={production ? 20000 : 5000}
           rows={5} value={content} onChange={(event) => update(production ? "brief" : "prompt", event.target.value)} /></label>
       <div className="video-field-grid">
-        <label className="video-field"><span>画幅</span><select disabled={continuation} value={text(input, "aspectRatio")} onChange={(event) => update("aspectRatio", event.target.value)}>
+        <label className="video-field"><span>画幅</span><select disabled={continuation || productionV2} value={text(input, "aspectRatio")} onChange={(event) => update("aspectRatio", event.target.value)}>
           <option value="16:9">横屏 16:9</option><option value="9:16">竖屏 9:16</option></select></label>
         <label className="video-field"><span>{production ? "目标总时长" : "时长"}</span><input type="number"
-          disabled={continuation} min={production ? 8 : 1} max={production ? 900 : 15} step="1"
+          disabled={continuation || productionV2} min={production ? 8 : 1} max={production ? 900 : 15} step="1"
           value={number(input, production ? "targetDurationSeconds" : "durationSeconds", production ? 60 : 10)}
           onChange={(event) => update(production ? "targetDurationSeconds" : "durationSeconds", event.target.valueAsNumber)} /></label>
-        <label className="video-field"><span>清晰度</span><select disabled={continuation} value={text(input, "resolution")} onChange={(event) => update("resolution", event.target.value)}>
+        <label className="video-field"><span>清晰度</span><select disabled={continuation || productionV2} value={text(input, "resolution")} onChange={(event) => update("resolution", event.target.value)}>
           {["480p", "720p", "768p", "1080p", "2k", "4k"].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       </div>
       <p className="video-creation-meta">视频模型：{modelLabel(text(input, "modelName"))}（系统自动选择）</p>
-      {production && <div className="video-field-grid"><label className="video-field"><span>单段时长</span><input type="number" min="4" max="15" step="1"
+      {production && <div className="video-field-grid"><label className="video-field"><span>单段时长</span><input type="number" disabled={productionV2} min="4" max="15" step="1"
         value={number(input, "segmentDurationSeconds", 8)} onChange={(event) => update("segmentDurationSeconds", event.target.valueAsNumber)} /></label></div>}
       {production && <div className="video-confirm-checks">
         <label><input type="checkbox" checked={bool(input, "generateAudio", true)} onChange={(event) => update("generateAudio", event.target.checked)} />生成配音</label>
         <label><input type="checkbox" checked={bool(input, "generateSubtitles", true)} onChange={(event) => update("generateSubtitles", event.target.checked)} />生成字幕</label>
       </div>}
+      {productionV2 && <div className="video-field-grid">
+        <label className="video-field"><span>制作方式</span><select value={text(input, "reviewMode") || "AUTO"} onChange={event => update("reviewMode", event.target.value)}>
+          <option value="AUTO">全自动制作</option><option value="REVIEW">审核资产和分镜后生成视频</option></select></label>
+        <label className="video-field"><span>积分上限（含重试）</span><input type="number" required min={estimated || "0.000001"} max="9999999999" step="0.000001"
+          value={text(input, "maxCredits")} onChange={event => update("maxCredits", event.target.value)} /></label>
+      </div>}
       {!production && <p className="video-creation-meta">生成方式：{({ new: "新生成", existing: "参考已有视频生成新版本", upload: "参考上传视频生成新版本", continue: "尾帧续接 · 上一段尾帧作为本段首帧" } as Record<string, string>)[text(input, "target")] ?? "新生成"}</p>}
       {continuation && interaction.firstFrameUrl && <img src={interaction.firstFrameUrl} alt="上一段尾帧，将作为本段首帧" style={{ maxWidth: "100%", maxHeight: 160, objectFit: "contain" }} />}
-      <p id="video-creation-note" className="video-creation-note">{estimated !== undefined
+      <p id="video-creation-note" className="video-creation-note">{productionV2
+        ? <>预计整集消耗 <strong>{estimated ?? "尚未取得估算"} 积分</strong>。预算内每项最多重试一次，超限暂停。资产、剧本与审核沿用当前规则，不单独扣 Story 钱包积分。确认后后台逐步制作，不会逐镜弹窗。</>
+        : estimated !== undefined
         ? <>预计消耗 <strong>{estimated} 积分</strong>{reserved !== undefined ? `，提交时可能临时冻结 ${reserved} 积分` : ""}。确认后才会提交真实生成任务。</>
         : "费用将按当前账号和所选模型的实时规则结算；确认后才会提交真实生成任务。"}</p>
       {error && <p className="video-creation-error" role="alert">{error}</p>}

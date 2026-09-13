@@ -118,6 +118,14 @@ export class WorkbenchClient {
     if (!identifier(id)) throw new WorkbenchError("视频标识无效。");
     return this.#request("/videos/" + encodeURIComponent(id), undefined, signal);
   }
+  public async storyProduction(id: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!identifier(id)) throw new WorkbenchError("制作任务标识无效。");
+    return this.#request("/productions/" + encodeURIComponent(id), undefined, signal);
+  }
+  public async controlStoryProduction(id: string, action: "pause" | "resume" | "approve" | "cancel", revision?: string): Promise<Record<string, unknown>> {
+    if (!identifier(id)) throw new WorkbenchError("制作任务标识无效。");
+    return this.#request("/productions/" + encodeURIComponent(id) + "/control", { action, requestId: crypto.randomUUID(), ...(revision ? { revision } : {}) });
+  }
   public async uploadStory(file: File): Promise<{ id: string; mime_type: string }> {
     if (!this.#accountScope) throw new WorkbenchError("请先连接道引账号。");
     const video = file.type === "video/mp4";

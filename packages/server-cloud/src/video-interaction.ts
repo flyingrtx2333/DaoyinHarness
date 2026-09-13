@@ -50,8 +50,15 @@ function inputRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function latestEstimate(events: AgentEvent[], runId: string): JsonValue | undefined {
-  const event = events.findLast((item) => item.turnId === runId && item.type === "tool.completed" && item.payload.toolName === "story_estimate_video");
+function latestEstimate(events: AgentEvent[], runId: string, production: boolean): JsonValue | undefined {
+  const event = events.findLast((item) => {
+    if (item.turnId !== runId || item.type !== "tool.completed") return false;
+    if (!production) return item.payload.toolName === "story_estimate_video";
+    const result = item.payload.evidence.result;
+    if (!inputRecord(result) || !inputRecord(result.data)) return false;
+    const data = inputRecord(result.data.result) ? result.data.result : result.data;
+    return data.workflowVersion === 2 && typeof data.estimatedCredits === "string" && inputRecord(data.specification);
+  });
   return event?.type === "tool.completed" ? event.payload.evidence.result : undefined;
 }
 
@@ -101,7 +108,20 @@ export class VideoInteractionCoordinator {
     if (!await binding.authorizeResource({ id: `${context.toolCallId}_preflight`, name: String(operation), input: requestedInput }, identity, signal)) {
       return { ok: false as const, code: "VIDEO_PREFLIGHT_FAILED", message: "视频参数或参考方式未通过业务校验，请读取当前模型能力并修正后再确认。", retryable: false };
     }
-    const estimate = latestEstimate(history, run.id);
+    const estimate = latestEstimate(history, run.id, operation === "story_create_production");
+    if (operation === "story_create_production" && requestedInput.workflowVersion === 2) {
+      const result = inputRecord(estimate) && inputRecord(estimate.data) ? estimate.data : undefined;
+      const data = result && inputRecord(result.result) ? result.result : result;
+      const spec = data && inputRecord(data.specification) ? data.specification : undefined;
+      if (!spec || !["modelName", "resolution", "targetDurationSeconds", "segmentDurationSeconds"].every(key =>
+          spec[key] === requestedInput[key])) {
+        return { ok: false as const, code: "PRODUCTION_ESTIMATE_REQUIRED", message: "请先通过 Story 的 estimate_production 操作获取匹配当前整集方案的费用，不能用单镜头估价代替。", retryable: false };
+      }
+      if (typeof requestedInput.maxCredits !== "string" || !Number.isFinite(Number(requestedInput.maxCredits)) ||
+          Number(requestedInput.maxCredits) < Number(data?.estimatedCredits)) {
+        return { ok: false as const, code: "PRODUCTION_BUDGET_REQUIRED", message: "请给出不低于整集基础估算的积分上限，并在弹窗中交由用户确认。", retryable: false };
+      }
+    }
     let settle!: (value: Resolution) => void;
     const resolutionPromise = new Promise<Resolution>((resolve) => { settle = resolve; });
     const pending: Pending = { run, identity, events, signal, accountId: context.accountId, scopeId: context.scopeId,
@@ -153,6 +173,10 @@ export class VideoInteractionCoordinator {
     }
     if (resolution.resolution === "confirmed" && (!inputRecord(confirmedInput) || !pending.binding.validateInput(confirmedInput))) {
       throw new CloudError(400, "VIDEO_CONFIRMATION_INVALID", "视频参数不完整或不受当前模型支持，请修改后再确认。");
+    }
+    if (resolution.resolution === "confirmed" && pending.operation === "story_create_production" && pending.requestedInput.workflowVersion === 2 &&
+        ["workflowVersion", "modelName", "resolution", "targetDurationSeconds", "segmentDurationSeconds", "aspectRatio", "request_key"].some(key => confirmedInput[key] !== pending.requestedInput[key])) {
+      throw new CloudError(400, "PRODUCTION_ESTIMATE_CHANGED", "已估价的制作规格发生变化，请重新准备整集确认。");
     }
     pending.resolving = true;
     try {
