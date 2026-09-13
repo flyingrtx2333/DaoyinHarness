@@ -7,6 +7,7 @@ import { createSaishiProfile, isSaishiIdentity } from "./saishi-profile.js";
 import { createStoryProfile, isStoryIdentity } from "./story-profile.js";
 import { createWorkbenchProfile, isWorkbenchIdentity } from "./workbench-profile.js";
 import { readModelStream } from "./model-stream.js";
+import { VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS } from "./video-interaction.js";
 
 export interface PlatformAdapterOptions {
   /** Fixed trusted origin, HTTPS except explicit loopback development. */
@@ -22,6 +23,16 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 type CallPolicy = (name: string, input: Record<string, unknown>) => boolean;
+export function privateModelCallAllowed(name: string, input: Record<string, unknown>,
+  requestTools: ReadonlyArray<{ name: string }>, bindings: ReadonlyArray<{ definition: { name: string }; validateInput(input: Record<string, unknown>): boolean }>): boolean {
+  if (!requestTools.some((tool) => tool.name === name)) return false;
+  const direct = bindings.find((binding) => binding.definition.name === name);
+  if (direct !== undefined) return direct.validateInput(input);
+  if (name !== VIDEO_CONFIRMATION_TOOL || typeof input.operation !== "string" || !VIDEO_GENERATION_OPERATIONS.has(input.operation) ||
+      !record(input.input)) return false;
+  const generation = bindings.find((binding) => binding.definition.name === input.operation);
+  return generation !== undefined && generation.validateInput(input.input);
+}
 function reply(value: unknown, appPolicy?: CallPolicy): ModelReply {
   if (!record(value) || value.schemaVersion !== 1 || !record(value.output)) throw new Error("Invalid model response.");
   const output = value.output;
@@ -159,8 +170,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
             tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
             systemPrompt: request.systemPrompt },
         }, request.signal, privateApp, request.onTextDelta);
-        return reply(value, privateApp ? (name, input) => request.tools.some((tool) => tool.name === name) &&
-          bindings.some((binding) => binding.definition.name === name && binding.validateInput(input)) : undefined);
+        return reply(value, privateApp ? (name, input) => privateModelCallAllowed(name, input, request.tools, bindings) : undefined);
       } };
     },
   };

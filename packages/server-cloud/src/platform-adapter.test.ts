@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExecutionIdentity } from "@daoyin/harness-contracts";
-import { createPlatformAdapters, createPlatformCloudServer } from "./platform-adapter.js";
+import { createPlatformAdapters, createPlatformCloudServer, privateModelCallAllowed } from "./platform-adapter.js";
 import { SqliteCloudRepository } from "./sqlite-repository.js";
 
 const serviceToken = "fixture-only-service-token-000000000000";
@@ -13,6 +13,17 @@ const identity: ExecutionIdentity = {
 const source = { id: "company_1_2", document_id: 1, chunk_id: 2, title: "项目", location: "", content: "公开互动项目。", untrusted: true };
 
 describe("platform adapter (real engine/SQLite, explicitly simulated platform and model)", () => {
+  it("accepts the local video confirmation control only for an exposed, schema-valid generation operation", () => {
+    const input = { modelName: "doubao-seedance-2-0-mini-260615", resolution: "720p", durationSeconds: 10,
+      prompt: "高燃混剪视频", aspectRatio: "16:9", target: "new", request_key: "gaoran_hunjian_10s_720p_20260913" };
+    const bindings = [{ definition: { name: "story_create_video" }, validateInput: (value: Record<string, unknown>) => value.request_key === input.request_key }];
+    const exposed = [{ name: "story_create_video" }, { name: "request_video_confirmation" }];
+    expect(privateModelCallAllowed("request_video_confirmation", { operation: "story_create_video", input }, exposed, bindings)).toBe(true);
+    expect(privateModelCallAllowed("request_video_confirmation", { operation: "story_create_video", input: { ...input, request_key: "wrong" } }, exposed, bindings)).toBe(false);
+    expect(privateModelCallAllowed("request_video_confirmation", { operation: "story_create_production", input }, exposed, bindings)).toBe(false);
+    expect(privateModelCallAllowed("request_video_confirmation", { operation: "story_create_video", input }, [{ name: "story_create_video" }], bindings)).toBe(false);
+  });
+
   it("executes the shared loop through fixed platform endpoints, replays and never persists credentials", async () => {
     let models = 0;
     const calls: { path: string; body: Record<string, unknown> }[] = [];
