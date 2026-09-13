@@ -18,13 +18,15 @@ describe("Harness unified-account login gateway", () => {
   });
 
   it("renders real SMS controls without a password or a second account system", () => {
-    const html = renderToStaticMarkup(createElement(LoginGateway, { fallbackLoginUrl: "/api/agent-apps/saishi/workbench/login" }));
-    expect(html).toContain("欢迎使用道引");
+    const html = renderToStaticMarkup(createElement(LoginGateway));
+    expect(html).toContain("登录 Harness");
     expect(html).toContain("获取验证码");
     expect(html).toContain("登录并进入 Harness");
     expect(html).toContain("道引统一账号");
     expect(html).toContain('autoComplete="one-time-code"');
     expect(html).not.toContain('type="password"');
     expect(html).not.toContain("Harness 账号注册");
+    expect(html).not.toContain("内容创作");
+    expect(html).not.toContain("使用主平台登录页");
   });
 });

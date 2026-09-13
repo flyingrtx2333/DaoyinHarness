@@ -5,22 +5,12 @@
 .login-story::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 128%; background: url("../../public/assets/login-hero-ribbon-v2.png") center / 100% 100% no-repeat; opacity: .70; pointer-events: none; }
 .login-story-copy { position: relative; z-index: 2; width: min(620px, 100%); transform: translateY(-116px); }
 .login-story h1 { margin: 0; max-width: 560px; color: #13213c; font-size: 48px; font-weight: 680; line-height: 1.25; letter-spacing: -1.5px; }
-.login-story-copy > p { max-width: 560px; margin: 28px 0 0; color: #526178; font-size: 20px; line-height: 1.55; }
-.login-story ul { display: grid; grid-template-columns: repeat(4, 100px); gap: 32px; margin: 38px 0 0 6px; padding: 0; list-style: none; }
-.login-story li { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ui-space-1); min-width: 0; }
-.login-story li > span { display: grid; place-items: center; width: 60px; height: 60px; margin-bottom: 14px; border: 1px solid #e2e9fa; border-radius: 16px; color: var(--ui-accent); background: #edf3ffcc; box-shadow: 0 8px 22px #4f78d512; }
-.login-story li .workbench-icon { width: 26px; height: 26px; }
-.login-story li b { overflow: hidden; color: #253149; font-size: 16px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
-.login-story li small { overflow: hidden; color: var(--ui-muted); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.login-story-foot { position: absolute; z-index: 2; bottom: 88px; left: clamp(36px, 6.5vw, 100px); margin: 0; color: #718098; font-size: 14px; letter-spacing: 2px; }
+.login-story-copy > p { margin: 24px 0 0; color: #526178; font-size: 16px; line-height: 1.6; }
 .login-aurora { display: none; }
 .login-panel { position: relative; z-index: 1; display: grid; place-items: center; min-width: 0; padding: var(--ui-space-6); background: radial-gradient(circle at 65% 28%, #edf3ff 0, transparent 42%), linear-gradient(90deg, #f5f7fc33, #f5f7fc 22%); }
-.login-card { display: flex; flex-direction: column; width: min(100%, 552px); min-height: 776px; padding: 60px 40px 34px; border: 1px solid #edf0f6; border-radius: var(--ui-radius-panel); background: #fffffff2; box-shadow: 0 24px 70px #23376316; transform: translateY(-8px); }
-.login-card-brand { display: flex; justify-content: center; align-items: center; gap: var(--ui-space-2); color: #1b2941; font-size: 20px; font-weight: 650; }
-.login-card-brand img { width: 32px; height: 32px; }
-.login-card h2 { margin: 36px 0 0; text-align: center; font-size: 32px; line-height: 1.4; }
-.login-subtitle { margin: 6px 0 40px; color: var(--ui-muted); text-align: center; font-size: 16px; }
-.login-card form { display: grid; gap: 24px; }
+.login-card { display: flex; flex-direction: column; width: min(100%, 500px); padding: 40px; border: 1px solid #edf0f6; border-radius: var(--ui-radius-panel); background: #fffffff2; box-shadow: 0 24px 70px #23376316; }
+.login-card h2 { margin: 0 0 28px; text-align: center; font-size: var(--ui-font-hero); line-height: 1.4; }
+.login-card form { display: grid; gap: var(--ui-space-4); }
 .login-field { display: grid; gap: var(--ui-space-2); color: #3b4659; font-size: 16px; font-weight: 560; }
 .login-phone, .login-code { display: flex; align-items: stretch; min-height: 52px; overflow: hidden; border: 1px solid #dce3ef; border-radius: var(--ui-radius-control); background: white; }
 .login-phone:focus-within, .login-code:focus-within { border-color: #86a6f8; box-shadow: 0 0 0 3px #3864e814; }
@@ -38,16 +28,13 @@
 .login-message { margin: 0 0 var(--ui-space-3); padding: 9px var(--ui-space-3); border-radius: var(--ui-radius-control); font-size: var(--ui-font-caption); line-height: 1.5; }
 .login-error { border: 1px solid #f1d0c2; color: #a34b2b; background: #fff6f1; }
 .login-notice { border: 1px solid #cce8dc; color: #1f7256; background: #f2fbf7; }
-.login-register { margin: 28px 0 0; color: var(--ui-muted); text-align: center; font-size: 14px; }
-.login-register a, .login-fallback { color: var(--ui-accent); text-decoration: none; }
-.login-register a:hover, .login-fallback:hover { text-decoration: underline; }
-.login-divider { height: 1px; margin: 32px 0 43px; background: var(--ui-line); }
-.login-fallback { display: block; width: fit-content; margin: 0 auto; font-size: var(--ui-font-caption); }
+.login-register { margin: var(--ui-space-5) 0 0; color: var(--ui-muted); text-align: center; font-size: var(--ui-font-caption); }
+.login-register a { color: var(--ui-accent); text-decoration: none; }
+.login-register a:hover { text-decoration: underline; }
 @media (max-width: 980px) {
   .login-gateway { grid-template-columns: minmax(0, 48%) minmax(420px, 52%); }
   .login-story { padding-inline: 36px; }
-  .login-brand, .login-story-foot { left: 36px; }
-  .login-story ul { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-space-4); }
+  .login-brand { left: 36px; }
 }
 @media (max-width: 720px) {
   .login-gateway { display: block; height: auto; min-height: 100dvh; overflow-x: hidden; overflow-y: auto; background: #f5f7fc; }
@@ -58,15 +45,10 @@
   .login-story-copy { transform: none; }
   .login-story h1 { font-size: var(--ui-font-hero); letter-spacing: -.5px; }
   .login-story-copy > p { margin-top: var(--ui-space-3); font-size: var(--ui-font-body); }
-  .login-story ul { display: none; }
-  .login-story-foot { bottom: var(--ui-space-4); left: var(--ui-space-4); letter-spacing: 1px; }
   .login-panel { display: block; padding: var(--ui-space-3); }
-  .login-card { display: block; width: 100%; min-height: 0; padding: var(--ui-space-5) var(--ui-space-4); transform: none; }
-  .login-card-brand { display: none; }
+  .login-card { display: block; width: 100%; padding: var(--ui-space-5) var(--ui-space-4); }
   .login-card h2 { margin-top: 0; font-size: var(--ui-font-title); text-align: left; }
-  .login-subtitle { margin-bottom: var(--ui-space-4); text-align: left; }
   .login-phone, .login-code, .login-submit { min-height: var(--ui-touch-target); }
-  .login-divider { margin: var(--ui-space-5) 0 var(--ui-space-4); }
 }
 @media (max-width: 360px) {
   .login-story { min-height: 190px; }

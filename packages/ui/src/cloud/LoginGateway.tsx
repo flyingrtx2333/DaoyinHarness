@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { HarnessLogo } from "./HarnessLogo.js";
-import { WorkbenchIcon } from "./WorkbenchIcon.js";
 
 const PLATFORM = "https://www.daoyintech.com";
 const API = "/api";
@@ -28,7 +27,7 @@ async function json(response: Response): Promise<unknown> {
   return response.json().catch(() => null);
 }
 
-export function LoginGateway({ fallbackLoginUrl }: { fallbackLoginUrl: string }): React.JSX.Element {
+export function LoginGateway(): React.JSX.Element {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [countdown, setCountdown] = useState(0);
@@ -99,21 +98,12 @@ export function LoginGateway({ fallbackLoginUrl }: { fallbackLoginUrl: string })
       <div className="login-aurora" aria-hidden="true"><span /><span /></div>
       <div className="login-story-copy">
         <h1 id="login-story-title">与 AI 一起，<br />把想法变成成果</h1>
-        <p>道引 Harness · 统一的 AI Agent 工作平台<br />支持创作、研究、业务工具与自动化流程，<br />让每个人与团队更高效地完成工作。</p>
-        <ul>
-          <li><span><WorkbenchIcon name="edit" /></span><b>内容创作</b><small>灵感即刻成文</small></li>
-          <li><span><WorkbenchIcon name="search" /></span><b>深度研究</b><small>从信息到洞见</small></li>
-          <li><span><WorkbenchIcon name="plugin" /></span><b>业务工具</b><small>连接你的业务</small></li>
-          <li><span><WorkbenchIcon name="connection" /></span><b>自动化流程</b><small>让工作自运行</small></li>
-        </ul>
+        <p>统一的 AI Agent 工作平台</p>
       </div>
-      <p className="login-story-foot">更强的个体 · 更高效的团队 · 更智能的未来</p>
     </section>
     <section className="login-panel" aria-labelledby="login-title">
       <div className="login-card">
-        <div className="login-card-brand"><HarnessLogo aria-hidden="true" /><span>道引 Harness</span></div>
-        <h2 id="login-title">欢迎使用道引</h2>
-        <p className="login-subtitle">使用道引统一账号登录 Harness</p>
+        <h2 id="login-title">登录 Harness</h2>
         {error && <div className="login-message login-error" role="alert">{error}</div>}
         {notice && <div className="login-message login-notice" role="status">{notice}</div>}
         <form onSubmit={event => { event.preventDefault(); void login(); }}>
@@ -123,8 +113,6 @@ export function LoginGateway({ fallbackLoginUrl }: { fallbackLoginUrl: string })
           <label className="login-agreement"><input type="checkbox" checked={agreed} onChange={event => setAgreed(event.target.checked)} disabled={submitting} /><span>我已了解并同意使用道引统一账号完成登录</span></label>
         </form>
         <p className="login-register">还没有道引账号？<a href={REGISTER_URL}>注册账号</a></p>
-        <div className="login-divider" />
-        <a className="login-fallback" href={fallbackLoginUrl}>使用主平台登录页</a>
       </div>
     </section>
   </main>;

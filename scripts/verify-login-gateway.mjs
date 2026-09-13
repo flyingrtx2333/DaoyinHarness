@@ -22,7 +22,7 @@ await build({
     import "./packages/ui/src/cloud/cloud.css";
     import "./packages/ui/src/cloud/login-gateway.css";
     import { LoginGateway } from "./packages/ui/src/cloud/LoginGateway.tsx";
-    createRoot(document.getElementById("root")).render(<LoginGateway fallbackLoginUrl="/api/agent-apps/saishi/workbench/login" />);
+    createRoot(document.getElementById("root")).render(<LoginGateway />);
   ` },
 });
 await writeFile(resolve(preview, "index.html"), "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>道引 Harness</title><link rel=\"stylesheet\" href=\"/login.css\"></head><body><div id=\"root\"></div><script type=\"module\" src=\"/login.js\"></script></body></html>");
@@ -62,7 +62,7 @@ try {
   page.on("pageerror", error => errors.push(error.message));
   page.on("requestfailed", request => failedRequests.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText ?? "failed"}`));
   await page.goto(origin + "/");
-  await page.getByRole("heading", { name: "欢迎使用道引" }).waitFor();
+  await page.getByRole("heading", { name: "登录 Harness" }).waitFor();
   assert.equal(await page.locator("input[type=password]").count(), 0);
   const desktopGeometry = await page.evaluate(() => ({ scrollHeight: document.documentElement.scrollHeight, innerHeight: window.innerHeight, scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth, bodyHeight: document.body.getBoundingClientRect().height, rootHeight: document.getElementById("root")?.getBoundingClientRect().height }));
   assert.equal(desktopGeometry.scrollHeight, desktopGeometry.innerHeight, JSON.stringify(desktopGeometry));
@@ -78,7 +78,7 @@ try {
   await page.getByRole("button", { name: "登录并进入 Harness" }).click();
   await sessionExchange;
   await page.waitForLoadState("domcontentloaded");
-  await page.getByRole("heading", { name: "欢迎使用道引" }).waitFor();
+  await page.getByRole("heading", { name: "登录 Harness" }).waitFor();
   assert.ok(requests.some(item => item.path === "/api/auth/sms/send" && item.body.includes('"scene":"login"')));
   assert.ok(requests.some(item => item.path === "/api/auth/sms-login" && item.body.includes('"sms_code":"123456"')));
   assert.ok(requests.some(item => item.path === "/api/auth/account-session" && item.authorization === "Bearer temporary-login-token"));
@@ -87,7 +87,7 @@ try {
   connected = false;
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(origin + "/");
-  await page.getByRole("heading", { name: "欢迎使用道引" }).waitFor();
+  await page.getByRole("heading", { name: "登录 Harness" }).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.screenshot({ path: resolve(evidence, "mobile-390x844.png"), fullPage: true, animations: "disabled", caret: "hide" });
   checks.push("390px mobile reflow without horizontal overflow");
