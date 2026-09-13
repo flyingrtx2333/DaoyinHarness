@@ -122,6 +122,9 @@ export class WorkbenchClient {
     if (!identifier(id)) throw new WorkbenchError("制作任务标识无效。");
     return this.#request("/productions/" + encodeURIComponent(id), undefined, signal);
   }
+  public async storyAssets(category: string, offset: number, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.#request("/assets?category=" + encodeURIComponent(category) + "&offset=" + offset, undefined, signal);
+  }
   public async controlStoryProduction(id: string, action: "pause" | "resume" | "approve" | "cancel", revision?: string): Promise<Record<string, unknown>> {
     if (!identifier(id)) throw new WorkbenchError("制作任务标识无效。");
     return this.#request("/productions/" + encodeURIComponent(id) + "/control", { action, requestId: crypto.randomUUID(), ...(revision ? { revision } : {}) });

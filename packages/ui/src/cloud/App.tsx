@@ -14,6 +14,7 @@ import { SettingsDialog } from "./SettingsDialog.js";
 import { ToolActivity } from "./ToolActivity.js";
 import { hasCreatedStoryVideo, StoryVideos } from "./StoryVideos.js";
 import { StoryProductions, storyProductionIds } from "./StoryProductions.js";
+import { AssetLibrary } from "./AssetLibrary.js";
 import { StoryUpload, type StoryReference } from "./StoryUpload.js";
 import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
@@ -83,7 +84,7 @@ export function App(): React.JSX.Element {
   const [cancelling, setCancelling] = useState(false);
   const [revision, setRevision] = useState(0);
   const [sidebar, setSidebar] = useState(false);
-  const [view, setView] = useState<"chat" | "plugins">(() => window.location.hash.startsWith("#plugins") ? "plugins" : "chat");
+  const [view, setView] = useState<"chat" | "plugins" | "assets">(() => window.location.hash === "#assets" ? "assets" : window.location.hash.startsWith("#plugins") ? "plugins" : "chat");
   const submission = useRef<Promise<CloudRun> | null>(null);
   const connecting = useRef(false);
   const loggingOut = useRef(false);
@@ -303,7 +304,7 @@ export function App(): React.JSX.Element {
     <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航" onKeyDown={(event) => { if (event.key === "Escape" && sidebar) { event.preventDefault(); closeSidebar(); } }}>
       <button type="button" className="sidebar-close" aria-label="关闭会话导航" onClick={closeSidebar}>×</button>
       <a className="brand" href="/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
-      <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button></nav>
+      <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); window.history.replaceState(null,"",window.location.pathname); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "assets" ? "page" : undefined} onClick={() => { setView("assets"); setSidebar(false); window.history.replaceState(null,"","#assets"); }}><WorkbenchIcon name="image" />资产</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button></nav>
       <SessionHistory key={`${APPLICATION}:${client.accountScope}:${accountEpoch.current}:${phase}`} sessions={sessions} selected={selected} chatActive={view === "chat"}
         disabled={phase !== "ready" || submitting || !!managing} isProtected={isSessionProtected} onChoose={choose} onManage={manageSession} />
       {phase === "ready" && account && <footer className="sidebar-footer"><AccountIdentity key={client.accountScope} account={account} onSettings={() => setSettingsOpen(true)} onLogout={logout} /></footer>}
@@ -311,6 +312,7 @@ export function App(): React.JSX.Element {
     <main id="conversation" className="main" tabIndex={-1}>
       <button className="mobile-menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
       {view === "plugins" && <div className="transcript plugin-transcript"><PluginWorkspace key={`${APPLICATION}:${client.accountScope}`} selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /></div>}
+      {view === "assets" && <div className="transcript plugin-transcript"><AssetLibrary key={`${client.accountScope}:${phase}`} client={client} ready={phase === "ready"} onConnect={() => { if (loginUrl) window.location.assign(loginUrl); else void connect(); }} /></div>}
       <div className="transcript" hidden={view !== "chat"} onScroll={(event) => { const element = event.currentTarget; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160; }}>
         <div className="conversation-content">
           {phase === "connecting" && <p className="connection-message" role="status"><span className="spinner" /> 正在连接工作台…</p>}
