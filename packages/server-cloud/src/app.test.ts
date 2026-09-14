@@ -102,7 +102,7 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
     expect(seen).toHaveLength(2);
   });
 
-  it("waits for a persisted video confirmation and only permits the exact confirmed generation input", async () => {
+  it("accepts a refreshed same-account authorization and only permits the exact confirmed video input", async () => {
     const input = { modelName: "Seedance", resolution: "720p", durationSeconds: 10, prompt: "雨中追逐",
       aspectRatio: "16:9", target: "new", request_key: "request_video_001" };
     const execute = vi.fn(async (): Promise<ToolSuccess> => ({ ok: true, summary: "视频任务已创建",
@@ -126,7 +126,7 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
       } }) });
     current.tokens.set("owner", identity({ permissions: ["agent.use", "story.generate"], allowedTools: ["story_create_video"] }));
     const sessionId = await createSession(current.app);
-    const accepted = await submit(current.app, sessionId, "video-request", "把上一段延续为雨中追逐镜头");
+    const accepted = await submit(current.app, sessionId, "video-request", "雨中追逐");
     const runId = accepted.json<{ run: CloudRun }>().run.id;
     let requested: Extract<AgentEvent, { type: "interaction.requested" }> | undefined;
     for (let attempt = 0; attempt < 100 && requested === undefined; attempt += 1) {
@@ -138,6 +138,7 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
       await current.repository.readEvents(current.tokens.get("owner")!, sessionId, 0, 100)));
     expect(requested).toBeDefined();
     expect(execute).not.toHaveBeenCalled();
+    current.tokens.set("owner", { ...current.tokens.get("owner")!, authorizationId: "grant-rotated" });
     const response = await current.app.inject({ method: "POST",
       url: `/api/v1/cloud/runs/${runId}/interactions/${requested!.payload.interactionId}/respond`, headers: headers(),
       payload: { resolution: "confirmed", input } });
@@ -151,7 +152,7 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
 
   it("does not spend the runtime deadline while waiting for video confirmation", async () => {
     const input = { modelName: "Seedance", resolution: "720p", durationSeconds: 10, prompt: "续接镜头",
-      aspectRatio: "16:9", target: "existing", source_video_id: "video-previous", request_key: "request_video_next" };
+      aspectRatio: "16:9", target: "new", request_key: "request_video_next" };
     const execute = vi.fn(async (): Promise<ToolSuccess> => ({ ok: true, summary: "视频任务已创建",
       evidence: { schemaVersion: 1, toolName: "story_create_video", result: { video_id: "video-next" }, artifacts: [], diagnostics: [] } }));
     const video: CloudToolBinding = { definition: { name: "story_create_video", description: "创建视频",
@@ -169,7 +170,7 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
       } }) });
     current.tokens.set("owner", identity({ permissions: ["agent.use", "story.generate"], allowedTools: ["story_create_video"] }));
     const sessionId = await createSession(current.app);
-    const accepted = await submit(current.app, sessionId, "video-next", "接着上个视频，继续生成下一段10秒镜头");
+    const accepted = await submit(current.app, sessionId, "video-next", "生成10秒雨中镜头");
     const runId = accepted.json<{ run: CloudRun }>().run.id;
     let requested: Extract<AgentEvent, { type: "interaction.requested" }> | undefined;
     for (let attempt = 0; attempt < 100 && requested === undefined; attempt += 1) {

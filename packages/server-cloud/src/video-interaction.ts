@@ -167,7 +167,8 @@ export class VideoInteractionCoordinator {
   public async resolve(identity: ExecutionIdentity, runId: string, interactionId: string, resolution: Resolution): Promise<void> {
     const pending = this.#pending.get(interactionId);
     if (pending === undefined || pending.run.id !== runId || pending.settled || pending.resolving || !sameExecutionScope(identity, pending.identity) ||
-        identity.authorizationId !== pending.identity.authorizationId) {
+        identity.billingAccountId !== pending.identity.billingAccountId ||
+        !identity.permissions.includes("agent.use") || !identity.allowedTools.includes(pending.operation)) {
       throw new CloudError(409, "INTERACTION_NOT_PENDING", "该确认请求已处理、已失效或不属于当前任务。");
     }
     const confirmedInput = resolution.input ?? pending.requestedInput;

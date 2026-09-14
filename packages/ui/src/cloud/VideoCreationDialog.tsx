@@ -45,11 +45,12 @@ export function VideoCreationDialog({ interaction, busy, error, onCancel, onConf
   }, []);
   function update(key: string, value: unknown): void { setInput(current => ({ ...current, [key]: value })); }
   const content = production ? text(input, "brief") : text(input, "prompt");
+  const showBillingNote = productionV2 || estimated !== undefined;
   return <dialog ref={dialog} className="video-creation-dialog" aria-labelledby="video-creation-title"
-    aria-describedby="video-creation-note" aria-busy={busy}
+    aria-describedby={showBillingNote ? "video-creation-note" : undefined} aria-busy={busy}
     onCancel={(event) => { event.preventDefault(); if (!busy) onCancel(); }}>
     <form onSubmit={(event) => { event.preventDefault(); if (!busy && content.trim()) onConfirm(input); }}>
-      <header><div><span className="dialog-kicker">Story 制作确认</span><h2 id="video-creation-title">{production ? "确认一键生成短剧" : "确认生成视频"}</h2></div>
+      <header><h2 id="video-creation-title">{production ? "确认一键生成短剧" : "确认生成视频"}</h2>
         <button type="button" className="plugin-close" aria-label="取消本次视频生成" disabled={busy} onClick={onCancel}>×</button></header>
       {production && <label className="video-field"><span>项目名称 <b>必填</b></span><input ref={firstField as React.RefObject<HTMLInputElement>}
         required maxLength={120} value={text(input, "title")} onChange={(event) => update("title", event.target.value)} /></label>}
@@ -81,11 +82,11 @@ export function VideoCreationDialog({ interaction, busy, error, onCancel, onConf
       </div>}
       {!production && <p className="video-creation-meta">生成方式：{({ new: "新生成", existing: "参考已有视频生成新版本", upload: "参考上传视频生成新版本", continue: "尾帧续接 · 上一段尾帧作为本段首帧" } as Record<string, string>)[text(input, "target")] ?? "新生成"}</p>}
       {continuation && interaction.firstFrameUrl && <img src={interaction.firstFrameUrl} alt="上一段尾帧，将作为本段首帧" style={{ maxWidth: "100%", maxHeight: 160, objectFit: "contain" }} />}
-      <p id="video-creation-note" className="video-creation-note">{productionV2
+      {showBillingNote && <p id="video-creation-note" className="video-creation-note">{productionV2
         ? <>预计整集消耗 <strong>{estimated ?? "尚未取得估算"} 积分</strong>。预算内允许恢复或重试，超限暂停。旁白、混音和同步字幕由后台自动完成；确认后不会逐镜弹窗。</>
         : estimated !== undefined
         ? <>预计消耗 <strong>{estimated} 积分</strong>{reserved !== undefined ? `，提交时可能临时冻结 ${reserved} 积分` : ""}。确认后才会提交真实生成任务。</>
-        : "费用将按当前账号和所选模型的实时规则结算；确认后才会提交真实生成任务。"}</p>
+        : null}</p>}
       {error && <p className="video-creation-error" role="alert">{error}</p>}
       <footer><button type="button" disabled={busy} onClick={onCancel}>取消生成</button>
         <button type="submit" className="primary" disabled={busy || !content.trim()}>{busy ? "正在确认…" : "确认并开始生成"}</button></footer>

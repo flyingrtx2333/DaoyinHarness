@@ -613,6 +613,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         properties: { resolution: { type: "string", enum: ["confirmed", "cancelled"] }, input: { type: "object", maxProperties: 32 } } } },
     }, async (request) => {
       const identity = identityFor(request);
+      await ensureActive(identity);
       await options.repository.getRun(identity, request.params.runId);
       await videoInteractions.resolve(identity, request.params.runId, request.params.interactionId, request.body);
       return { accepted: true };
