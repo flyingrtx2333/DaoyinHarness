@@ -298,7 +298,7 @@ export class PostgresCloudRepository implements CloudRepository {
         VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$9)`, [runId, key, sessionId, requestId, inputHash, userMessage,
         identity.authorizationId, identity.billingAccountId, createdAt]);
       await client.query(`INSERT INTO session_search_documents(turn_id,scope_key,session_id,search_text,updated_at)
-        VALUES ($1,$2,$3,LEFT(CONCAT_WS(' ',$4,$5),20000),$6)`,
+        VALUES ($1,$2,$3,LEFT(CONCAT_WS(' ',$4::text,$5::text),20000),$6)`,
         [runId, key, sessionId, String(selectedSession.title), userMessage, Date.now()]);
       return { run: run(await this.#run(client, key, runId)), created: true };
     });
@@ -338,7 +338,7 @@ export class PostgresCloudRepository implements CloudRepository {
         VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$9)`, [runId, key, sessionId, input.operationId, digest(input.instruction), input.instruction,
         identity.authorizationId, identity.billingAccountId, createdAt]);
       await client.query(`INSERT INTO session_search_documents(turn_id,scope_key,session_id,search_text,updated_at)
-        VALUES ($1,$2,$3,LEFT(CONCAT_WS(' ',$4,$5),20000),$6)`,
+        VALUES ($1,$2,$3,LEFT(CONCAT_WS(' ',$4::text,$5::text),20000),$6)`,
         [runId, key, sessionId, `子任务 · ${input.nodeId}`, input.instruction, Date.now()]);
       await client.query(`INSERT INTO cloud_child_runs(parent_run_id,parent_session_id,operation_id,tool_call_id,node_id,child_run_id,child_session_id,scope_key,created_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [parentRunId, parentSessionId, input.operationId, input.toolCallId, input.nodeId, runId, sessionId, key, createdAt]);
