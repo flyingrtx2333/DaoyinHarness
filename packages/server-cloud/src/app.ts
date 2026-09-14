@@ -12,7 +12,7 @@ import { createCloudMemoryRuntime } from "./memory-tools.js";
 import { AUTONOMOUS_MEMORY_INSTRUCTIONS, isMemoryToolName } from "./memory-agent-policy.js";
 import { createCloudEpisodicMemoryRuntime, EPISODIC_MEMORY_INSTRUCTIONS, isEpisodicMemoryToolName } from "./episodic-memory-tools.js";
 import { ToolRegistry, type ToolAuthorization, type ToolDefinition, type ToolRequest } from "@daoyin/harness-tools/registry";
-import { assertExecutionIdentity, ExecutionAccessError, sameExecutionScope, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
+import { assertExecutionIdentity, ExecutionAccessError, executionScopeKey, sameExecutionScope, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import { CloudError, SESSION_ACTIONS, type BoundRunStores, type CloudRepository, type CloudRun, type SessionAction } from "./repository.js";
 import { registerMemoryRoutes } from "./memory-routes.js";
 import { registerCloudEventStream, type EventStreamLimits } from "./event-stream.js";
@@ -165,15 +165,57 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     }
   }
 
+  const authorizationLeases = new Map<string, { checkedAt: number; pending?: Promise<void> }>();
+  const authorizationLeaseMs = 1_000;
+  const authorizationKey = (identity: ExecutionIdentity): string =>
+    JSON.stringify([identity.authorizationId, executionScopeKey(identity), identity.expiresAt]);
+
+  function trimAuthorizationLeases(now: number): void {
+    for (const [key, lease] of authorizationLeases) {
+      if (lease.pending === undefined && now - lease.checkedAt > 10_000) authorizationLeases.delete(key);
+    }
+    if (authorizationLeases.size < 512) return;
+    const removable = [...authorizationLeases].find(([, lease]) => lease.pending === undefined);
+    if (removable !== undefined) authorizationLeases.delete(removable[0]);
+  }
+
   async function ensureActive(identity: ExecutionIdentity, parent?: AbortSignal): Promise<void> {
     await assertOwner();
     assertExecutionIdentity(identity);
     const timeout = AbortSignal.timeout(5_000);
     const signal = parent === undefined ? timeout : AbortSignal.any([parent, timeout]);
-    const allowed = await abortable(() => options.isAuthorizationActive(identity, signal), signal);
+    let allowed: boolean;
+    try { allowed = await abortable(() => options.isAuthorizationActive(identity, signal), signal); }
+    catch (error) {
+      if (timeout.aborted && parent?.aborted !== true) {
+        throw new CloudError(503, "PLATFORM_AUTH_TIMEOUT", "平台授权校验响应超时，请重试；任务与已保存结果不受影响。");
+      }
+      throw error;
+    }
     await assertOwner();
     assertExecutionIdentity(identity);
     if (!allowed) throw new CloudError(403, "AUTHORIZATION_REVOKED", "当前空间或应用授权已失效。");
+  }
+
+  async function ensureTransportActive(identity: ExecutionIdentity, parent?: AbortSignal): Promise<void> {
+    await assertOwner();
+    assertExecutionIdentity(identity);
+    const now = Date.now();
+    trimAuthorizationLeases(now);
+    const key = authorizationKey(identity);
+    const current = authorizationLeases.get(key);
+    if (current !== undefined && current.pending === undefined && now - current.checkedAt <= authorizationLeaseMs) return;
+    let pending = current?.pending;
+    if (pending === undefined) {
+      pending = ensureActive(identity);
+      authorizationLeases.set(key, { checkedAt: current?.checkedAt ?? 0, pending });
+      void pending.then(
+        () => authorizationLeases.set(key, { checkedAt: Date.now() }),
+        () => authorizationLeases.delete(key),
+      );
+    }
+    if (parent === undefined) await pending;
+    else await abortable(() => pending, parent);
   }
 
   const identityFor = (request: FastifyRequest): ExecutionIdentity => {
@@ -199,11 +241,18 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
       throw new CloudError(401, "AUTHENTICATION_REQUIRED", "请先完成应用授权。");
     }
     const signal = AbortSignal.timeout(5_000);
-    const resolved = await abortable(() => options.authenticate(header.slice(7), signal), signal);
+    let resolved: ExecutionIdentity | null;
+    try { resolved = await abortable(() => options.authenticate(header.slice(7), signal), signal); }
+    catch (error) {
+      if (signal.aborted) {
+        throw new CloudError(503, "PLATFORM_LOGIN_TIMEOUT", "平台登录校验响应超时，请重试；任务与已保存结果不受影响。");
+      }
+      throw error;
+    }
     assertExecutionIdentity(resolved);
     const identity = snapshotExecutionIdentity(resolved);
     if (!identity.permissions.includes("agent.use")) throw new CloudError(403, "APP_ACCESS_DENIED", "未开通当前应用的 Agent 使用权限。");
-    await ensureActive(identity);
+    await ensureTransportActive(identity);
     identities.set(request, identity);
   });
 
@@ -225,7 +274,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
 
   registerProjectAuthorization(app, { repository: options.repository, ensureActive });
   registerProjectRoutes(app, { repository: options.repository, identityFor, ensureActive });
-  registerCloudEventStream(app, { repository: options.repository, identityFor, ensureActive,
+  registerCloudEventStream(app, { repository: options.repository, identityFor, ensureActive: ensureTransportActive,
     ...(options.eventStream === undefined ? {} : { limits: options.eventStream }) });
 
   app.get("/health/live", async () => ({ status: "alive" }));

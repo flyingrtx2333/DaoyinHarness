@@ -131,9 +131,8 @@ export function registerCloudEventStream(app: FastifyInstance, options: Options)
     async function send(value: Record<string, unknown>): Promise<void> {
       const text = JSON.stringify({ ...value, sessionId });
       if (Buffer.byteLength(text) > MAX_FRAME || socket.bufferedAmount > MAX_BUFFER) throw new Error("Slow consumer");
-      // Recheck after database reads and before EACH data frame. Expiry is also
-      // enforced during idle heartbeat; never grant indefinite access at handshake.
-      await options.ensureActive(identity, controller.signal);
+      // The pump validates authorization before reading. Sending every frame
+      // must not fan out duplicate platform checks during replay.
       controller.signal.throwIfAborted();
       if (socket.readyState !== 1) throw new Error("Closed stream");
       await new Promise<void>((resolve, reject) => {

@@ -109,7 +109,7 @@ export class WorkbenchClient {
     } catch (error) {
       if (signal?.aborted) throw new DOMException("View closed", "AbortError");
       if (error instanceof WorkbenchError) throw error;
-      throw new WorkbenchError("连接中断，请重新连接。已提交的任务会保留，可以恢复原提交。");
+      throw new WorkbenchError("连接平台超时，请重试。已提交的任务和保存结果不会丢失。");
     } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
   }
 
