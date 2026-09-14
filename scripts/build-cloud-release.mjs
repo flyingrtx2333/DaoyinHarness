@@ -22,6 +22,20 @@ const read = (path) => {
     const before="const app = Fastify({ logger: false, bodyLimit: 64_000,";
     if(!value.includes(before)&&!value.includes("forceCloseConnections: true"))throw new Error("Unexpected deployed cloud app shape.");
     value=value.replace(before,"const app = Fastify({ logger: false, forceCloseConnections: true, bodyLimit: 64_000,");
+    const toolBefore = `            const result = await abortable(() => binding.definition.execute(input, signal, context), signal);
+            await ensureActive(identity, signal);
+            return result;`;
+    const toolAfter = `            const suspendsDeadline = binding.definition.name === "project_concept_generate";
+            if (suspendsDeadline) suspendRunDeadline();
+            try {
+              const result = await abortable(() => binding.definition.execute(input, signal, context), signal);
+              await ensureActive(identity, signal);
+              return result;
+            } finally {
+              if (suspendsDeadline) resumeRunDeadline();
+            }`;
+    if(!value.includes(toolBefore)&&!value.includes("const suspendsDeadline = binding.definition.name"))throw new Error("Unexpected deployed project tool wrapper shape.");
+    value=value.replace(toolBefore,toolAfter);
   }
   return value;
 };

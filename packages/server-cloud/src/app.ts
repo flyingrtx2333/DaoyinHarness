@@ -334,9 +334,15 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           execute: (input, signal, context) => measurements.measure(run.id, "tool_inclusive", async () => {
             await ensureActive(identity, signal);
             chargeTool();
-            const result = await abortable(() => binding.definition.execute(input, signal, context), signal);
-            await ensureActive(identity, signal);
-            return result;
+            const suspendsDeadline = binding.definition.name === "project_concept_generate";
+            if (suspendsDeadline) suspendRunDeadline();
+            try {
+              const result = await abortable(() => binding.definition.execute(input, signal, context), signal);
+              await ensureActive(identity, signal);
+              return result;
+            } finally {
+              if (suspendsDeadline) resumeRunDeadline();
+            }
           }, (result) => result.ok),
         }));
         const authorize: ToolAuthorization = async ({ tool, context, request }): Promise<boolean> => {
