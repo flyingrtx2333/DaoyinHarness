@@ -11,7 +11,7 @@ export function isExplicitNewVideoRequest(message: string): boolean {
   if (!text || text.includes("[已上传参考") || /^(?:如何|怎么|为什么|为何|是否支持|能否查询|查询|查看|刷新|取消|停止|不要)/u.test(text)) return false;
   // Multi-shot deliverables must stay in the normal Agent path so it can plan
   // a durable Story production, narration, subtitles and the final export.
-  if (/(?:宣传片|宣传视频|成片|短剧|分镜|混剪|片尾|旁白|字幕|配音)|(?:[2-9]\d|[1-9]\d{2,})\s*秒|(?:半|一|两|二)\s*分钟/u.test(text)) return false;
+  if (/(?:宣传片|宣传短片|宣传视频|成片|短剧|分镜|混剪|片尾|旁白|字幕|配音)|(?:[2-9]\d|[1-9]\d{2,})\s*秒|(?:半|一|两|二)\s*分钟/u.test(text)) return false;
   return /^(?:(?:请|请你|帮我|给我|我要|我想|想要|立即|直接)\s*)?(?:生成|制作|创建|做)(?:一段|一个|个|段)?[^。！？\n]{0,100}(?:视频|短片)(?:[。！!]?)$/u.test(text);
 }
 

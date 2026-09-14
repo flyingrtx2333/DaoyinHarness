@@ -4,7 +4,8 @@ import { createExplicitVideoFlow, isExplicitNewVideoRequest } from "./explicit-v
 
 describe("explicit video flow", () => {
   it("routes explicit new-video commands but leaves questions and referenced edits to the Agent", () => {
-    expect(isExplicitNewVideoRequest("生成一段高燃混剪视频")).toBe(true);
+    expect(isExplicitNewVideoRequest("生成一段海浪翻涌视频")).toBe(true);
+    expect(isExplicitNewVideoRequest("生成一段高燃混剪视频")).toBe(false);
     expect(isExplicitNewVideoRequest("帮我制作一个体育宣传短片")).toBe(false);
     expect(isExplicitNewVideoRequest("制作30秒宣传视频，要旁白和字幕")).toBe(false);
     expect(isExplicitNewVideoRequest("怎么生成视频？")).toBe(false);
@@ -13,7 +14,7 @@ describe("explicit video flow", () => {
   });
 
   it("starts with capability discovery without calling the paid generation tool", async () => {
-    const run = { id: "run_12345678-1234-1234-1234-123456789012", userMessage: "生成一段高燃混剪视频" } as CloudRun;
+    const run = { id: "run_12345678-1234-1234-1234-123456789012", userMessage: "生成一段海浪翻涌视频" } as CloudRun;
     const polish = vi.fn(async () => ({ kind: "assistant" as const, content: "高速动作蒙太奇，强对比光影，无旁白。" }));
     const model = createExplicitVideoFlow(run, { complete: polish })!;
     const tools = ["story_video_options", "story_estimate_video", "request_video_confirmation", "story_create_video"].map(name => ({
