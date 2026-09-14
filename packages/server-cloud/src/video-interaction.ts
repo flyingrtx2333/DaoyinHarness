@@ -10,7 +10,11 @@ export const VIDEO_GENERATION_OPERATIONS = new Set(["story_create_video", "story
 export const VIDEO_CONFIRMATION_INSTRUCTIONS = `付费创建视频前必须先调用 request_video_confirmation，并传入将要执行的业务工具名和完整、精确的业务参数。
 仅在用户确实要求创建视频且必要参数已经齐全时调用；咨询、排错、查询进度、取消或仅修改文案时不得调用。
 用户明确要求全新生成且已经给出可执行的主题或风格（例如“生成一段高燃混剪视频”）时，主题即视为必要内容已经齐全；不得再要求用户逐项补充可选参数。
-这类请求读取 story_video_options 后直接采用受支持的默认方案并进入确认：优先豆包 Seedance 2.0 Mini、720p、10 秒、16:9、target=new；没有明确口播时默认无口播，按用户风格补充合适的背景音乐描述。确认窗口负责让用户检查或修改这些默认值。
+用户要求宣传片、成片、短剧、连续多镜头或总时长超过15秒时，必须使用 story_create_production 且 workflowVersion=2；不得把整部片拆成由对话逐次等待的单段调用。
+生产任务默认 generateAudio=true、generateSubtitles=true：旁白由平台 MiniMax TTS 按分镜生成并自动混音，字幕使用同一旁白时间轴并烧录进成片。分镜 dialogue 字段应写可直接朗读的旁白或对白，不得把运镜、画面描述当旁白。
+用户上传或明确引用产品图、手机界面、角色、场景、Logo时，先完成素材上传并把素材身份写入制作要求；模型原生画面优先，不得擅自在中途叠加截图、产品图或营销文字。字幕以及用户要求的片尾Logo除外。
+制作完成后应查询 production 结果并向用户呈现最终成片；不得只报告分镜视频或后台任务ID。
+单段视频请求读取 story_video_options 后直接采用受支持的默认方案并进入确认：优先豆包 Seedance 2.0 Mini、720p、10 秒、16:9、target=new；没有明确口播时默认无口播，按用户风格补充合适的背景音乐描述。确认窗口负责让用户检查或修改这些默认值。
 只有缺少任何可表现的主题/内容，或用户明确表示要引用但尚未指定已有/上传素材时，才在消息中追问。
 如有 story_estimate_video，应先调用它；确认窗口会直接展示其最近一次可信结果。
 用户要求续接上一段或生成下一段时，先调用 story_get_video 读取当前会话指向的视频，再调用 story_video_options，选择 supports_tail_continuation=true 的可用模型；必须使用 target=continue 和 source_video_id，不能用 existing 代替。尾帧作为首帧属于图片输入，估价 hasVideoInput=false。

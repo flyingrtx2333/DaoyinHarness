@@ -70,8 +70,8 @@ export function VideoCreationDialog({ interaction, busy, error, onCancel, onConf
       {production && <div className="video-field-grid"><label className="video-field"><span>单段时长</span><input type="number" disabled={productionV2} min="4" max="15" step="1"
         value={number(input, "segmentDurationSeconds", 8)} onChange={(event) => update("segmentDurationSeconds", event.target.valueAsNumber)} /></label></div>}
       {production && <div className="video-confirm-checks">
-        <label><input type="checkbox" checked={bool(input, "generateAudio", true)} onChange={(event) => update("generateAudio", event.target.checked)} />生成配音</label>
-        <label><input type="checkbox" checked={bool(input, "generateSubtitles", true)} onChange={(event) => update("generateSubtitles", event.target.checked)} />生成字幕</label>
+        <label><input type="checkbox" checked={bool(input, "generateAudio", true)} onChange={(event) => update("generateAudio", event.target.checked)} />生成旁白并自动混音</label>
+        <label><input type="checkbox" checked={bool(input, "generateSubtitles", true)} onChange={(event) => update("generateSubtitles", event.target.checked)} />生成同步字幕并烧录</label>
       </div>}
       {productionV2 && <div className="video-field-grid">
         <label className="video-field"><span>制作方式</span><select value={text(input, "reviewMode") || "AUTO"} onChange={event => update("reviewMode", event.target.value)}>
@@ -82,7 +82,7 @@ export function VideoCreationDialog({ interaction, busy, error, onCancel, onConf
       {!production && <p className="video-creation-meta">生成方式：{({ new: "新生成", existing: "参考已有视频生成新版本", upload: "参考上传视频生成新版本", continue: "尾帧续接 · 上一段尾帧作为本段首帧" } as Record<string, string>)[text(input, "target")] ?? "新生成"}</p>}
       {continuation && interaction.firstFrameUrl && <img src={interaction.firstFrameUrl} alt="上一段尾帧，将作为本段首帧" style={{ maxWidth: "100%", maxHeight: 160, objectFit: "contain" }} />}
       <p id="video-creation-note" className="video-creation-note">{productionV2
-        ? <>预计整集消耗 <strong>{estimated ?? "尚未取得估算"} 积分</strong>。预算内每项最多重试一次，超限暂停。资产、剧本与审核沿用当前规则，不单独扣 Story 钱包积分。确认后后台逐步制作，不会逐镜弹窗。</>
+        ? <>预计整集消耗 <strong>{estimated ?? "尚未取得估算"} 积分</strong>。预算内允许恢复或重试，超限暂停。旁白、混音和同步字幕由后台自动完成；确认后不会逐镜弹窗。</>
         : estimated !== undefined
         ? <>预计消耗 <strong>{estimated} 积分</strong>{reserved !== undefined ? `，提交时可能临时冻结 ${reserved} 积分` : ""}。确认后才会提交真实生成任务。</>
         : "费用将按当前账号和所选模型的实时规则结算；确认后才会提交真实生成任务。"}</p>

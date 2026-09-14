@@ -5,7 +5,8 @@ import { createExplicitVideoFlow, isExplicitNewVideoRequest } from "./explicit-v
 describe("explicit video flow", () => {
   it("routes explicit new-video commands but leaves questions and referenced edits to the Agent", () => {
     expect(isExplicitNewVideoRequest("生成一段高燃混剪视频")).toBe(true);
-    expect(isExplicitNewVideoRequest("帮我制作一个体育宣传短片")).toBe(true);
+    expect(isExplicitNewVideoRequest("帮我制作一个体育宣传短片")).toBe(false);
+    expect(isExplicitNewVideoRequest("制作30秒宣传视频，要旁白和字幕")).toBe(false);
     expect(isExplicitNewVideoRequest("怎么生成视频？")).toBe(false);
     expect(isExplicitNewVideoRequest("查询视频生成进度")).toBe(false);
     expect(isExplicitNewVideoRequest("生成视频\n\n[已上传参考图片，文件名：a.png，素材 ID：asset_1]")).toBe(false);

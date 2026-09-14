@@ -56,6 +56,7 @@ function ProductionCard({ id, client }: { id: string; client: WorkbenchClient })
   const result = record(data?.result_json) ? data.result_json : undefined;
   const exported = result && record(result.export) ? result.export : undefined;
   const videoUrl = state === "DONE" ? url(exported?.output_url) : undefined;
+  const subtitleUrl = state === "DONE" ? url(exported?.subtitle_url) : undefined;
   async function control(action: "pause" | "resume" | "approve" | "cancel"): Promise<void> {
     if (busy) return;
     setBusy(true); setError("");
@@ -68,6 +69,7 @@ function ProductionCard({ id, client }: { id: string; client: WorkbenchClient })
   return <section className="story-video-card" aria-label="短剧制作任务">
     <p className="story-video-status" role="status">{status} · {Number(data?.progress || 0)}%</p>
     {videoUrl && <video className="story-video-player" controls preload="metadata" src={videoUrl} />}
+    {subtitleUrl && <p><a href={subtitleUrl} target="_blank" rel="noreferrer">下载同步字幕</a>{exported?.subtitle_burned_in === true ? " · 已烧录到成片" : ""}</p>}
     {budget && <p>已用 {Number(budget.spentCredits).toFixed(2)} · 预留 {Number(budget.reservedCredits).toFixed(2)} · 上限 {Number(budget.maxCredits).toFixed(2)} 积分</p>}
     {typeof data?.error_message === "string" && data.error_message && <p className="story-video-error">{data.error_message}</p>}
     {error && <p role="alert" className="story-video-error">{error}</p>}
