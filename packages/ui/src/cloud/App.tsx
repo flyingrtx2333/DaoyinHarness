@@ -21,6 +21,9 @@ import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
 import { VideoCreationDialog } from "./VideoCreationDialog.js";
 import { LoginGateway } from "./LoginGateway.js";
+import { EvaluationClient } from "./evaluation-client.js";
+import { AdminWorkspace } from "./AdminWorkspace.js";
+import { canShowAdmin, requestedAdminView } from "./admin-access.js";
 
 const APPLICATION = "saishi" as const;
 const entryUrl = new URL(window.location.href);
@@ -86,7 +89,9 @@ export function App(): React.JSX.Element {
   const [cancelling, setCancelling] = useState(false);
   const [revision, setRevision] = useState(0);
   const [sidebar, setSidebar] = useState(false);
-  const [view, setView] = useState<"chat" | "plugins" | "assets" | "projects">(() => window.location.hash === "#assets" ? "assets" : window.location.hash.startsWith("#plugins") ? "plugins" : "chat");
+  const [view, setView] = useState<"chat" | "plugins" | "assets" | "projects" | "admin">(() => window.location.hash === "#assets" ? "assets" : window.location.hash.startsWith("#plugins") ? "plugins" : "chat");
+  const [adminClient] = useState(() => new EvaluationClient());
+  const [adminScope, setAdminScope] = useState("");
   const submission = useRef<Promise<CloudRun> | null>(null);
   const connecting = useRef(false);
   const loggingOut = useRef(false);
@@ -150,6 +155,28 @@ export function App(): React.JSX.Element {
     finally { connecting.current = false; }
   }
   useEffect(() => { void connect(); }, []); // One bootstrap; the entry intentionally does not double-mount effects.
+  useEffect(() => {
+    if (phase !== "ready") { adminClient.reset(); setAdminScope(""); return; }
+    let stopped = false; let controller: AbortController | undefined;
+    async function check(): Promise<void> {
+      controller?.abort(); controller = new AbortController(); const current = controller;
+      try {
+        await adminClient.bootstrap(current.signal);
+        if (!stopped && !current.signal.aborted) {
+          setAdminScope(adminClient.scope);
+          if (requestedAdminView(window.location.hash, true)) setView("admin");
+        }
+      } catch {
+        if (!stopped && !current.signal.aborted) { adminClient.reset(); setAdminScope(""); }
+      }
+    }
+    const focus = (): void => { if (document.visibilityState === "visible") void check(); };
+    void check();
+    const timer = window.setInterval(focus, 30_000);
+    window.addEventListener("focus", focus); document.addEventListener("visibilitychange", focus);
+    return () => { stopped = true; controller?.abort(); window.clearInterval(timer); window.removeEventListener("focus", focus); document.removeEventListener("visibilitychange", focus); };
+  }, [phase, account, adminClient]);
+  useEffect(() => { if (view === "admin" && !canShowAdmin(adminScope)) setView("chat"); }, [view, adminScope]);
   useEffect(() => {
     let timer: number | undefined;
     const checkAccount = (): void => {
@@ -222,6 +249,7 @@ export function App(): React.JSX.Element {
 
   function choose(id: string): void {
     setSelected(id); setDraft(""); setReferences([]); setError(""); setSidebar(false); setView("chat");
+    window.history.replaceState(null,"",window.location.pathname);
     if (!id) try { storage.removeItem(SELECTED); } catch { /* Optional selection history. */ }
   }
   function isSessionProtected(id: string): boolean {
@@ -243,7 +271,7 @@ export function App(): React.JSX.Element {
     } finally { sessionMutation.current = false; setManaging(""); }
   }
   function browsePlugins(): void {
-    setView("plugins"); setSidebar(false);
+    setView("plugins"); setSidebar(false); window.history.replaceState(null,"","#plugins");
     window.requestAnimationFrame(() => document.getElementById("conversation")?.focus());
   }
   function usePlugin(id: string, focusComposer = true): void {
@@ -310,7 +338,7 @@ export function App(): React.JSX.Element {
     <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航" onKeyDown={(event) => { if (event.key === "Escape" && sidebar) { event.preventDefault(); closeSidebar(); } }}>
       <button type="button" className="sidebar-close" aria-label="关闭会话导航" onClick={closeSidebar}>×</button>
       <a className="brand" href="/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
-      <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "projects" ? "page" : undefined} onClick={() => { setView("projects"); setSidebar(false); }}>项目</button><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); window.history.replaceState(null,"",window.location.pathname); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "assets" ? "page" : undefined} onClick={() => { setView("assets"); setSidebar(false); window.history.replaceState(null,"","#assets"); }}><WorkbenchIcon name="image" />资产</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button></nav>
+      <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "projects" ? "page" : undefined} onClick={() => { setView("projects"); setSidebar(false); window.history.replaceState(null,"","#projects"); }}>项目</button><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); window.history.replaceState(null,"",window.location.pathname); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "assets" ? "page" : undefined} onClick={() => { setView("assets"); setSidebar(false); window.history.replaceState(null,"","#assets"); }}><WorkbenchIcon name="image" />资产</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button>{canShowAdmin(adminScope) && <button aria-current={view === "admin" ? "page" : undefined} onClick={() => { setView("admin"); setSidebar(false); window.history.replaceState(null,"","#admin"); }}><WorkbenchIcon name="settings" />后台</button>}</nav>
       <SessionHistory key={`${APPLICATION}:${client.accountScope}:${accountEpoch.current}:${phase}`} sessions={sessions} selected={selected} chatActive={view === "chat"}
         disabled={phase !== "ready" || submitting || !!managing} isProtected={isSessionProtected} onChoose={choose} onManage={manageSession} />
       {phase === "ready" && account && <footer className="sidebar-footer"><AccountIdentity key={client.accountScope} account={account} onSettings={() => setSettingsOpen(true)} onLogout={logout} /></footer>}
@@ -320,6 +348,7 @@ export function App(): React.JSX.Element {
       {view === "plugins" && <div className="transcript plugin-transcript"><PluginWorkspace key={`${APPLICATION}:${client.accountScope}`} selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /></div>}
       {view === "projects" && <ProjectWorkspace key={client.accountScope+":"+phase} client={client} ready={phase === "ready"} onDevelop={async (id) => { setSessions(await client.sessions()); choose(id); }} />}
       {view === "assets" && <div className="transcript plugin-transcript"><AssetLibrary key={`${client.accountScope}:${phase}`} client={client} ready={phase === "ready"} onConnect={() => { if (loginUrl) window.location.assign(loginUrl); else void connect(); }} /></div>}
+      {view === "admin" && canShowAdmin(adminScope) && <div className="transcript plugin-transcript"><AdminWorkspace key={adminScope} client={adminClient} onDenied={() => { adminClient.reset(); setAdminScope(""); setView("chat"); }} /></div>}
       <div className="transcript" hidden={view !== "chat"} onScroll={(event) => { const element = event.currentTarget; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160; }}>
         <div className="conversation-content">
           {phase === "connecting" && <p className="connection-message" role="status"><span className="spinner" /> 正在连接工作台…</p>}
