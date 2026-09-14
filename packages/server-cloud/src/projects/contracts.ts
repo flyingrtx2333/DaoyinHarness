@@ -15,11 +15,23 @@ export interface ProjectOperation {
   id: string; projectId: string; kind: string; status: string; result: Record<string, unknown> | null;
   error: string | null; createdAt: string;
 }
+export type ConceptDirection = "A" | "B" | "C";
+export interface ProjectConcept {
+  id: string; setId: string; direction: ConceptDirection; title: string; prompt: string;
+  strength: string; tradeoff: string; mimeType: string; bytes: number; createdAt: string;
+}
+export interface ProjectConceptSet {
+  id: string; projectId: string; revision: number; screen: string; width: number; height: number;
+  status: "generating" | "awaiting_selection" | "selected" | "superseded";
+  selectedDirection: ConceptDirection | null; createdAt: string; updatedAt: string;
+  concepts: ProjectConcept[];
+}
 export interface ExecutorRequest {
   action: "domains" | "readiness" | "prepare" | "check" | "preview" | "publish" | "rollback" | "stop" | "status" | "reconcile";
   projectId: string; slug?: string; versionId?: string; files?: ProjectFile[]; mode?: "development" | "production";
 }
-export const PROJECT_TOOLS = ["project_list", "project_create", "project_files", "project_write", "project_check", "project_preview", "project_publish"] as const;
+export const PROJECT_TOOLS = ["project_list", "project_create", "project_files", "project_write", "project_concepts",
+  "project_concept_generate", "project_concept_select", "project_concept_discard", "project_check", "project_preview", "project_publish"] as const;
 export function ownerOf(identity: ExecutionIdentity): ProjectOwner {
   if (identity.space.kind === "public") throw new ProjectError("PROJECT_ACCOUNT_REQUIRED", "请登录道引账号。", 403);
   return { actor: String(identity.actorUserId), space: JSON.stringify(identity.space) };
@@ -30,6 +42,11 @@ export function ownerKey(owner: ProjectOwner): string {
 export function identifier(value: unknown, prefix: string): string {
   if (typeof value !== "string" || !new RegExp("^" + prefix + "_[a-f0-9]{24}$", "u").test(value))
     throw new ProjectError("PROJECT_ID_INVALID", "项目或版本标识无效。");
+  return value;
+}
+export function conceptDirection(value: unknown): ConceptDirection {
+  if (value !== "A" && value !== "B" && value !== "C")
+    throw new ProjectError("PROJECT_CONCEPT_DIRECTION_INVALID", "界面方案只能是 A、B 或 C。");
   return value;
 }
 export function filePath(value: unknown): string {

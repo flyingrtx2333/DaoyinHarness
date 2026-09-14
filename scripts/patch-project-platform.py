@@ -68,3 +68,68 @@ if account_bridge.exists():
         assert needle in s
         s=s.replace(needle,needle+'    if grant.get("project_only"):\n        return {"id":PROFILE,"version":"1","instructions":"Independent account-scoped cloud application development.","tools":[],"credits":None}\n',1)
         account_bridge.write_text(s)
+
+# Independent image binding and scene: no Builder catalog or state.
+bindings=root/"services/AiAppBindings.py"
+s=bindings.read_text()
+if '"app_key": "harness-projects"' not in s:
+    needle="SCENE_DEFAULTS: list[dict[str, Any]] = ["
+    assert needle in s
+    entry="""{
+        "app_key": "harness-projects",
+        "app_name": "Harness 云端项目",
+        "scene_key": "ui_concept",
+        "scene_name": "生成界面概念方案",
+        "capability": "image_generation",
+        "provider_key": "ark",
+        "model_name": "doubao-seedream-5-0-260128",
+        "config_json": {"size_16_9": "2560x1440", "timeout": 360},
+    },"""
+    s=s.replace(needle,needle+"\n    "+entry,1)
+    bindings.write_text(s)
+generation=root/"services/ai_story_generation.py"
+s=generation.read_text()
+needle='APP_IMAGE_SCENES = {APP_KEY: IMAGE_SCENES, "xczj": set(), "site-builder": {"hero_image"}}'
+replacement='APP_IMAGE_SCENES = {APP_KEY: IMAGE_SCENES, "xczj": set(), "site-builder": {"hero_image"}, "harness-projects": {"ui_concept"}}'
+if '"harness-projects": {"ui_concept"}' not in s:
+    assert needle in s
+    generation.write_text(s.replace(needle,replacement,1))
+
+# Cookie-authenticated, account-scoped concept image proxy for normal img elements.
+media=root/"services/harness_media.py"
+s=media.read_text()
+if 'def project_concept_image' not in s:
+    s += r"""
+
+@router.get("/workbench/projects/{account_scope}/{project_id}/concepts/{concept_id}/image")
+async def project_concept_image(request: Request, account_scope: str, project_id: str, concept_id: str):
+    config = access.configured()
+    if request.headers.get("origin") not in {None, config.origin} or request.headers.get("sec-fetch-site") == "cross-site":
+        raise access.fail(403, "ORIGIN_DENIED")
+    if not re.fullmatch(r"[a-f0-9]{64}", account_scope) or not re.fullmatch(r"prj_[a-f0-9]{24}", project_id) or not re.fullmatch(r"uic_[a-f0-9]{24}", concept_id):
+        raise access.fail(404, "PROJECT_CONCEPT_NOT_FOUND")
+    bearer, grant = access.for_account(first_party_accounts.resolve(request))
+    if not hmac.compare_digest(account_scope, access.account_scope(grant)):
+        raise access.fail(401, "ACCOUNT_SCOPE_CHANGED")
+    url = config.cloud_url + f"/api/v1/cloud/projects/{account_scope}/{project_id}/concepts/{concept_id}/image"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=3), follow_redirects=False, trust_env=False) as client:
+            async with client.stream("GET", url, headers={"Authorization": "Bearer " + bearer}) as response:
+                if response.status_code != 200:
+                    raise access.fail(response.status_code if response.status_code in {401,403,404,413} else 503, "PROJECT_CONCEPT_UNAVAILABLE")
+                mime = response.headers.get("content-type", "").split(";",1)[0]
+                if mime not in {"image/jpeg", "image/png", "image/webp"}:
+                    raise access.fail(415, "PROJECT_CONCEPT_FORMAT")
+                body = bytearray()
+                async for part in response.aiter_bytes():
+                    body.extend(part)
+                    if len(body) > 5 * 1024 * 1024:
+                        raise access.fail(413, "PROJECT_CONCEPT_TOO_LARGE")
+        _, current = access.for_account(first_party_accounts.resolve(request))
+        if current["id"] != grant["id"] or not hmac.compare_digest(account_scope, access.account_scope(current)):
+            raise access.fail(401, "ACCOUNT_SCOPE_CHANGED")
+        return Response(bytes(body), media_type=mime, headers={"Cache-Control":"private, max-age=300","X-Content-Type-Options":"nosniff","Cross-Origin-Resource-Policy":"same-origin"})
+    except httpx.HTTPError as exc:
+        raise access.fail(503, "PROJECT_CONCEPT_UNAVAILABLE") from exc
+"""
+    media.write_text(s)

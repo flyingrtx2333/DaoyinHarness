@@ -7,13 +7,20 @@ provides its existing account, execution authorization and model accounting brid
 ## User flow
 
 Open https://harness.daoyintech.com/ and select **项目**. Create or select a project,
-then use **在新对话中开发** to continue it. The Agent owns code changes through seven
+then use **在新对话中开发** to continue it. The Agent owns code changes through eleven
 `project_*` tools. Ordinary chat does not allocate a sandbox. **更新预览** builds a
 development snapshot; **打开预览** obtains a one-use authenticated preview ticket.
 **发布网站**, or the explicit message **发布当前项目**, deploys a health-checked
 immutable snapshot. The previous site remains active if the candidate fails.
 The published-version selector rolls code back without rolling database records
 or uploaded files back.
+
+For a page design or redesign without an approved final comp, the Agent first reads
+the current project and generates three materially different complete concepts:
+A, B and C. The project panel shows every completed concept with its benefit and
+tradeoff. The Agent must stop after all three are ready. A user click or an explicit
+later message such as **选择 B** records the decision; only then can source editing
+resume. The user may explicitly discard an incomplete batch without deleting its audit record. Small style adjustments and already-approved comps bypass this gate.
 
 Accounts admitted for this pilot: platform actors 1 and 3, explicitly selected by
 the user. Public admission remains off. This is a resource-limited first release,
@@ -52,6 +59,11 @@ not an unrestricted shell or package-installation service.
 - Pilot domains use the reserved `h-` namespace under `demo.daoyintech.com`.
   Slugs may change before first publication; exact existing routes are never
   overwritten. HTTPS uses the existing wildcard certificate.
+- Concept batches, prompts, tradeoffs, selected direction and image bytes are
+  durable project records. Images are limited to 5 MiB, served through the
+  cookie-authenticated account boundary, and never exposed to user sandboxes.
+  Each project may generate at most nine concepts in 24 hours. An incomplete
+  A/B/C batch blocks source writes until the user selects a completed direction.
 - Preview is authenticated, isolated and embedded with an iframe sandbox.
   The gateway strips parent/platform cookies and authorization headers before
   user code and filters response cookies to host-only application cookies.

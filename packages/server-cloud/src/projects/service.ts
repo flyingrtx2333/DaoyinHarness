@@ -10,7 +10,12 @@ const socket="/run/daoyin-projects/control.sock";
 const executor="/run/daoyin-project-executor/control.sock";
 const database=process.env.HARNESS_PROJECTS_DATABASE_URL;
 const brokerKey=process.env.HARNESS_PROJECTS_BROKER_KEY;
-if(!database||!brokerKey||brokerKey.length<32)throw new Error("Project service database and broker key required.");
+const aiToken=process.env.HARNESS_PROJECTS_AI_TOKEN;
+const aiOrigin=process.env.HARNESS_PROJECTS_AI_ORIGIN??"http://127.0.0.1:6087";
+const aiBase=new URL(aiOrigin);
+if(!database||!brokerKey||brokerKey.length<32||!aiToken||aiToken.length<32||
+  aiBase.protocol!=="http:"||aiBase.hostname!=="127.0.0.1"||aiBase.port!=="6087"||aiBase.pathname!=="/")
+  throw new Error("Project service database, broker and isolated image gateway configuration required.");
 const dbUrl=new URL(database);
 const dbConfig:PoolConfig={host:dbUrl.searchParams.get("host")??dbUrl.hostname,port:Number(dbUrl.port||5432),user:decodeURIComponent(dbUrl.username),password:decodeURIComponent(dbUrl.password),database:decodeURIComponent(dbUrl.pathname.slice(1)),max:5};
 const pool=new Pool(dbConfig),repository=new ProjectRepository(pool),brokers=new ProjectBrokers(pool,dbConfig,brokerKey);
@@ -25,8 +30,47 @@ const permit=(value:unknown):ProjectOwner=>{
   if(!allEnabled&&!allowed.has(value.actor))throw new ProjectError("PROJECT_NOT_ENABLED","云端开发正在限额试运行，当前账号尚未开放。",403);
   return{actor:value.actor,space:value.space};
 };
-interface RequestBody { authorization?:unknown; sourceRun?:string; owner?:unknown; action?:string; projectId?:string; title?:string; requestId?:string; sessionId?:string; revision?:number; files?:unknown; slug?:unknown; versionId?:string; operationId?:string }
-async function control(input:RequestBody):Promise<unknown>{
+interface RequestBody { authorization?:unknown; sourceRun?:string; owner?:unknown; action?:string; projectId?:string; title?:string; requestId?:string; sessionId?:string; revision?:number; files?:unknown; slug?:unknown; versionId?:string; operationId?:string; conceptId?:string; direction?:unknown; screen?:string; width?:number; height?:number; prompt?:string; strength?:string; tradeoff?:string }
+function projectIdentity(owner:ProjectOwner):{tenantId:number;userId:number}{
+  let space:unknown;try{space=JSON.parse(owner.space);}catch{throw new ProjectError("PROJECT_IDENTITY_INVALID","项目身份无效。",403);}
+  if(!space||typeof space!=="object"||!("kind" in space)||space.kind!=="organization"||!("tenantId" in space)||
+    typeof space.tenantId!=="string"||!/^[1-9][0-9]{0,15}$/u.test(space.tenantId)||!/^[1-9][0-9]{0,15}$/u.test(owner.actor))
+    throw new ProjectError("PROJECT_IDENTITY_INVALID","项目身份无效。",403);
+  return{tenantId:Number(space.tenantId),userId:Number(owner.actor)};
+}
+async function boundedImage(url:string,signal?:AbortSignal):Promise<{mimeType:string;content:Buffer}>{
+  const target=new URL(url);
+  if(target.protocol!=="https:"||target.username||target.password||target.port||target.search||target.hash||
+    !/^[a-z0-9-]+\.cos\.[a-z0-9-]+\.myqcloud\.com$/u.test(target.hostname))
+    throw new ProjectError("PROJECT_CONCEPT_SOURCE_DENIED","图片存储来源无效。",502);
+  const response=await fetch(target,{redirect:"error",signal:signal?AbortSignal.any([signal,AbortSignal.timeout(60000)]):AbortSignal.timeout(60000)});
+  const mimeType=(response.headers.get("content-type")??"").split(";",1)[0]!;
+  if(!response.ok||!["image/png","image/jpeg","image/webp"].includes(mimeType))throw new ProjectError("PROJECT_CONCEPT_DOWNLOAD_FAILED","生成图片未能安全保存。",502);
+  const reader=response.body?.getReader();if(!reader)throw new ProjectError("PROJECT_CONCEPT_DOWNLOAD_FAILED","生成图片内容为空。",502);
+  const chunks:Uint8Array[]=[];let bytes=0;
+  try{while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.byteLength;if(bytes>5242880)throw new ProjectError("PROJECT_CONCEPT_IMAGE_TOO_LARGE","生成图片超过 5 MB。",413);chunks.push(part.value);}}
+  finally{await reader.cancel().catch(()=>undefined);reader.releaseLock();}
+  const content=Buffer.concat(chunks);if(content.length<1024)throw new ProjectError("PROJECT_CONCEPT_DOWNLOAD_FAILED","生成图片内容为空。",502);
+  return{mimeType,content};
+}
+async function generateConcept(owner:ProjectOwner,requestId:string,prompt:string,signal?:AbortSignal):Promise<{mimeType:string;content:Buffer}>{
+  const identity=projectIdentity(owner);
+  const response=await fetch(new URL("/internal/ai/image-generations",aiBase),{method:"POST",redirect:"error",signal:signal?AbortSignal.any([signal,AbortSignal.timeout(390000)]):AbortSignal.timeout(390000),
+    headers:{"Content-Type":"application/json","x-ai-service-token":aiToken!},body:JSON.stringify({
+      tenant_id:identity.tenantId,user_id:identity.userId,credential_mode:"PLATFORM",app_key:"harness-projects",scene_key:"ui_concept",
+      request_id:"harness_ui_"+digest(requestId).slice(0,40),prompt,negative_prompt:"水印、浏览器外框、设备模型、乱码、密集小字、外部品牌标志、整页装饰遮挡控件",
+      reference_urls:[],aspect_ratio:"16:9",seed:null
+    })});
+  const bytes=await response.arrayBuffer();
+  if(bytes.byteLength>131072)throw new ProjectError("PROJECT_CONCEPT_GATEWAY_INVALID","图片生成服务返回异常。",502);
+  let value:unknown;try{value=JSON.parse(Buffer.from(bytes).toString());}catch{throw new ProjectError("PROJECT_CONCEPT_GATEWAY_INVALID","图片生成服务返回异常。",502);}
+  if(!response.ok)throw new ProjectError(response.status===429?"PROJECT_CONCEPT_QUOTA":"PROJECT_CONCEPT_GENERATION_FAILED",response.status===429?"图片生成额度暂不可用。":"界面方案生成失败，请稍后重试。",response.status===429?429:502);
+  const data=value&&typeof value==="object"&&"data" in value&&value.data&&typeof value.data==="object"?value.data:null;
+  const output=data&&"output_url" in data&&typeof data.output_url==="string"?data.output_url:null;
+  if(!output)throw new ProjectError("PROJECT_CONCEPT_GATEWAY_INVALID","图片生成服务没有返回图片。",502);
+  return boundedImage(output,signal);
+}
+async function control(input:RequestBody,signal?:AbortSignal):Promise<unknown>{
   const owner=permit(input.owner);
   if(input.action==="cancel_run"){
     const rows=(await pool.query<{id:string;project_id:string}>("UPDATE harness_project_operations o SET status='cancelled',error='对话已停止；源码与原网站保留。' FROM harness_projects p WHERE p.id=o.project_id AND p.owner_key=$1 AND o.source_run=$2 AND o.status IN ('queued','running') RETURNING o.id,o.project_id",[digest([owner.actor,owner.space]),input.sourceRun])).rows;
@@ -54,6 +98,36 @@ async function control(input:RequestBody):Promise<unknown>{
   if(input.action==="rename")return{project:await repository.rename(owner,id,input.slug)};
   if(input.action==="versions")return{versions:await repository.versions(owner,id)};
   if(input.action==="operations")return{operations:await repository.operations(owner,id)};
+  if(input.action==="concepts")return{conceptSet:await repository.concepts(owner,id)};
+  if(input.action==="concept_image"){
+    const image=await repository.conceptImage(owner,id,identifier(input.conceptId,"uic"));
+    return{mimeType:image.mimeType,content:image.content.toString("base64")};
+  }
+  if(input.action==="concept_select")return await repository.selectConcept(owner,id,input.direction);
+  if(input.action==="concept_discard"){await repository.discardConcepts(owner,id);return{discarded:true};}
+  if(input.action==="concept_generate"){
+    await authorize(input.authorization,input.sourceRun);
+    const project=await repository.get(owner,id);
+    const requestId=String(input.requestId??"");
+    const prompt=String(input.prompt??"");
+    const fullPrompt=["Use case: ui-mockup","Asset type: complete desktop web application screen concept",
+      "Viewport: 1536x864 landscape, full screen visible, no browser chrome","Product: "+project.title,
+      "Required functions and information architecture: "+prompt,"Direction "+String(input.direction??"")+": "+prompt,
+      "Style: polished production Chinese UI concept with reconstructable hierarchy and project-appropriate imagery",
+      "Constraints: all edges visible; real controls can be rebuilt as DOM; no watermark; no lorem ipsum; no external brand logos; avoid emoji as primary icons"].join("\n");
+    const begun=await repository.beginConcept(owner,id,{requestId,direction:input.direction,screen:String(input.screen??""),width:Number(input.width),height:Number(input.height),
+      prompt,title:String(input.title??""),strength:String(input.strength??""),tradeoff:String(input.tradeoff??"")});
+    if(begun.cached)return{conceptSet:await repository.concepts(owner,id)};
+    try{
+      const generated=await generateConcept(owner,requestId,fullPrompt,signal);
+      await authorize(input.authorization,input.sourceRun);
+      return{conceptSet:await repository.completeConcept(owner,id,begun.conceptId,generated.mimeType,generated.content)};
+    }catch(error){
+      const message=error instanceof ProjectError?error.message:"界面方案生成失败。";
+      await repository.failConcept(owner,id,begun.conceptId,message).catch(()=>undefined);
+      throw error;
+    }
+  }
   if(input.action==="cancel"){
     await repository.cancel(owner,id,String(input.operationId));
     await exec({action:"stop",projectId:id,mode:"development"});return{cancelled:true};
@@ -217,7 +291,10 @@ await mkdir("/run/daoyin-projects",{recursive:true,mode:0o750});await unlink(soc
 http.createServer((req,res)=>{
   if(req.method!=="POST"||req.url!=="/control"){res.writeHead(404).end();return;}
   let body="";req.on("data",(b:Buffer)=>{body+=b.toString();if(Buffer.byteLength(body)>1048576)req.destroy();});
-  req.on("end",()=>{void Promise.resolve().then(()=>control(JSON.parse(body) as RequestBody)).then(v=>res.writeHead(200,{"Content-Type":"application/json"}).end(JSON.stringify(v))).catch(e=>{
+  const controller=new AbortController();
+  req.on("aborted",()=>controller.abort());
+  res.on("close",()=>{if(!res.writableEnded)controller.abort();});
+  req.on("end",()=>{void Promise.resolve().then(()=>control(JSON.parse(body) as RequestBody,controller.signal)).then(v=>res.writeHead(200,{"Content-Type":"application/json"}).end(JSON.stringify(v))).catch(e=>{
     const err=e instanceof ProjectError?e:new ProjectError("PROJECT_SERVICE_FAILED","项目操作未完成；已保存的代码保持不变。",503);
     res.writeHead(err.status,{"Content-Type":"application/json"}).end(JSON.stringify({error:{code:err.code,message:err.message}}));
   });});

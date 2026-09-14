@@ -5,11 +5,14 @@ interface Project {id:string;title:string;slug:string;revision:number;activeVers
 interface File {path:string;content:string}
 interface Operation {id:string;kind:string;status:string;error:string|null;result:{versionId?:string}|null}
 interface Version {id:string;revision:number;createdAt:string;published:boolean}
+interface Concept {id:string;direction:"A"|"B"|"C";title:string;strength:string;tradeoff:string}
+interface ConceptSet {id:string;status:"generating"|"awaiting_selection"|"selected"|"superseded";selectedDirection:"A"|"B"|"C"|null;concepts:Concept[]}
 const states:Record<string,string>={queued:"等待资源",running:"正在执行",completed:"已完成",failed:"未完成",cancelled:"已停止",interrupted:"执行中断"};
 const kinds:Record<string,string>={check:"检查",preview:"预览",publish:"发布",rollback:"回滚"};
 export function ProjectWorkspace({client,ready,onDevelop}:{client:WorkbenchClient;ready:boolean;onDevelop:(sessionId:string)=>Promise<void>}):React.JSX.Element{
  const [projects,setProjects]=useState<Project[]>([]),[selected,setSelected]=useState(""),[files,setFiles]=useState<File[]>([]),[file,setFile]=useState("");
  const [operations,setOperations]=useState<Operation[]>([]),[versions,setVersions]=useState<Version[]>([]);
+ const [conceptSet,setConceptSet]=useState<ConceptSet|null>(null);
  const [title,setTitle]=useState(""),[slug,setSlug]=useState(""),[preview,setPreview]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
  const [enabled,setEnabled]=useState(false),[sandboxReady,setSandboxReady]=useState(false);
  const selectedRef=useRef(selected);selectedRef.current=selected;
@@ -25,17 +28,18 @@ export function ProjectWorkspace({client,ready,onDevelop}:{client:WorkbenchClien
   return()=>{disposed=true};
  },[client,ready,refresh]);
  const inspect=useCallback(async(id:string)=>{
-  const [f,o,v]=await Promise.all([
+  const [f,o,v,c]=await Promise.all([
    client.project<{project:Project;files:File[]}>({action:"files",projectId:id}),
    client.project<{operations:Operation[]}>({action:"operations",projectId:id}),
-   client.project<{versions:Version[]}>({action:"versions",projectId:id})
+   client.project<{versions:Version[]}>({action:"versions",projectId:id}),
+   client.project<{conceptSet:ConceptSet|null}>({action:"concepts",projectId:id})
   ]);
   if(selectedRef.current!==id)return;
   setFiles(f.files);setFile(previous=>f.files.some(item=>item.path===previous)?previous:f.files[0]?.path??"");
-  setOperations(o.operations);setVersions(v.versions);setSlug(f.project.slug);
+  setOperations(o.operations);setVersions(v.versions);setConceptSet(c.conceptSet);setSlug(f.project.slug);
   setProjects(previous=>previous.map(p=>p.id===id?f.project:p));
  },[client]);
- useEffect(()=>{setPreview("");if(selected)void inspect(selected).catch(e=>setError(String(e.message??e)));},[selected,inspect]);
+ useEffect(()=>{setPreview("");setConceptSet(null);if(selected)void inspect(selected).catch(e=>setError(String(e.message??e)));},[selected,inspect]);
  useEffect(()=>{
   if(!selected||!pending)return;
   const timer=window.setInterval(()=>{void inspect(selected).catch(e=>setError(String(e.message??e)));},2500);
@@ -76,6 +80,15 @@ export function ProjectWorkspace({client,ready,onDevelop}:{client:WorkbenchClien
       {project.activeVersion&&<a href={"https://"+project.slug+".demo.daoyintech.com"} target="_blank" rel="noreferrer">打开网站 ↗</a>}
      </form>
      {operations[0]&&<div className="project-status" role="status">{kinds[operations[0].kind]}：{states[operations[0].status]}{operations[0].error&&<p>{operations[0].error}</p>}</div>}
+     {conceptSet&&<section className="project-concepts" aria-labelledby="project-concepts-title">
+      <header><div><h3 id="project-concepts-title">界面方案</h3><p>{conceptSet.status==="generating"?("正在生成，已完成 "+conceptSet.concepts.length+"/3"):conceptSet.status==="awaiting_selection"?"请选择一个方案后继续开发":("已选择方案 "+conceptSet.selectedDirection)}</p></div><span>1536 × 864</span></header>
+      {["generating","awaiting_selection"].includes(conceptSet.status)&&<button className="project-concept-discard" disabled={busy} onClick={()=>void perform(async()=>{await client.project({action:"concept_discard",projectId:project.id});await inspect(project.id);})}>放弃本批方案</button>}
+      <div className="project-concept-grid">{conceptSet.concepts.map(concept=><article key={concept.id} className={conceptSet.selectedDirection===concept.direction?"selected":""}>
+       <img src={client.projectConceptImage(project.id,concept.id)} alt={"方案 "+concept.direction+"："+concept.title} loading="lazy" referrerPolicy="no-referrer"/>
+       <div><strong>{concept.direction} · {concept.title}</strong><p>{concept.strength}</p><small>取舍：{concept.tradeoff}</small>
+       {conceptSet.status==="awaiting_selection"&&<button className="primary" disabled={busy} onClick={()=>void perform(async()=>{await client.project({action:"concept_select",projectId:project.id,direction:concept.direction});await inspect(project.id);})}>选择 {concept.direction}</button>}</div>
+      </article>)}</div>
+     </section>}
      <div className="project-file-bar"><label>项目文件<select value={file} onChange={e=>setFile(e.target.value)}>{files.map(f=><option key={f.path}>{f.path}</option>)}</select></label><span>版本 {project.revision}</span></div>
      {current&&<pre className="project-source" tabIndex={0} aria-label={current.path+" 源代码"}><code>{current.content}</code></pre>}
      <div className="project-toolbar"><button disabled={busy||!operations.some(o=>o.kind==="preview"&&o.status==="completed")} onClick={()=>void perform(async()=>{

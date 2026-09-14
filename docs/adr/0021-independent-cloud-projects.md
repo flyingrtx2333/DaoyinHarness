@@ -18,6 +18,8 @@ React/Vite + Node.js/TypeScript is the first template. The trusted application S
 
 Main-platform changes are limited to existing account/permission/model bridge and authenticated proxy support. No second plugin consent or privileged identity is introduced. New functionality is feature-gated and initially admitted only for explicitly configured test accounts.
 
+Concept-first UI work is a durable project capability. The Agent inspects current project files, generates A, B and C as separate complete 1536×864 concepts through the dedicated harness-projects.ui_concept model scene, and stops for the user's choice. Concept bytes, prompts and tradeoffs are stored in project PostgreSQL; account-scoped image reads pass through the authenticated workbench. While a concept set is generating or awaiting selection, the repository rejects source writes. Selection creates a versioned manifest and advances the project revision before implementation resumes. This state is independent from Builder and survives reconnects and service restarts.
+
 Validation uses a bounded set of real-model / real-cloud scenarios and direct runtime checks. No mock-model or legacy test suites. Production, model, packaging and browser results are reported separately.
 
 The pilot account adapter validates real account sessions and active tenant membership. A project-only installation has an independent identity boundary and no inherited business tools when the account lacks an unrelated business application subscription. Existing business tool authorization is unchanged.

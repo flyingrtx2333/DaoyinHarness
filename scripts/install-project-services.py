@@ -29,6 +29,20 @@ if not envfile.exists():
     dbfile=config/"database.env"
     dbfile.write_text(f"POSTGRES_PASSWORD={dbpass}\nPOSTGRES_DB=harness_projects\nPOSTGRES_INITDB_ARGS=--auth-local=scram-sha-256\n")
     os.chmod(dbfile,0o600)
+# The trusted project service gets only the server-side AI gateway token; user sandboxes never inherit it.
+platform_env=pathlib.Path("/www/wwwroot/daoyintech/backend/.env")
+def read_env_value(path,key):
+    for line in path.read_text().splitlines():
+        if line.startswith(key+"="):
+            return line.split("=",1)[1].strip()
+    return ""
+ai_token=read_env_value(platform_env,"AI_INTERNAL_SERVICE_TOKEN")
+if len(ai_token)<32:
+    raise RuntimeError("Platform AI service token is unavailable")
+env_lines=[line for line in envfile.read_text().splitlines() if not line.startswith(("HARNESS_PROJECTS_AI_TOKEN=","HARNESS_PROJECTS_AI_ORIGIN="))]
+env_lines.extend(["HARNESS_PROJECTS_AI_TOKEN="+ai_token,"HARNESS_PROJECTS_AI_ORIGIN=http://127.0.0.1:6087"])
+envfile.write_text("\n".join(env_lines)+"\n")
+os.chmod(envfile,0o640);os.chown(envfile,0,gid)
 socketdir=pathlib.Path("/run/daoyin-projects-db")
 socketdir.mkdir(exist_ok=True)
 postgres_uid=int(run(["docker","run","--rm","--network","none","postgres:16-alpine","id","-u","postgres"]).stdout.strip())

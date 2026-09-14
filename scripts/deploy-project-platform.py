@@ -7,7 +7,7 @@ stage.mkdir(parents=True,exist_ok=False)
 def run(args,**kw):return subprocess.run(args,check=True,text=True,capture_output=True,**kw)
 before=json.loads(run(["docker","inspect","daoyintech-backend"]).stdout)[0]
 image=before["Image"]
-files=["services/agent_app_access.py","services/saishi_agent_bridge.py","routes/agent_apps.py","services/harness_agent_bridge.py"]
+files=["services/agent_app_access.py","services/saishi_agent_bridge.py","routes/agent_apps.py","services/harness_agent_bridge.py","services/harness_media.py","services/AiAppBindings.py","services/ai_story_generation.py"]
 for name in files:
  p=stage/name;p.parent.mkdir(parents=True,exist_ok=True)
  p.write_text(run(["docker","exec","daoyintech-backend","cat","/app/"+name]).stdout)

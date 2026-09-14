@@ -12,7 +12,7 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
   it("preserves display identity during a background check but clears it on revocation", async () => {
     let complete: (response: Response) => void = () => { throw new Error("No pending check"); };
     let pending = false;
-    const response = { csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "saishi-readonly", authentication: "account", accountScope: "account_a", account: { username: "Alice", avatarUrl: null } };
+    const response = { csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "daoyin-workbench", authentication: "account", accountScope: "account_a", account: { username: "Alice", avatarUrl: null } };
     const client = new WorkbenchClient(memory(), async () => pending ? new Promise<Response>(resolve => { complete = resolve; }) : json(response), "saishi");
     await client.bootstrap(); pending = true;
     const check = client.bootstrap(true);
@@ -25,7 +25,7 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
     let failLogout = true;
     const client = new WorkbenchClient(memory(), async (url) => String(url).endsWith("/logout")
       ? json({}, failLogout ? 503 : 200)
-      : json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "saishi-readonly", authentication: "account", accountScope: "account_a", account: { username: "Alice", avatarUrl: null } }), "saishi");
+      : json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "daoyin-workbench", authentication: "account", accountScope: "account_a", account: { username: "Alice", avatarUrl: null } }), "saishi");
     await client.bootstrap();
     await expect(client.disconnectApplication()).rejects.toMatchObject({ status: 503 });
     expect(client.account?.username).toBe("Alice");
@@ -36,7 +36,7 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
     let account: unknown = { username: "张小明", avatarUrl: "https://images.example/a.png", email: "private@example.test" };
     let status = 200;
     const client = new WorkbenchClient(memory(), async () => json({ csrfToken: "csrf", expiresAt: Date.now() + 60000,
-      profileId: "saishi-readonly", authentication: "account", accountScope: "account_a", account }, status), "saishi");
+      profileId: "daoyin-workbench", authentication: "account", accountScope: "account_a", account }, status), "saishi");
     await client.bootstrap();
     expect(client.account).toEqual({ username: "张小明", avatarUrl: "https://images.example/a.png" });
     for (const avatarUrl of [null, "javascript:alert(1)", "data:image/svg+xml,test", "http://images.example/a.png", "https://user:pass@images.example/a.png"]) {
@@ -57,7 +57,7 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
       expect(new Headers(init?.headers).has("Authorization")).toBe(false);
       if (String(url).endsWith("/bootstrap")) {
         expect(JSON.parse(String(init?.body))).toEqual({});
-        return json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "saishi-readonly", authentication: "account", accountScope: "account_a" });
+        return json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "daoyin-workbench", authentication: "account", accountScope: "account_a" });
       }
       expect(new Headers(init?.headers).get("x-agent-account")).toBe("account_a");
       return json({ sessions: [] });
@@ -82,7 +82,7 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
     let scope = "account_a";
     const client = new WorkbenchClient(store, async (url) => {
       if (String(url).endsWith("/bootstrap")) return json({ csrfToken: "csrf", expiresAt: Date.now() + 60000,
-        profileId: "saishi-readonly", authentication: "account", accountScope: scope });
+        profileId: "daoyin-workbench", authentication: "account", accountScope: scope });
       throw new Error("uncertain result");
     }, "saishi");
     await expect(client.submit("session_1", "问题")).rejects.toThrow("账号");
@@ -95,14 +95,14 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
     expect(client.pending("session_1")).toEqual(pending);
   });
   it("rejects legacy grant bootstrap and accepts only the fixed first-party login route", async () => {
-    const legacy = new WorkbenchClient(memory(), async () => json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "saishi-readonly" }), "saishi");
+    const legacy = new WorkbenchClient(memory(), async () => json({ csrfToken: "csrf", expiresAt: Date.now() + 60000, profileId: "daoyin-workbench" }), "saishi");
     await expect(legacy.bootstrap()).rejects.toThrow("账号工作台尚未接通");
     for (const loginUrl of ["https://evil.example", "//evil.example", "/api/agent-apps/saishi/workbench/login"]) {
       const client = new WorkbenchClient(memory(), async () => json({ loginUrl }, 401), "saishi");
       await expect(client.bootstrap()).rejects.toMatchObject({ status: 401, loginUrl: loginUrl.startsWith("/api/") ? loginUrl : undefined });
     }
     const denied = new WorkbenchClient(memory(), async () => json({}, 403), "saishi");
-    await expect(denied.bootstrap()).rejects.toThrow("没有此赛事数据的访问权限");
+    await expect(denied.bootstrap()).rejects.toThrow("没有此业务空间的访问权限");
   });
   it("checks the server session profile before the selected plugin can start model work", async () => {
     let calls = 0;
@@ -210,5 +210,18 @@ describe("cloud workbench BFF contract and recovery (mock HTTP)", () => {
     });
     await client.bootstrap();
     await client.respondInteraction("run_1", "interaction_1", "confirmed", { prompt: "追逐" });
+  });
+});
+
+
+describe("project concept image boundary",()=>{
+  it("builds an account-scoped same-origin path and rejects untrusted identifiers",async()=>{
+    const scope="a".repeat(64);
+    const client=new WorkbenchClient(memory(),async()=>json({csrfToken:"csrf",expiresAt:Date.now()+60000,
+      profileId:"daoyin-workbench",authentication:"account",accountScope:scope}),"saishi");
+    await client.bootstrap();
+    expect(client.projectConceptImage("prj_"+"b".repeat(24),"uic_"+"c".repeat(24)))
+      .toBe("/api/agent-apps/saishi/workbench/projects/"+scope+"/prj_"+"b".repeat(24)+"/concepts/uic_"+"c".repeat(24)+"/image");
+    expect(()=>client.projectConceptImage("../foreign","uic_"+"c".repeat(24))).toThrow("地址无效");
   });
 });
