@@ -28,6 +28,8 @@ type CallPolicy = (name: string, input: Record<string, unknown>) => boolean;
 export function privateModelCallAllowed(name: string, input: Record<string, unknown>,
   requestTools: ReadonlyArray<{ name: string }>, bindings: ReadonlyArray<{ definition: { name: string }; validateInput(input: Record<string, unknown>): boolean }>): boolean {
   if (!requestTools.some((tool) => tool.name === name)) return false;
+  if (name === "capability_search") return Object.keys(input).length === 1 &&
+    typeof input.query === "string" && input.query.trim().length > 0 && input.query.length <= 500;
   if (isProjectTool(name)) return validateProjectInput(name, input);
   const direct = bindings.find((binding) => binding.definition.name === name);
   if (direct !== undefined) return direct.validateInput(input);

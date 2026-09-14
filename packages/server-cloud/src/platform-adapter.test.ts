@@ -13,6 +13,13 @@ const identity: ExecutionIdentity = {
 const source = { id: "company_1_2", document_id: 1, chunk_id: 2, title: "项目", location: "", content: "公开互动项目。", untrusted: true };
 
 describe("platform adapter (real engine/SQLite, explicitly simulated platform and model)", () => {
+  it("accepts capability_search only when exposed with its exact local schema", () => {
+    expect(privateModelCallAllowed("capability_search", { query: "赛事资料" },
+      [{ name: "capability_search" }], [])).toBe(true);
+    expect(privateModelCallAllowed("capability_search", { query: "赛事资料", write: true },
+      [{ name: "capability_search" }], [])).toBe(false);
+    expect(privateModelCallAllowed("capability_search", { query: "赛事资料" }, [], [])).toBe(false);
+  });
   it("accepts the local video confirmation control only for an exposed, schema-valid generation operation", () => {
     const input = { modelName: "doubao-seedance-2-0-mini-260615", resolution: "720p", durationSeconds: 10,
       prompt: "高燃混剪视频", aspectRatio: "16:9", target: "new", request_key: "gaoran_hunjian_10s_720p_20260913" };
