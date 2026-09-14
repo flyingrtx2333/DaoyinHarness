@@ -547,7 +547,7 @@ export class PostgresCloudRepository implements CloudRepository {
       [event.sessionId, event.eventSeq, event.turnId, event.id, body]);
     const indexText = episodicIndexText(event);
     if (indexText) await client.query(`UPDATE session_search_documents
-      SET search_text=LEFT(CONCAT_WS(' ',search_text,$1),20000),updated_at=$2 WHERE turn_id=$3 AND scope_key=$4`,
+      SET search_text=LEFT(CONCAT_WS(' ',search_text,$1::text),20000),updated_at=$2 WHERE turn_id=$3 AND scope_key=$4`,
       [indexText, Date.now(), event.turnId, key]);
     let status: CloudRun["status"] = "running";
     let finalText = "";
