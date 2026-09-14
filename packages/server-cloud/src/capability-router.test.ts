@@ -49,6 +49,40 @@ describe("capability router", () => {
     expect(result.decision.fallback).toBe("lexical");
     expect(result.selectedToolNames.has("search_events")).toBe(true);
   });
+  it("recalls a semantically related pack that BM25 cannot find", async () => {
+    const tools = [tool("weather_lookup"), tool("event_lookup")];
+    const packs = [
+      pack("weather.read", ["weather_lookup"], "read", ["气象预报"]),
+      pack("event.read", ["event_lookup"], "read", ["校园活动"]),
+    ];
+    const result = await routeCapabilities({
+      message: "出门要不要带伞", packs, tools,
+      semantic: {
+        retrieve: async () => ({ "weather.read": 0.92, "event.read": 0.08 }),
+        analyze: async () => ({
+          rerankScores: { "weather.read": 0.94 },
+          intents: [{ label: "weather.query", objective: "查询天气",
+            confidence: 0.91, packIds: ["weather.read"] }],
+        }),
+      }, signal: new AbortController().signal,
+    });
+    expect(result.decision.fallback).toBe("none");
+    expect(result.selectedToolNames.has("weather_lookup")).toBe(true);
+    expect(result.selectedToolNames.has("event_lookup")).toBe(false);
+  });
+  it("keeps BM25 routing when vector retrieval fails", async () => {
+    const tools = [tool("search_events")];
+    const packs = [pack("profile.search.1", ["search_events"], "read", ["查询活动"])];
+    const result = await routeCapabilities({
+      message: "查询活动", packs, tools,
+      semantic: {
+        retrieve: async () => { throw new Error("embedding unavailable"); },
+        analyze: async () => ({ rerankScores: { "profile.search.1": 1 }, intents: [] }),
+      }, signal: new AbortController().signal,
+    });
+    expect(result.decision.fallback).toBe("lexical");
+    expect(result.selectedToolNames.has("search_events")).toBe(true);
+  });
   it("expands only readonly packs", async () => {
     const tools = [tool("read_a"), tool("read_b"), tool("write_c", true)];
     const packs = [

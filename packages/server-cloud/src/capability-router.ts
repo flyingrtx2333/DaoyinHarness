@@ -15,6 +15,8 @@ export interface CapabilitySemanticResult {
   rerankScores: Readonly<Record<string, number>>; intents: readonly CapabilitySemanticIntent[];
 }
 export interface CapabilitySemanticProvider {
+  retrieve?(input: { query: string; clauses: readonly string[]; candidates: readonly CapabilityPackManifest[];
+    signal: AbortSignal }): Promise<Readonly<Record<string, number>>>;
   analyze(input: { query: string; clauses: readonly string[]; candidates: readonly CapabilityPackManifest[];
     signal: AbortSignal }): Promise<CapabilitySemanticResult>;
 }
@@ -124,12 +126,15 @@ function bm25(query: string, packs: readonly CapabilityPackManifest[]): Capabili
     .slice(0, 24).map((item) => item.pack);
 }
 function rank(query: string, clauses: readonly string[], packs: readonly CapabilityPackManifest[],
-  continuity: string): Ranked[] {
+  continuity: string, vectorScores: Readonly<Record<string, number>> = {}): Ranked[] {
   const fused = new Map<string, number>();
   for (const text of [query, ...clauses]) {
     bm25(text, packs).forEach((pack, index) =>
       fused.set(pack.id, (fused.get(pack.id) ?? 0) + 1 / (60 + index + 1)));
   }
+  Object.entries(vectorScores).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 24).forEach(([packId], index) =>
+      fused.set(packId, (fused.get(packId) ?? 0) + 1 / (60 + index + 1)));
   const maximum = Math.max(...fused.values(), 0), contextTokens = new Set(tokens(continuity));
   return packs.map((pack) => {
     const rrf = fused.get(pack.id) ?? 0;
@@ -187,10 +192,24 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
   }
   const eligibilityMs = elapsed(eligibilityStarted), retrievalStarted = performance.now();
   const clauses = splitCapabilityIntents(input.message);
-  const ranked = rank(input.message, clauses, eligible, (input.continuity ?? "").slice(0, 1_500));
+  let vectorScores: Readonly<Record<string, number>> = {};
+  let fallback: CapabilityRouteDecision["fallback"] = "none";
+  if (input.semantic?.retrieve && eligible.length) {
+    try {
+      vectorScores = await input.semantic.retrieve({
+        query: input.message, clauses, candidates: eligible, signal: input.signal,
+      });
+      const allowed = new Set(eligible.map((pack) => pack.id));
+      if (Object.entries(vectorScores).some(([packId, score]) =>
+        !allowed.has(packId) || !Number.isFinite(score) || score < -1 || score > 1)) {
+        throw new Error("Invalid vector capability result.");
+      }
+    } catch { vectorScores = {}; fallback = "lexical"; }
+  }
+  const ranked = rank(input.message, clauses, eligible,
+    (input.continuity ?? "").slice(0, 1_500), vectorScores);
   const retrievalMs = elapsed(retrievalStarted), semanticStarted = performance.now();
   let semantic: CapabilitySemanticResult | undefined;
-  let fallback: CapabilityRouteDecision["fallback"] = "none";
   if (input.semantic && ranked.length) {
     try {
       semantic = await input.semantic.analyze({
@@ -206,7 +225,7 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
         throw new Error("Invalid semantic capability result.");
       }
     } catch { semantic = undefined; fallback = "lexical"; }
-  } else fallback = "lexical";
+  } else if (fallback === "none") fallback = "lexical";
   const semanticMs = elapsed(semanticStarted), confidence = new Map<string, number>();
   for (const intent of semantic?.intents ?? []) {
     if (intent.confidence < 0.55) continue;
@@ -216,7 +235,7 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
   }
   const pinned = new Set(input.pinnedPackIds ?? []);
   let scored = ranked.map((item) => {
-    const rerank = semantic?.rerankScores[item.pack.id] ?? item.normalized;
+    const rerank = semantic === undefined ? item.normalized : (semantic.rerankScores[item.pack.id] ?? 0);
     const classifier = confidence.get(item.pack.id) ?? 0;
     const score = semantic ?
       0.45 * rerank + 0.25 * classifier + 0.15 * item.normalized + 0.10 + 0.05 * item.continuity :
