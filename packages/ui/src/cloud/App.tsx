@@ -24,6 +24,7 @@ import { LoginGateway } from "./LoginGateway.js";
 import { EvaluationClient } from "./evaluation-client.js";
 import { AdminWorkspace } from "./AdminWorkspace.js";
 import { canShowAdmin, requestedAdminView } from "./admin-access.js";
+import { keepReadyAfterBackgroundFailure } from "./connection-state.js";
 
 const APPLICATION = "saishi" as const;
 const entryUrl = new URL(window.location.href);
@@ -135,6 +136,8 @@ export function App(): React.JSX.Element {
       if (loggingOut.current) return;
       if (quiet && previousScope && previousScope === client.accountScope) {
         setExpiresAt(expiry); setAccount(client.account);
+        setError((current) => current === "连接未完成，请重试。" ? "" : current);
+        setLoginUrl(undefined);
         return; // A routine identity check must not reset history, draft, focus or a running turn.
       }
       if (quiet) { resetAccount(); setPhase("connecting"); setError(""); setLoginUrl(undefined); }
@@ -148,6 +151,8 @@ export function App(): React.JSX.Element {
       setPhase("ready"); setRevision((value) => value + 1);
     } catch (cause) {
       if (!loggingOut.current) {
+        const status = cause instanceof WorkbenchError ? cause.status : undefined;
+        if (keepReadyAfterBackgroundFailure(quiet, previousScope, client.accountScope, status)) return;
         if (!quiet || previousScope !== client.accountScope) { if (quiet) resetAccount(); setPhase("error"); }
         fail(cause);
       }
@@ -374,7 +379,7 @@ export function App(): React.JSX.Element {
       <div className="composer-area" hidden={view !== "chat"}>
         {error && <div className="error-message" role="alert">{error}</div>}
         {loginUrl && phase !== "ready" && phase !== "connecting" && <button type="button" className="primary reconnect" onClick={() => window.location.assign(loginUrl)}>登录道引账号</button>}
-        {!loginUrl && phase !== "connecting" && (phase !== "ready" || error) && <button className="primary reconnect" onClick={() => { void connect(); }}>重新连接工作台</button>}
+        {!loginUrl && phase !== "connecting" && phase !== "ready" && <button className="primary reconnect" onClick={() => { void connect(); }}>重新连接工作台</button>}
         {pending && phase === "ready" && !submitting && <div className="recovery"><span>上次提交结果尚未确认。</span><button disabled={loading || !!active} onClick={() => { void send(pending.message); }}>恢复原提交</button></div>}
         {session?.archivedAt && <div className="archived-notice" role="status"><span>会话已归档，恢复后可继续发送。</span><button type="button" disabled={!!managing || phase !== "ready"} onClick={() => { void manageSession(session.id, "restore").catch(() => undefined); }}>恢复会话</button></div>}
         <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
