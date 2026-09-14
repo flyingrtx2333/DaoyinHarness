@@ -51,7 +51,7 @@
   },
   {
     "name": "project_write",
-    "description": "按 revision 原子更新项目源代码；网站线上版本保持不变。",
+    "description": "按 revision 原子更新项目源代码；有待选择的界面方案时服务端禁止写入。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -92,6 +92,135 @@
         "projectId",
         "revision",
         "files"
+      ]
+    }
+  },
+  {
+    "name": "project_concepts",
+    "description": "读取项目最近一批 A/B/C 界面概念、生成进度和用户选择。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    }
+  },
+  {
+    "name": "project_concept_generate",
+    "description": "为界面改版单独生成一个完整桌面方案。必须依次生成差异明显的 A、B、C；三套完成后停止并等待用户选择。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "A",
+            "B",
+            "C"
+          ]
+        },
+        "screen": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,40}$"
+        },
+        "width": {
+          "type": "integer",
+          "enum": [
+            1536
+          ]
+        },
+        "height": {
+          "type": "integer",
+          "enum": [
+            864
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 8000
+        },
+        "strength": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "tradeoff": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      },
+      "required": [
+        "projectId",
+        "direction",
+        "screen",
+        "width",
+        "height",
+        "title",
+        "prompt",
+        "strength",
+        "tradeoff"
+      ]
+    }
+  },
+  {
+    "name": "project_concept_select",
+    "description": "仅在用户当前消息明确选择 A/B/C 后记录所选方案；不得替用户选择或合并方向。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "A",
+            "B",
+            "C"
+          ]
+        }
+      },
+      "required": [
+        "projectId",
+        "direction"
+      ]
+    }
+  },
+  {
+    "name": "project_concept_discard",
+    "description": "仅在用户明确放弃本批界面方案时解除选择门禁，已生成概念仍保留为审计记录。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^prj_[a-f0-9]{24}$"
+        }
+      },
+      "required": [
+        "projectId"
       ]
     }
   },
