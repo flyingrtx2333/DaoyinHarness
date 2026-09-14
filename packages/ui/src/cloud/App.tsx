@@ -348,7 +348,7 @@ export function App(): React.JSX.Element {
       {view === "plugins" && <div className="transcript plugin-transcript"><PluginWorkspace key={`${APPLICATION}:${client.accountScope}`} selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /></div>}
       {view === "projects" && <ProjectWorkspace key={client.accountScope+":"+phase} client={client} ready={phase === "ready"} onDevelop={async (id) => { setSessions(await client.sessions()); choose(id); }} />}
       {view === "assets" && <div className="transcript plugin-transcript"><AssetLibrary key={`${client.accountScope}:${phase}`} client={client} ready={phase === "ready"} onConnect={() => { if (loginUrl) window.location.assign(loginUrl); else void connect(); }} /></div>}
-      {view === "admin" && canShowAdmin(adminScope) && <div className="transcript plugin-transcript"><AdminWorkspace key={adminScope} client={adminClient} onDenied={() => { adminClient.reset(); setAdminScope(""); setView("chat"); }} /></div>}
+      {view === "admin" && canShowAdmin(adminScope) && <div className="transcript plugin-transcript"><AdminWorkspace key={adminScope} client={adminClient} workbenchClient={client} onDenied={() => { adminClient.reset(); setAdminScope(""); setView("chat"); }} /></div>}
       <div className="transcript" hidden={view !== "chat"} onScroll={(event) => { const element = event.currentTarget; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160; }}>
         <div className="conversation-content">
           {phase === "connecting" && <p className="connection-message" role="status"><span className="spinner" /> 正在连接工作台…</p>}
