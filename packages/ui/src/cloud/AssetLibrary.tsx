@@ -93,7 +93,7 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
       {websites.length > 0 && <div className="asset-grid website-grid" aria-label="已发布网站">
         {websites.map(({ project, url }) => <article className="asset-item website-item" key={project.id}>
           <a className="asset-preview website-preview" href={url} target="_blank" rel="noreferrer" aria-label={`进入网站 ${project.title}`}>
-            <iframe src={url} title={`${project.title} 网站缩略图`} sandbox="allow-scripts" loading="lazy" tabIndex={-1} aria-hidden="true" />
+            <iframe src={url} title={`${project.title} 网站缩略图`} sandbox="allow-scripts allow-same-origin" loading="lazy" tabIndex={-1} aria-hidden="true" />
             <span className="website-open">进入网站</span>
           </a>
           <div className="asset-meta"><h2 title={project.title}>{project.title}</h2><p>网站 · 已发布</p><p className="asset-project" title={url}>{project.slug}.demo.daoyintech.com</p></div>
