@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { registerProjectAuthorization } from "./projects/authorization.js";
 import { createProjectTools, PROJECT_INSTRUCTIONS, cancelProjectRun } from "./projects/tools.js";
 import { registerProjectRoutes } from "./projects/routes.js";
@@ -211,7 +212,15 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     if (error instanceof ExecutionAccessError) return reply.code(401).send({ error: { code: error.code, message: "执行身份无效或授权已过期。" } });
     if (error instanceof Error && "validation" in error) return reply.code(400).send({ error: { code: "REQUEST_INVALID", message: "请求格式不正确；身份和权限不能通过请求正文指定。" } });
     if (error instanceof Error && "statusCode" in error && error.statusCode === 413) return reply.code(413).send({ error: { code: "REQUEST_TOO_LARGE", message: "请求内容过大。" } });
-    return reply.code(503).send({ error: { code: "CLOUD_REQUEST_FAILED", message: "请求未完成，请保留原请求标识并查询任务状态。" } });
+    const failureId = randomUUID();
+    const candidate = error as { code?: unknown; name?: unknown; stack?: unknown };
+    console.error(JSON.stringify({ event: "cloud.internal_error", failureId,
+      errorName: typeof candidate.name === "string" ? candidate.name.slice(0, 80) : "unknown",
+      errorCode: typeof candidate.code === "string" ? candidate.code.slice(0, 80) : undefined,
+      locations: typeof candidate.stack === "string" ? candidate.stack.split("\n").slice(1, 4)
+        .map((line) => line.trim().slice(0, 240)) : [] }));
+    return reply.code(503).send({ error: { code: "CLOUD_REQUEST_FAILED",
+      message: "请求未完成，请保留故障编号 " + failureId + " 并查询任务状态。" } });
   });
 
   registerProjectAuthorization(app, { repository: options.repository, ensureActive });
