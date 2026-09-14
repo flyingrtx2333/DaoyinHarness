@@ -1,5 +1,6 @@
 import http from "node:http";
 import { providerSafeConceptText } from "./concept-prompt.js";
+import { projectSiteContentSecurityPolicy } from "./site-policy.js";
 import { mkdir, chmod, chown, unlink } from "node:fs/promises";
 import { Pool, type PoolConfig } from "pg";
 import { randomBytes } from "node:crypto";
@@ -234,7 +235,7 @@ const gateway=http.createServer((req,res)=>{void(async()=>{
     const row=(await pool.query<{id:string;active_version:string|null;owner_key:string}>("SELECT id,active_version,owner_key FROM harness_projects WHERE "+(preview?"id=$1":"slug=$1"),[preview?"prj_"+preview[1]:published![1]])).rows[0];
     if(!row)throw new ProjectError("PROJECT_DOMAIN_UNKNOWN","网站不存在。",404);
     res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Referrer-Policy","no-referrer");
-    res.setHeader("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors "+(preview?"https://harness.daoyintech.com https://www.daoyintech.com":"'none'"));
+    res.setHeader("Content-Security-Policy",projectSiteContentSecurityPolicy(Boolean(preview)));
     let version=row.active_version;
     if(preview){
       const url=new URL(req.url??"/","https://"+host);
