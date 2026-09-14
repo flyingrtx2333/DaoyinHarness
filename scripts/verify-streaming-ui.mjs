@@ -56,6 +56,7 @@ try {
     await page.evaluate(() => { window.detachedHistory = false; const node = document.querySelector("article.turn"); new MutationObserver(() => { if (!node.isConnected) window.detachedHistory = true; }).observe(document.querySelector(".conversation-content"), { childList: true, subtree: true }); });
     await page.locator("#message").fill("现在开始流式回复");
     await page.getByRole("button", { name: "发送", exact: true }).click();
+    assert.equal(await page.locator("#message").inputValue(), "");
     await page.getByRole("article", { name: "正在发送的问题" }).waitFor();
     assert.equal(await original.evaluate(node => node.isConnected), true);
     await page.getByText("正在处理你的问题…", { exact: true }).waitFor();

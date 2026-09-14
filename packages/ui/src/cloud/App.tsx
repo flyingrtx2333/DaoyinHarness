@@ -292,6 +292,9 @@ export function App(): React.JSX.Element {
     if (uploading || !visibleMessage || submission.current || sessionMutation.current || active || phase !== "ready" || loading) return;
     if (session?.archivedAt) { setError("请先恢复已归档的会话，或新建会话。"); return; }
     if (!plugin?.profileId) { setError("当前会话的插件尚未支持，请新建会话并选择可用插件。"); return; }
+    const submittedDraft = draft;
+    const submittedReferences = references;
+    setDraft(""); setReferences([]);
     setSubmitting(true); setSendingMessage(visibleMessage); setError(""); nearBottom.current = true;
     const epoch = accountEpoch.current;
     const operation = (async (): Promise<CloudRun> => {
@@ -308,9 +311,13 @@ export function App(): React.JSX.Element {
       const accepted = await operation;
       if (epoch === accountEpoch.current) {
         setRuns((current) => [accepted, ...current.filter((run) => run.id !== accepted.id)]);
-        setDraft(""); setReferences([]); nearBottom.current = true;
+        nearBottom.current = true;
       }
-    } catch (cause) { if (epoch === accountEpoch.current) fail(cause); }
+    } catch (cause) {
+      if (epoch === accountEpoch.current) {
+        setDraft(submittedDraft); setReferences(submittedReferences); fail(cause);
+      }
+    }
     finally { submission.current = null; setSubmitting(false); setSendingMessage(""); if (epoch === accountEpoch.current) setRevision((value) => value + 1); }
   }
   async function cancel(): Promise<void> {
