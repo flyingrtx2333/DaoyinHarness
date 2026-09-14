@@ -10,6 +10,7 @@ describe("independent project concept-to-ui policy",()=>{
     expect(PROJECT_INSTRUCTIONS).toContain("A、B、C");
     expect(PROJECT_INSTRUCTIONS).toContain("不得调用 project_write");
     expect(PROJECT_INSTRUCTIONS).toContain("每次优先只更新一个文件");
+    expect(PROJECT_INSTRUCTIONS).toContain("单次写入内容不超过12000个字符");
     expect(PROJECT_INSTRUCTIONS).toContain("不能把整张概念图当页面背景");
   });
   it("accepts only the fixed concept viewport and closed direction schema",()=>{

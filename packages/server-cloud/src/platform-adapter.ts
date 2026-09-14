@@ -76,7 +76,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
     const secret = privateApp ? options.appServiceToken : options.serviceToken;
     if (!secret) throw new CloudError(503, "APP_BRIDGE_DISABLED", "私有业务插件尚未配置。");
     if ((!privateApp && ["profile", "call", "authorize-tool"].includes(path)) || (privateApp && path === "search")) throw new Error("Invalid bridge path.");
-    const duration = ["model", "search"].includes(path) ? 90_000 : ["profile", "call", "authorize-tool"].includes(path) ? (path === "call" ? 100_000 : 30_000) : 5_000;
+    const duration = path === "model" ? 160_000 : path === "search" ? 90_000 : ["profile", "call", "authorize-tool"].includes(path) ? (path === "call" ? 100_000 : 30_000) : 5_000;
     const signal = AbortSignal.any([parent, AbortSignal.timeout(duration)]);
     try {
       const response = await transport(new URL(`/api/internal/${privateApp ? "agent-apps" : "agent-public"}/v1/${path}`, base), {
