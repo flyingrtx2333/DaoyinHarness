@@ -45,7 +45,7 @@ describe("shared AgentEngine reliability (replay model and isolated memory event
       const { engine, write, events } = fixture([{ kind: "tool_calls", calls: [{ id: "first", name: "write", input: {} }, invalid] }]);
       expect((await engine.runTurn(input)).status).toBe("failed");
       expect(write).not.toHaveBeenCalled();
-      expect(events.events.map((event) => event.type)).toEqual(["turn.started", "assistant.delta", "turn.failed"]);
+      expect(events.events.map((event) => event.type)).toEqual(["turn.started", "phase.updated", "assistant.delta", "turn.failed"]);
     },
   );
 

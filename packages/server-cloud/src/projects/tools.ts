@@ -84,6 +84,7 @@ export function createProjectTools(identity:ExecutionIdentity,run:CloudRun,ensur
             result=await projectCall(identity,{action,...input},signal);
             if(action==="write")await projectCall(identity,{action:"bind",projectId:input.projectId,sessionId:run.sessionId},signal);
           }else if(action==="concept_generate"){
+            await context.reportProgress?.({displayText:"正在生成方案 "+String(input.direction)+" 图片…"});
             result=await projectCall(identity,{action,...input,requestId:context.toolCallId,sourceRun:run.id},signal);
           }else if(action==="concept_select"){
             if(!userSelected(run.userMessage,input.direction))throw new ProjectError("PROJECT_CONCEPT_SELECTION_CONFIRMATION_REQUIRED","请明确发送“选择 A”“选择 B”或“选择 C”。",409);
@@ -99,9 +100,14 @@ export function createProjectTools(identity:ExecutionIdentity,run:CloudRun,ensur
             const cancel=():void=>{void projectCall(identity,{action:"cancel",projectId:input.projectId,operationId}).catch(()=>undefined);};
             signal.addEventListener("abort",cancel,{once:true});
             let operation=accepted.operation;
+            let lastProgress="";
             try{
               for(let i=0;i<25&&["queued","running"].includes(operation.status);i++){
                 signal.throwIfAborted();
+                const displayText=operation.status==="queued"?"正在等待可用的隔离资源…":
+                  action==="publish"?"正在构建并启动正式网站…":action==="preview"?"正在构建开发预览…":
+                    action==="rollback"?"正在恢复所选网站版本…":"正在检查项目…";
+                if(displayText!==lastProgress||i%3===0){await context.reportProgress?.({displayText});lastProgress=displayText;}
                 await new Promise<void>(resolve=>setTimeout(resolve,1500));
                 await ensureActive(identity,signal);
                 operation=(await projectCall<{operations:ProjectOperation[]}>(identity,{action:"operations",projectId:input.projectId},signal)).operations.find(o=>o.id===operationId)??operation;

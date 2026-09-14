@@ -130,12 +130,15 @@ describe("AgentEngine", () => {
     const events = await store.read("session_test");
     expect(events.map((event) => event.type)).toEqual([
       "turn.started",
+      "phase.updated",
+      "phase.updated",
       "tool.started",
       "tool.completed",
+      "phase.updated",
       "assistant.delta",
       "turn.completed",
     ]);
-    expect(events.map((event) => event.eventSeq)).toEqual([1, 2, 3, 4, 5]);
+    expect(events.map((event) => event.eventSeq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(model.requests[1]?.messages.at(-1)).toMatchObject({ role: "tool", toolName: "write_file" });
   });
 
@@ -170,6 +173,34 @@ describe("AgentEngine", () => {
     const started = (await store.read("session_test")).find((event) => event.type === "tool.started");
     expect(started).toMatchObject({ type: "tool.started", payload: { input: { text: "[redacted]" } } });
     expect(JSON.stringify(await store.read("session_test"))).not.toContain("do not persist me");
+  });
+
+  it("persists bounded tool progress before the tool completion event", async () => {
+    const model = new ReplayModel([
+      { kind: "tool_calls", calls: [{ id: "call_progress", name: "progress_tool", input: {} }] },
+      { kind: "assistant", content: "Progress tool complete." },
+    ]);
+    const root = await temporaryDirectory();
+    const store = new JsonlSessionStore(path.join(root, ".events"));
+    const tools = new ToolRegistry([{
+      name: "progress_tool", description: "Reports safe progress.", category: "system", mutating: false,
+      inputSchema: { type: "object" },
+      async execute(_input, _signal, context) {
+        await context.reportProgress?.({ displayText: "已完成 1 / 3 步", completed: 1, total: 3 });
+        await context.reportProgress?.({ displayText: "此更新过于频繁", completed: 2, total: 3 });
+        return { ok: true, summary: "Done",
+          evidence: { schemaVersion: 1, toolName: "progress_tool", result: {}, artifacts: [], diagnostics: [] } };
+      },
+    }]);
+    const engine = new AgentEngine({ model, tools, events: store });
+    await engine.runTurn({ ...turnInput, turnId: "turn_progress", userMessage: "Run progress tool." });
+    const events = await store.read("session_test");
+    const progressEvent = events.find(event => event.type === "tool.progress");
+    expect(progressEvent).toMatchObject({ payload: { toolCallId: "call_progress", displayText: "已完成 1 / 3 步",
+      completed: 1, total: 3 } });
+    expect(events.filter(event => event.type === "tool.progress")).toHaveLength(1);
+    expect(events.findIndex(event => event.type === "tool.progress"))
+      .toBeLessThan(events.findIndex(event => event.type === "tool.completed"));
   });
 
   it("reassembles dynamic prompt sections for every step and persists tool inputs for later evidence", async () => {
@@ -271,9 +302,10 @@ describe("AgentEngine", () => {
 
     const result = await engine.runTurn(turnInput);
 
-    expect(result).toMatchObject({ status: "failed", lastEventSeq: 3 });
+    expect(result).toMatchObject({ status: "failed", lastEventSeq: 4 });
     expect((await store.read("session_test")).map((event) => event.type)).toEqual([
       "turn.started",
+      "phase.updated",
       "assistant.delta",
       "turn.failed",
     ]);

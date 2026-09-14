@@ -114,7 +114,7 @@ export function createDefaultPromptRegistry(): SystemPromptRegistry {
       id: "tool_behavior",
       kind: "stable",
       priority: 300,
-      render: () => "Use only capabilities actually provided in the current tool schema. Prefer observation before mutation. Read tool results before deciding the next action. Continue purposefully until the user's goal is complete or a concrete blocker is reached.",
+      render: () => "Use only capabilities actually provided in the current tool schema. Prefer observation before mutation. Before a tool call, briefly state the next action in user-visible content when the provider supports content alongside tool calls; never claim a result before the tool returns. Read tool results before deciding the next action. Continue purposefully until the user's goal is complete or a concrete blocker is reached.",
     },
     {
       id: "safety_and_evidence",

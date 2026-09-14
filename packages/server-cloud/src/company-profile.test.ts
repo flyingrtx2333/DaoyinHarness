@@ -115,7 +115,7 @@ describe("company profile contracts (no real platform/model calls)", () => {
       await vi.waitFor(async () => expect((await repository.getRun(actor, runId)).status).toBe("completed"));
       expect(search).toHaveBeenCalledOnce();
       expect((await repository.readEvents(actor, sessionId, 0, 100)).map((event) => event.type))
-        .toEqual(["turn.started", "tool.started", "tool.completed", "assistant.delta", "turn.completed"]);
+        .toEqual(["turn.started", "phase.updated", "phase.updated", "tool.started", "tool.completed", "phase.updated", "assistant.delta", "turn.completed"]);
     } finally { await app.close(); repository.close(); }
   });
 });

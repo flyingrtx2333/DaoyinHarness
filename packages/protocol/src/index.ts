@@ -152,11 +152,23 @@ export interface AgentEventPayloads {
     contentBlockId: string;
     delta: string;
   };
+  "phase.updated": {
+    phase: "thinking" | "tool" | "synthesizing";
+    displayText: string;
+    step: number;
+  };
   "tool.started": {
     toolCallId: string;
     toolName: string;
     displayText: string;
     input?: JsonValue;
+  };
+  "tool.progress": {
+    toolCallId: string;
+    toolName: string;
+    displayText: string;
+    completed?: number;
+    total?: number;
   };
   "tool.completed": {
     toolCallId: string;

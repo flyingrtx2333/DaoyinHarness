@@ -7,6 +7,7 @@ export {
   type ToolExecution,
   type ToolFailure,
   type ToolExecutionContext,
+  type ToolProgressUpdate,
   type ToolPack,
   type ToolRequest,
   type ToolSuccess,

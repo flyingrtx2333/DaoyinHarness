@@ -35,7 +35,7 @@ BFF 解析账号后，使用内部 Bearer 连接固定 Harness 地址，只转�
 | ready | sessionId, lastEventSeq |
 | heartbeat | sessionId, lastEventSeq |
 
-原 AgentEvent、Run 和工具数据协议不变。传输可以重复，客户端按序号去重；不是 exactly-once 传输。关闭码 4401/4403 对应身份/权限失效，4404 表示无权访问会话，4409 表示游标需从历史重新建立；1012/1013 可重连回放。
+AgentEvent 同时承载分阶段实时反馈：`phase.updated` 表示理解、工具执行和结果整理阶段；`assistant.delta` 继续承载模型正文分片；`tool.started / tool.progress / tool.completed / tool.failed` 表示工具生命周期。工具进度由内核校验并至少间隔 150ms 接受一次，项目检查、预览、发布和回滚会持续报告排队或执行状态。所有事件仍先持久化再广播，传输可以重复，客户端按序号去重；不是 exactly-once 传输。关闭码 4401/4403 对应身份/权限失效，4404 表示无权访问会话，4409 表示游标需从历史重新建立；1012/1013 可重连回放。
 
 ## 存在哪里
 

@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentEventPayloads, AgentEventType, JsonValue, SessionCompaction } from "@daoyin/harness-protocol";
-import type { ToolRegistry, ToolDescriptor, ToolExecution, ToolExecutionContext } from "@daoyin/harness-tools/registry";
+import type { ToolRegistry, ToolDescriptor, ToolExecution, ToolExecutionContext, ToolProgressUpdate } from "@daoyin/harness-tools/registry";
 import { snapshotExecutionIdentity, type ExecutionIdentity, type SessionCompactionStore, type SessionEventStore } from "@daoyin/harness-contracts";
 import { ContextAssembler } from "./context-assembler.js";
 import { TextDeltaBuffer } from "./text-delta-buffer.js";
@@ -206,6 +206,7 @@ export class AgentEngine {
     };
     const started = await append("turn.started", { status: "running", userMessageId: `msg_${crypto.randomUUID()}`, userMessage: input.userMessage });
     if (signal.aborted) return cancel();
+    await append("phase.updated", { phase: "thinking", displayText: "正在理解需求并规划下一步…", step: 0 });
     let compaction: SessionCompaction | undefined;
     let history: ModelConversationItem[];
     try {
@@ -324,6 +325,7 @@ export class AgentEngine {
       for (const call of reply.calls) seenIds.add(call.id);
       current.push({ role: "assistant_tool_calls", content: reply.content ?? "", calls: reply.calls });
       if (reply.content && !streamed) await append("assistant.delta", { contentBlockId, delta: reply.content });
+      await append("phase.updated", { phase: "tool", displayText: "正在执行所需操作…", step });
       for (const [callIndex, call] of reply.calls.entries()) {
         if (signal.aborted) return cancel();
         const snapshot = memorySnapshot;
@@ -359,8 +361,30 @@ export class AgentEngine {
             }
           }
           progress.started(call, descriptor);
+          let lastProgressAt = 0;
+          const reportProgress = async (update: ToolProgressUpdate): Promise<void> => {
+            signal.throwIfAborted();
+            const displayText = update.displayText.trim();
+            const completed = update.completed;
+            const total = update.total;
+            const hasControl = [...displayText].some((character) => {
+              const code = character.codePointAt(0) ?? 0;
+              return code < 32 || code === 127;
+            });
+            if (!displayText || displayText.length > 160 || hasControl ||
+                (completed !== undefined && (!Number.isSafeInteger(completed) || completed < 0)) ||
+                (total !== undefined && (!Number.isSafeInteger(total) || total < 1)) ||
+                (completed !== undefined && total !== undefined && completed > total)) {
+              throw new AgentPolicyError("TOOL_PROGRESS_INVALID", "工具返回了无效的进度信息。");
+            }
+            const now = Date.now();
+            if (now - lastProgressAt < 150) return;
+            lastProgressAt = now;
+            await append("tool.progress", { toolCallId: call.id, toolName: call.name, displayText,
+              ...(completed === undefined ? {} : { completed }), ...(total === undefined ? {} : { total }) });
+          };
           result = await this.#tools.execute(structuredClone(call), signal, {
-            ...executionContext, sourceEventIds: [started.id, toolStarted.id],
+            ...executionContext, sourceEventIds: [started.id, toolStarted.id], reportProgress,
           });
           // Observe the returned outcome before cancellation, retaining completed side-effect evidence.
           progress.observe(call, result);
@@ -399,6 +423,7 @@ export class AgentEngine {
           }
         }
       }
+      await append("phase.updated", { phase: "synthesizing", displayText: "正在根据操作结果继续处理…", step: step + 1 });
     }
     return this.#fail(append, "AGENT_STEP_LIMIT", "Agent 超过了推理步数上限。");
   }

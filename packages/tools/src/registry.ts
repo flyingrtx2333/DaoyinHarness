@@ -22,6 +22,11 @@ export interface ToolRequest {
   input: Record<string, unknown>;
 }
 
+export interface ToolProgressUpdate {
+  displayText: string;
+  completed?: number;
+  total?: number;
+}
 export interface ToolExecutionContext {
   accountId: string;
   scopeId: string;
@@ -31,6 +36,8 @@ export interface ToolExecutionContext {
   executionIdentity?: ExecutionIdentity;
   /** Filled by the registry, never taken from model-supplied arguments. */
   toolCallId?: string;
+  /** Trusted per-call progress channel. The Agent kernel validates and persists each accepted update. */
+  reportProgress?(update: ToolProgressUpdate): Promise<void>;
 }
 
 export interface ToolSuccess {

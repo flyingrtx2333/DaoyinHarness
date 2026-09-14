@@ -37,12 +37,15 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
   });
   it("appends chunks within a block and separates model steps while retaining live tool state", () => {
     const events = [event(1, "assistant.delta", { delta: "先查询", contentBlockId: "pre" }),
-      event(2, "tool.started", { toolCallId: "lookup", toolName: "saishi_list_events", displayText: "raw" }),
-      event(3, "assistant.delta", { delta: "结果", contentBlockId: "answer" }),
-      event(4, "assistant.delta", { delta: "如下", contentBlockId: "answer" })];
+      event(2, "phase.updated", { phase: "tool", displayText: "正在执行查询…", step: 0 }),
+      event(3, "tool.started", { toolCallId: "lookup", toolName: "saishi_list_events", displayText: "raw" }),
+      event(4, "tool.progress", { toolCallId: "lookup", toolName: "saishi_list_events", displayText: "已读取目录…" }),
+      event(5, "assistant.delta", { delta: "结果", contentBlockId: "answer" }),
+      event(6, "assistant.delta", { delta: "如下", contentBlockId: "answer" })];
     const result = projectTurns([{ ...run, status: "running" }], events)[0];
     expect(result?.text).toBe("先查询\n\n结果如下");
-    expect(result?.tools[0]).toMatchObject({ status: "running", text: "正在查询赛事列表…" });
+    expect(result?.phaseText).toBe("正在执行查询…");
+    expect(result?.tools[0]).toMatchObject({ status: "running", text: "已读取目录…" });
     expect(projectTurns([{ ...run, status: "cancelled" }], events)[0]?.tools[0]?.status).toBe("failed");
   });
   it("orders turns chronologically and never duplicates replayed deltas", () => {

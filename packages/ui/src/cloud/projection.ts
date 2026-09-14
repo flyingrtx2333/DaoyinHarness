@@ -4,7 +4,7 @@ import type { CloudRun } from "./client.js";
 export interface PublicSource { id: string; title: string; location: string; content: string }
 export interface EventImage { id: number; eventId: number; kind: "event_cover" | "material" | "highlight" | "video_preview"; title: string }
 export interface ToolView { id: string; status: "running" | "completed" | "failed"; text: string; startedAt: string; finishedAt?: string }
-export interface TurnView { run: CloudRun; text: string; tools: ToolView[]; sources: PublicSource[]; images: EventImage[]; assistantOccurredAt: string }
+export interface TurnView { run: CloudRun; text: string; phaseText: string; tools: ToolView[]; sources: PublicSource[]; images: EventImage[]; assistantOccurredAt: string }
 export interface PendingVideoInteraction {
   interactionId: string;
   runId: string;
@@ -63,7 +63,7 @@ function appendEventCover(turn: TurnView, event: unknown): void {
 }
 
 export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[] {
-  const turns = [...runs].reverse().map((run) => ({ run, text: "", tools: [] as ToolView[], sources: [] as PublicSource[], images: [] as EventImage[], assistantOccurredAt: run.createdAt }));
+  const turns = [...runs].reverse().map((run) => ({ run, text: "", phaseText: "", tools: [] as ToolView[], sources: [] as PublicSource[], images: [] as EventImage[], assistantOccurredAt: run.createdAt }));
   const byId = new Map(turns.map((turn) => [turn.run.id, turn]));
   const seen = new Set<number>();
   const blocks = new Map<string, string>();
@@ -78,7 +78,8 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       blocks.set(event.turnId, event.payload.contentBlockId);
       turn.text += event.payload.delta;
     }
-    if (event.type === "tool.started" || event.type === "tool.completed" || event.type === "tool.failed") {
+    if (event.type === "phase.updated") turn.phaseText = event.payload.displayText;
+    if (event.type === "tool.started" || event.type === "tool.progress" || event.type === "tool.completed" || event.type === "tool.failed") {
       const id = event.payload.toolCallId;
       let tool = turn.tools.find((item) => item.id === id);
       const payload: unknown = event.payload;
@@ -86,7 +87,8 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       const isSaishi = typeof name === "string" && name.startsWith("saishi_");
       const label = typeof name === "string" ? toolLabels[name] ?? (isSaishi ? "查询赛事数据" : "执行工具") : "执行工具";
       if (!tool) { tool = { id, status: "running", text: `正在${label}…`, startedAt: event.occurredAt }; turn.tools.push(tool); }
-      if (event.type !== "tool.started") tool.finishedAt = event.occurredAt;
+      if (event.type === "tool.progress") tool.text = event.payload.displayText;
+      if (event.type === "tool.completed" || event.type === "tool.failed") tool.finishedAt = event.occurredAt;
       if (event.type === "tool.completed") {
         const result: unknown = event.payload.evidence.result;
         tool.status = "completed"; tool.text = `${label}完成`;
