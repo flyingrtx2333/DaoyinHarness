@@ -24,6 +24,8 @@ describe("execution identity contracts (pure policy, no auth/provider I/O)", () 
     ["missing tenant", () => ({ ...identity(), space: { kind: "organization", id: "team-a" } })],
     ["unknown scope kind", () => ({ ...identity(), space: { kind: "auto", id: "team-a" } })],
     ["wildcard tools", () => ({ ...identity(), allowedTools: ["*"] })],
+    ["oversized tool inventory", () => ({ ...identity(),
+      allowedTools: Array.from({ length: 2_001 }, (_, index) => "tool_" + String(index)) })],
   ] as const)("rejects %s without supplying a default", (_label, candidate) => {
     expect(() => assertExecutionIdentity(candidate())).toThrow();
   });

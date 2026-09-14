@@ -8,6 +8,7 @@ const port = Number(process.env.DAOYIN_CLOUD_PORT ?? "4700");
 const platformUrl = process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "";
 const appServiceToken = process.env.DAOYIN_CLOUD_APP_SERVICE_TOKEN;
 const vectorMinScoreRaw = process.env.DAOYIN_MEMORY_VECTOR_MIN_SCORE;
+const capabilityRouterMode = process.env.DAOYIN_CAPABILITY_ROUTER_MODE ?? "off";
 const vectorMinScore = vectorMinScoreRaw === undefined ? undefined : Number(vectorMinScoreRaw);
 try {
   const url = new URL(databaseUrl);
@@ -20,6 +21,9 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) {
 }
 if (vectorMinScore !== undefined && (!Number.isFinite(vectorMinScore) || vectorMinScore < -1 || vectorMinScore > 1)) {
   throw new Error("DAOYIN_MEMORY_VECTOR_MIN_SCORE must be between -1 and 1.");
+}
+if (!["off", "shadow", "enforce"].includes(capabilityRouterMode)) {
+  throw new Error("DAOYIN_CAPABILITY_ROUTER_MODE must be off, shadow or enforce.");
 }
 const repository = await PostgresCloudRepository.open(databaseUrl, {
   memoryRetrieverFactory: (pool) => createConfiguredMemoryRetriever(pool, {
@@ -58,6 +62,7 @@ try {
     buildInfo: await loadRuntimeBuild(new URL("./release.json", import.meta.url)),
     platformUrl,
     serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
+    capabilityRouterMode: capabilityRouterMode as "off" | "shadow" | "enforce",
     ...(appServiceToken ? { appServiceToken } : {}),
   });
   // Startup never creates or changes production schema. Run postgres-migrate first.

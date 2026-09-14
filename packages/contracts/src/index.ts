@@ -86,7 +86,7 @@ function identifier(value: unknown): value is string {
 }
 
 function names(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.length <= 256 && value.every(identifier);
+  return Array.isArray(value) && value.length <= 2_000 && value.every(identifier);
 }
 
 export function assertExecutionScope(value: unknown): asserts value is ExecutionScope {

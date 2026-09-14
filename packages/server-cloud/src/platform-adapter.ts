@@ -57,10 +57,11 @@ function reply(value: unknown, appPolicy?: CallPolicy): ModelReply {
   return { kind: "tool_calls", content: output.content, calls };
 }
 
-type BridgePath = "introspect" | "authorize" | "model" | "search" | "profile" | "call" | "authorize-tool" | "health";
+type BridgePath = "introspect" | "authorize" | "model" | "search" | "profile" | "call" |
+  "authorize-tool" | "capability-semantic" | "health";
 
 /** No credentials are attached to identities, run records, tool results or errors. */
-export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<CloudServerOptions, "authenticate" | "isAuthorizationActive" | "resolveProfile" | "createModel" | "checkPlatform"> {
+export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<CloudServerOptions, "authenticate" | "isAuthorizationActive" | "resolveProfile" | "createModel" | "createCapabilitySemantic" | "checkPlatform"> {
   const base = new URL(options.platformUrl);
   if (base.username || base.password || base.search || base.hash || base.pathname !== "/" ||
       (base.protocol !== "https:" && !(base.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(base.hostname))) ||
@@ -159,6 +160,29 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       if (!isCompanyPublicIdentity(identity)) throw new CloudError(403, "APP_ACCESS_DENIED", "未开通当前应用。");
       return publicProfile;
     },
+    createCapabilitySemantic: (identity, run) => ({
+      analyze: async (input) => {
+        const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) ||
+          isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
+        if (!privateApp || run.authorizationId !== identity.authorizationId ||
+            run.billingAccountId !== identity.billingAccountId) {
+          throw new CloudError(403, "RUN_IDENTITY_MISMATCH", "任务授权不匹配。");
+        }
+        const value = await post("capability-semantic", {
+          authorizationId: identity.authorizationId, runId: run.id, operationId: "capability_route",
+          input: { schemaVersion: 1, query: input.query, clauses: input.clauses,
+            candidates: input.candidates.map((pack) => ({
+              id: pack.id, title: pack.title, summary: pack.summary, intents: pack.intents,
+              examples: pack.examples, negativeExamples: pack.negativeExamples,
+              resourceKinds: pack.resourceKinds, risk: pack.risk,
+            })) },
+        }, input.signal, true);
+        if (!record(value) || value.schemaVersion !== 1 || !record(value.rerankScores) ||
+            !Array.isArray(value.intents)) throw new Error("Invalid capability semantic response.");
+        return { rerankScores: value.rerankScores as Record<string, number>,
+          intents: value.intents as Array<{ label: string; objective: string; confidence: number; packIds: string[] }> };
+      },
+    }),
     createModel: async (identity, run, signal) => {
       const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
       if ((!privateApp && !isCompanyPublicIdentity(identity)) || run.authorizationId !== identity.authorizationId || run.billingAccountId !== identity.billingAccountId) {
@@ -180,10 +204,11 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   };
 }
 
-export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick<CloudServerOptions, "repository" | "maxConcurrentRuns" | "runTimeoutMs" | "buildInfo">): ReturnType<typeof createCloudServer> {
+export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick<CloudServerOptions, "repository" | "maxConcurrentRuns" | "runTimeoutMs" | "buildInfo" | "capabilityRouterMode">): ReturnType<typeof createCloudServer> {
   return createCloudServer({ ...createPlatformAdapters(options), repository: options.repository,
     ...(options.buildInfo === undefined ? {} : { buildInfo: options.buildInfo }),
     ...(options.maxConcurrentRuns === undefined ? {} : { maxConcurrentRuns: options.maxConcurrentRuns }),
     ...(options.runTimeoutMs === undefined ? {} : { runTimeoutMs: options.runTimeoutMs }),
+    ...(options.capabilityRouterMode === undefined ? {} : { capabilityRouterMode: options.capabilityRouterMode }),
   });
 }

@@ -5,6 +5,8 @@ import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createClou
 export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { AgentEngine, type ModelClient } from "@daoyin/harness-agent-core";
+import { capabilityPacksFor, explicitHighRiskPacks } from "./capability-packs.js";
+import { routeCapabilities, type CapabilitySemanticProvider } from "./capability-router.js";
 import { createCloudMemoryRuntime } from "./memory-tools.js";
 import { AUTONOMOUS_MEMORY_INSTRUCTIONS, isMemoryToolName } from "./memory-agent-policy.js";
 import { createCloudEpisodicMemoryRuntime, EPISODIC_MEMORY_INSTRUCTIONS, isEpisodicMemoryToolName } from "./episodic-memory-tools.js";
@@ -52,6 +54,8 @@ export interface CloudServerOptions {
   maxConcurrentRuns?: number;
   runTimeoutMs?: number;
   eventStream?: EventStreamLimits;
+  capabilityRouterMode?: "off" | "shadow" | "enforce";
+  createCapabilitySemantic?(identity: ExecutionIdentity, run: CloudRun): CapabilitySemanticProvider;
   /** Trusted platform check; absence disables cross-application memory sharing. */
   authorizeMemoryShare?(identity: ExecutionIdentity, targetAppId: string, signal: AbortSignal): Promise<boolean>;
 }
@@ -99,7 +103,7 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
   const businessTools = profile.tools.filter((binding) => !isMemoryToolName(binding.definition.name) &&
     !isEpisodicMemoryToolName(binding.definition.name) && !ORCHESTRATION_TOOLS.has(binding.definition.name));
   if (!/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.id) || !/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.version) ||
-      !profile.instructions.trim() || profile.instructions.length > 10_000 || businessTools.length > 32 || profile.tools.length > 39) {
+      !profile.instructions.trim() || profile.instructions.length > 10_000 || businessTools.length > 2_000 || profile.tools.length > 2_000) {
     throw new CloudError(503, "PROFILE_INVALID", "应用配置不可用。");
   }
   const names = new Set<string>();
@@ -129,6 +133,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   }
   const maxConcurrentRuns = options.maxConcurrentRuns ?? 4;
   const runTimeoutMs = options.runTimeoutMs ?? 120_000;
+  const capabilityRouterMode = options.capabilityRouterMode ?? "off";
   if (!Number.isSafeInteger(maxConcurrentRuns) || maxConcurrentRuns < 1 || maxConcurrentRuns > 32 ||
       !Number.isSafeInteger(runTimeoutMs) || runTimeoutMs < 100 || runTimeoutMs > 600_000) throw new Error("Invalid cloud runtime limits.");
   const app = Fastify({ logger: false, forceCloseConnections: true, bodyLimit: 64_000,
@@ -345,21 +350,75 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             }
           }, (result) => result.ok),
         }));
+        const routableDefinitions = wrappedDefinitions.filter((definition) => {
+          const binding = bindings.get(definition.name);
+          return binding !== undefined && identity.allowedTools.includes(definition.name) &&
+            binding.requiredPermissions.every((permission) => identity.permissions.includes(permission));
+        });
+        const priorForRouting = capabilityRouterMode === "off" ? [] : await stores.events.read(run.sessionId);
+        const continuity = priorForRouting.filter((event) => event.type === "turn.started")
+          .slice(-2).map((event) => event.payload.userMessage).join("\n").slice(0, 1_500);
+        const packs = capabilityPacksFor(routableDefinitions);
+        const highRiskPacks = explicitHighRiskPacks(run.userMessage, packs);
+        const capabilityRoute = capabilityRouterMode === "off" || routableDefinitions.length === 0 ? undefined :
+          await routeCapabilities({
+            message: run.userMessage, continuity, packs,
+            tools: routableDefinitions, explicitHighRiskPackIds: highRiskPacks, pinnedPackIds: highRiskPacks,
+            ...(options.createCapabilitySemantic === undefined ? {} :
+              { semantic: options.createCapabilitySemantic(identity, run) }),
+            signal: controller.signal,
+          });
+        const routeAllows = (name: string): boolean => capabilityRouterMode !== "enforce" ||
+          capabilityRoute === undefined || capabilityRoute.selectedToolNames.has(name);
+        const capabilitySearchTool: ToolDefinition | undefined = capabilityRoute === undefined ? undefined : {
+          name: "capability_search", description: "按当前目标检索并追加最多两个已授权的只读能力包；不能启用写入或高风险能力。",
+          category: "system", mutating: false,
+          inputSchema: { type: "object", additionalProperties: false, required: ["query"],
+            properties: { query: { type: "string", minLength: 1, maxLength: 500 } } },
+          auditInput: (input) => ({ queryLength: typeof input.query === "string" ? input.query.length : 0 }),
+          execute: async (input, signal, context) => {
+            if (context.turnId !== run.id || context.sessionId !== run.sessionId || typeof input.query !== "string" ||
+                !input.query.trim() || input.query.length > 500) {
+              return { ok: false, code: "CAPABILITY_SEARCH_INVALID", message: "能力检索参数无效。", retryable: false };
+            }
+            await ensureActive(identity, signal); chargeTool();
+            const expanded = capabilityRoute.expandReadonly(input.query);
+            await stores.events.append({
+              type: "capability.routed", accountId: stores.accountId, scopeId: stores.scopeId,
+              sessionId: run.sessionId, turnId: run.id,
+              payload: { phase: "expansion", ...capabilityRoute.decision },
+            });
+            return { ok: true, summary: expanded.addedPackIds.length ? "已追加只读能力" : "没有找到新的只读能力",
+              evidence: { schemaVersion: 1, toolName: "capability_search",
+                result: { addedPackIds: expanded.addedPackIds }, artifacts: [], diagnostics: [] } };
+          },
+        };
         const authorize: ToolAuthorization = async ({ tool, context, request }): Promise<boolean> => {
           const current = context.executionIdentity;
           if (current === undefined || !sameExecutionScope(identity, current) || current.authorizationId !== identity.authorizationId) return false;
+          if (tool.name === "capability_search") {
+            if (capabilitySearchTool === undefined || !current.permissions.includes("agent.use")) return false;
+            if (request !== undefined && (typeof request.input.query !== "string" || !request.input.query.trim() ||
+                request.input.query.length > 500 || Object.keys(request.input).some((key) => key !== "query"))) return false;
+            await ensureActive(identity, controller.signal);
+            return true;
+          }
           if (ORCHESTRATION_TOOLS.has(tool.name)) {
+            if (!routeAllows(tool.name)) return false;
             if (!orchestrationAvailable || context.turnId !== run.id || context.sessionId !== run.sessionId || !current.permissions.includes("agent.use")) return false;
             if (request !== undefined && !validateCloudOrchestrationInput(tool.name, request.input)) return false;
             await ensureActive(identity, controller.signal);
             return true;
           }
           if (tool.name === VIDEO_CONFIRMATION_TOOL) {
+            if (capabilityRouterMode === "enforce" && capabilityRoute !== undefined &&
+                ![...VIDEO_GENERATION_OPERATIONS].some((name) => capabilityRoute.selectedToolNames.has(name))) return false;
             if (videoConfirmationTool === undefined || context.turnId !== run.id || context.sessionId !== run.sessionId ||
                 !current.permissions.includes("agent.use")) return false;
             await ensureActive(identity, controller.signal);
             return true;
           }
+          if (!routeAllows(tool.name)) return false;
           const binding = bindings.get(tool.name);
           if (binding === undefined || !current.allowedTools.includes(tool.name) ||
               !binding.requiredPermissions.every((permission) => current.permissions.includes(permission))) return false;
@@ -423,11 +482,31 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
           tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}`, signal: controller.signal,
           remainingModelCalls: () => maxModelCalls - modelCalls, chargeTool, createModel: createMeteredModel, ensureActive });
-        const tools = new ToolRegistry([...wrappedDefinitions, ...(videoConfirmationTool === undefined ? [] : [videoConfirmationTool]), ...orchestrationDefinitions], { authorize });
+        const tools = new ToolRegistry([...wrappedDefinitions,
+          ...(capabilitySearchTool === undefined ? [] : [capabilitySearchTool]),
+          ...(videoConfirmationTool === undefined ? [] : [videoConfirmationTool]),
+          ...orchestrationDefinitions], { authorize });
         const model = await createMeteredModel(run, controller.signal);
+        let initialRoutePending = capabilityRoute !== undefined;
+        const engineEvents = capabilityRoute === undefined ? stores.events : {
+          read: (sessionId: string, after?: number) => stores.events.read(sessionId, after),
+          append: async (pending: import("@daoyin/harness-protocol").PendingAgentEvent<
+            import("@daoyin/harness-protocol").AgentEventType>) => {
+            const event = await stores.events.append(pending);
+            if (initialRoutePending && pending.type === "turn.started") {
+              initialRoutePending = false;
+              await stores.events.append({
+                type: "capability.routed", accountId: stores.accountId, scopeId: stores.scopeId,
+                sessionId: run.sessionId, turnId: run.id,
+                payload: { phase: "initial", ...capabilityRoute.decision },
+              });
+            }
+            return event;
+          },
+        };
         // Keep the provider even without memory.read: revoked dependencies cannot re-enter through history.
         const engine = new AgentEngine({
-          model, tools, events: stores.events, compactionStore: stores.compactions,
+          model, tools, events: engineEvents, compactionStore: stores.compactions,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
           systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: maxModelCalls, maxToolCalls: 24,

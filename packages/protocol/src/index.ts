@@ -135,6 +135,19 @@ export interface AgentEventPayloads {
     userMessageId: string;
     userMessage: string;
   };
+  "capability.routed": {
+    phase: "initial" | "expansion";
+    algorithmVersion: "hybrid-v1";
+    catalogDigest: string;
+    eligiblePackCount: number;
+    selectedPackIds: string[];
+    exposedToolCount: number;
+    schemaCharacters: number;
+    intents: Array<{ label: string; confidence: number; packIds: string[] }>;
+    fallback: "none" | "lexical" | "safe-readonly";
+    blockedHighRiskPackIds: string[];
+    latencyMs: { eligibility: number; retrieval: number; rerank: number; classify: number };
+  };
   "assistant.delta": {
     contentBlockId: string;
     delta: string;

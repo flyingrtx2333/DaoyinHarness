@@ -134,6 +134,8 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
         .find((event): event is Extract<AgentEvent, { type: "interaction.requested" }> => event.type === "interaction.requested");
       if (requested === undefined) await delay(5);
     }
+    if (requested === undefined) console.error("ROUTE_DEBUG", JSON.stringify(
+      await current.repository.readEvents(current.tokens.get("owner")!, sessionId, 0, 100)));
     expect(requested).toBeDefined();
     expect(execute).not.toHaveBeenCalled();
     const response = await current.app.inject({ method: "POST",
@@ -367,4 +369,35 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
     expect(changed.json<{ error: { code: string } }>().error.code).toBe("PROFILE_CHANGED");
     expect((await current.app.inject({ method: "GET", url: `/api/v1/cloud/sessions/${sessionId}`, headers: headers() })).statusCode).toBe(200);
   });
+  it("routes an authorized inventory before model exposure and persists the decision", async () => {
+    const events = binding("public_lookup");
+    events.tool.definition.description = "查询赛事与活动数据";
+    const story = binding("story_lookup");
+    story.tool.definition.description = "制作短剧和视频";
+    const routedIdentity = identity({ allowedTools: ["public_lookup", "story_lookup"] });
+    const requests: ModelRequest[] = [];
+    const current = fixture({
+      capabilityRouterMode: "enforce",
+      authenticate: async () => routedIdentity,
+      resolveProfile: async () => ({
+        id: "portal", version: "1", instructions: "按需使用能力。", tools: [events.tool, story.tool],
+      }),
+      createModel: async () => ({ complete: async (request) => {
+        requests.push(request);
+        return { kind: "assistant", content: "已找到赛事能力。" };
+      } }),
+    });
+    const sessionId = await createSession(current.app);
+    const accepted = await submit(current.app, sessionId, "route-1", "查询赛事活动");
+    const runId = accepted.json<{ run: CloudRun }>().run.id;
+    expect((await terminal(current.repository, current.owner, runId)).status).toBe("completed");
+    expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["public_lookup", "capability_search"]);
+    const persisted = await current.repository.readEvents(current.owner, sessionId, 0, 100);
+    expect(persisted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "capability.routed", payload: expect.objectContaining({
+        phase: "initial", algorithmVersion: "hybrid-v1", exposedToolCount: 1,
+      }) }),
+    ]));
+  });
+
 });

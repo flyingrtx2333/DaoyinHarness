@@ -62,8 +62,14 @@ export function describeRun(run: CloudRun, history: readonly AgentEvent[], measu
       toolStarts.delete(event.payload.toolCallId);
     }
   }
+  const routing = events.filter((event) => event.type === "capability.routed").map((event) => ({
+    phase: event.payload.phase, algorithmVersion: event.payload.algorithmVersion,
+    catalogDigest: event.payload.catalogDigest, selectedPackIds: event.payload.selectedPackIds,
+    exposedToolCount: event.payload.exposedToolCount, schemaCharacters: event.payload.schemaCharacters,
+    fallback: event.payload.fallback, latencyMs: event.payload.latencyMs,
+  }));
   return { schemaVersion: 1, runId: run.id, status: run.status, lastEventSeq: run.lastEventSeq,
-    source: "persisted_events", events: events.length,
+    source: "persisted_events", events: events.length, routing,
     textEvents: events.filter((event) => event.type === "assistant.delta").length,
     firstPersistedTextMs: elapsed(time(started), time(firstText)),
     totalRecordedMs: elapsed(time(started), time(terminal)),
