@@ -1,4 +1,5 @@
 import http from "node:http";
+import { providerSafeConceptText } from "./concept-prompt.js";
 import { mkdir, chmod, chown, unlink } from "node:fs/promises";
 import { Pool, type PoolConfig } from "pg";
 import { randomBytes } from "node:crypto";
@@ -110,9 +111,10 @@ async function control(input:RequestBody,signal?:AbortSignal):Promise<unknown>{
     const project=await repository.get(owner,id);
     const requestId=String(input.requestId??"");
     const prompt=String(input.prompt??"");
+    const safeProjectTitle=providerSafeConceptText(project.title),safePrompt=providerSafeConceptText(prompt);
     const fullPrompt=["Use case: ui-mockup","Asset type: complete desktop web application screen concept",
-      "Viewport: 1536x864 landscape, full screen visible, no browser chrome","Product: "+project.title,
-      "Required functions and information architecture: "+prompt,"Direction "+String(input.direction??"")+": "+prompt,
+      "Viewport: 1536x864 landscape, full screen visible, no browser chrome","Product: "+safeProjectTitle,
+      "Required functions and information architecture: "+safePrompt,"Direction "+String(input.direction??"")+": "+safePrompt,
       "Style: polished production Chinese UI concept with reconstructable hierarchy and project-appropriate imagery",
       "Constraints: all edges visible; real controls can be rebuilt as DOM; no watermark; no lorem ipsum; no external brand logos; avoid emoji as primary icons"].join("\n");
     const begun=await repository.beginConcept(owner,id,{requestId,direction:input.direction,screen:String(input.screen??""),width:Number(input.width),height:Number(input.height),
