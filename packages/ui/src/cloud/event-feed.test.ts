@@ -46,6 +46,24 @@ describe("cloud browser event feed: fake transport, real cursor and retry logic"
     expect(f.onUpdate.mock.lastCall?.[0][0].status).toBe("completed");
     expect(f.onUpdate.mock.lastCall?.[1].map((item: AgentEvent) => item.eventSeq)).toEqual([1, 2]);
   });
+  it("accepts persisted capability routing events in the session replay", async () => {
+    const f = fixture(); await vi.advanceTimersByTimeAsync(0);
+    const routed: AgentEvent = {
+      id: "evt_route", eventSeq: 1, accountId: "a", scopeId: "scope", sessionId: "ses_a", turnId: "run_a",
+      occurredAt: new Date(0).toISOString(), type: "capability.routed",
+      payload: {
+        phase: "initial", algorithmVersion: "hybrid-v1", catalogDigest: "digest", eligiblePackCount: 2,
+        selectedPackIds: ["project.runtime"], exposedToolCount: 2, schemaCharacters: 1200,
+        intents: [{ label: "project.preview", confidence: 0.9, packIds: ["project.runtime"] }],
+        fallback: "none", blockedHighRiskPackIds: [],
+        latencyMs: { eligibility: 1, retrieval: 2, rerank: 3, classify: 4 },
+      },
+    };
+    f.sockets[0]!.message({ type: "events", sessionId: "ses_a", events: [routed], nextEventSeq: 1 });
+    f.sockets[0]!.message({ type: "ready", sessionId: "ses_a", lastEventSeq: 1 });
+    expect(f.onUpdate.mock.lastCall?.[1].map((item: AgentEvent) => item.type)).toEqual(["capability.routed"]);
+    expect(f.onError).not.toHaveBeenCalled();
+  });
   it("reconnects from the last applied cursor and deduplicates replay, without a submit method", async () => {
     const f = fixture(); await vi.advanceTimersByTimeAsync(0);
     f.sockets[0]!.message({ type: "events", sessionId: "ses_a", events: [event(1)], nextEventSeq: 1 });
