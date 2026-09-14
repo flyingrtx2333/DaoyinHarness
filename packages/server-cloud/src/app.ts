@@ -524,7 +524,14 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           accountId: stores.accountId, scopeId: stores.scopeId, sessionId: run.sessionId, turnId: run.id,
           userMessage: run.userMessage, executionIdentity: identity, signal: controller.signal,
         });
-      } catch {
+      } catch (error) {
+        const failureId = randomUUID();
+        const candidate = error as { code?: unknown; name?: unknown; stack?: unknown };
+        console.error(JSON.stringify({ event: "cloud.run_internal_error", failureId, runId: run.id,
+          errorName: typeof candidate.name === "string" ? candidate.name.slice(0, 80) : "unknown",
+          errorCode: typeof candidate.code === "string" ? candidate.code.slice(0, 80) : undefined,
+          locations: typeof candidate.stack === "string" ? candidate.stack.split("\n").slice(1, 4)
+            .map((line) => line.trim().slice(0, 240)) : [] }));
         // Cancellation may happen before AgentEngine starts. Still record its exact terminal state.
         try {
           const current = await options.repository.getRun(identity, run.id);
