@@ -31,3 +31,11 @@
   .asset-item h2 { min-height:0; }
 }
 @media (max-width:420px) { .asset-grid { grid-template-columns:1fr; } }
+
+.website-grid{margin-bottom:var(--ui-space-5)}
+.website-preview{display:block;overflow:hidden;text-decoration:none}
+.website-preview iframe{position:absolute;top:0;left:0;width:555.556%;height:555.556%;border:0;transform:scale(.18);transform-origin:top left;pointer-events:none;background:#eef3fb}
+.website-open{position:absolute;right:var(--ui-space-2);bottom:var(--ui-space-2);padding:6px 10px;border-radius:999px;background:rgb(20 29 48 / 84%);color:#fff;font-size:var(--ui-font-caption);opacity:0;transform:translateY(4px);transition:opacity .16s ease,transform .16s ease}
+.website-preview:hover .website-open,.website-preview:focus-visible .website-open{opacity:1;transform:none}
+.website-item .asset-project{font-size:12px}
+@media(max-width:640px){.website-open{opacity:1;transform:none}}
