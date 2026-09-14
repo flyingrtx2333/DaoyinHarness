@@ -8,7 +8,12 @@ import type { ModelClient, ModelReply, ModelRequest } from "./model.js";
 /** Replay-only fixtures: no provider, process or business writes. */
 class MemoryEvents implements SessionEventStore {
   public readonly events: AgentEvent[] = [];
+  public failNextTextDelta = false;
   public async append<T extends AgentEventType>(pending: PendingAgentEvent<T>): Promise<AgentEvent> {
+    if (pending.type === "assistant.delta" && this.failNextTextDelta) {
+      this.failNextTextDelta = false;
+      throw new Error("fixture persistence unavailable");
+    }
     const event = { ...pending, id: `event-${this.events.length + 1}`, eventSeq: this.events.length + 1, occurredAt: new Date().toISOString() } as AgentEvent;
     this.events.push(event);
     return event;
@@ -120,6 +125,19 @@ describe("shared AgentEngine reliability (replay model and isolated memory event
     expect((await current.engine.runTurn({ ...input, signal: controller.signal })).status).toBe("cancelled");
     expect(current.execute).not.toHaveBeenCalled();
     expect(current.events.events.some((event) => event.type === "tool.completed" && event.payload.toolCallId === "first")).toBe(true);
+  });
+
+  it("reports text persistence failure separately from memory validation", async () => {
+    const current = fixture();
+    current.events.failNextTextDelta = true;
+    current.complete.mockImplementation(async (request) => {
+      await request.onTextDelta?.("partial response");
+      return { kind: "assistant", content: "partial response" };
+    });
+    expect((await current.engine.runTurn(input)).status).toBe("failed");
+    expect(terminalCode(current.events)).toBe("AGENT_TEXT_PERSIST_FAILED");
+    expect(current.events.events.filter((event) => event.type === "assistant.delta").at(-1)?.payload.delta)
+      .toContain("正文保存未完成");
   });
 
   it("times out a model without issuing a second potentially billable request", async () => {

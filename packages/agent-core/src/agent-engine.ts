@@ -272,7 +272,8 @@ export class AgentEngine {
         const modelSignal = AbortSignal.any([signal, timeout, streamFailure.signal]);
         const snapshot = memorySnapshot;
         const textBuffer = new TextDeltaBuffer({ signal: modelSignal,
-          onFailure: () => streamFailure.abort(new AgentPolicyError("AGENT_TEXT_STREAM_FAILED", "正文保存或上下文校验未完成，已停止继续执行。")),
+          onFailure: (error) => streamFailure.abort(error instanceof AgentPolicyError ? error :
+            new AgentPolicyError("AGENT_TEXT_PERSIST_FAILED", "正文保存未完成，已保留此前内容；请重试。")),
           emit: async (delta) => {
             if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
             modelSignal.throwIfAborted();

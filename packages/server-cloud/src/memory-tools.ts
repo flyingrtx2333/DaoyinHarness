@@ -96,7 +96,10 @@ export function createCloudMemoryRuntime(options: {
     const builtQuery = buildMemoryQuery({ userMessage: request.turn.userMessage, recentEvents: history, profileId, step: request.step });
     const snapshot = await memory.prepare(identity, { sessionId: run.sessionId, turnId: run.id, step: request.step,
       query: builtQuery.retrievalQuery, events: history, ownInvalidations: [...ownInvalidations.values()], additionalReferences: [...additionalReferences.values()] });
-    return { ...snapshot, assertCurrent: async (signal) => { await ensureActive(identity, signal); await snapshot.assertCurrent(signal); } };
+    // Authorization is checked when loading the snapshot and by the metered model adapter while streaming.
+    // Keep this hot-path assertion local to memory revisions so text persistence does not perform a remote
+    // authorization request for every buffered delta.
+    return { ...snapshot, assertCurrent: (signal) => snapshot.assertCurrent(signal) };
   };
   const provider: AgentMemoryProvider = { load, afterTool: async (request) => {
     if (!dirty) return undefined;
