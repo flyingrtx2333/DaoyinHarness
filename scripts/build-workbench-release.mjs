@@ -16,8 +16,13 @@ const root = resolve(".");
 const overlayIndex=process.argv.indexOf("--project-overlay");
 const baseRevision=overlayIndex<0?undefined:process.argv[overlayIndex+1];
 if(baseRevision!==undefined&&(preview||!/^[a-f0-9]{40}$/u.test(baseRevision)))throw new Error("Project overlay requires an exact deployed base and committed source.");
+const overlayPaths=new Set([
+ "packages/ui/src/cloud/ProjectWorkspace.tsx","packages/ui/src/cloud/client.ts","packages/ui/src/cloud/projects.css",
+ "packages/ui/src/cloud/App.tsx","packages/ui/src/cloud/PluginWorkspace.tsx","packages/ui/src/cloud/AdminWorkspace.tsx",
+ "packages/ui/src/cloud/admin-access.ts","packages/ui/src/cloud/admin.css",
+]);
 const read = (path) => {
- const source=baseRevision!==undefined&&!["packages/ui/src/cloud/ProjectWorkspace.tsx","packages/ui/src/cloud/client.ts","packages/ui/src/cloud/projects.css"].includes(path)?baseRevision:revision;
+ const source=baseRevision!==undefined&&!overlayPaths.has(path)?baseRevision:revision;
  return preview?readFile(resolve(path),"utf8"):Promise.resolve(git("show",source+":"+path));
 };
 const { version } = JSON.parse(await read("package.json"));
