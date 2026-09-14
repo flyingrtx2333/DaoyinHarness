@@ -55,7 +55,7 @@ async function boundedImage(url:string,signal?:AbortSignal):Promise<{mimeType:st
 }
 async function generateConcept(owner:ProjectOwner,requestId:string,prompt:string,signal?:AbortSignal):Promise<{mimeType:string;content:Buffer}>{
   const identity=projectIdentity(owner);
-  const response=await fetch(new URL("/internal/ai/image-generations",aiBase),{method:"POST",redirect:"error",signal:signal?AbortSignal.any([signal,AbortSignal.timeout(390000)]):AbortSignal.timeout(390000),
+  const response=await fetch(new URL("/api/internal/ai/image-generations",aiBase),{method:"POST",redirect:"error",signal:signal?AbortSignal.any([signal,AbortSignal.timeout(390000)]):AbortSignal.timeout(390000),
     headers:{"Content-Type":"application/json","x-ai-service-token":aiToken!},body:JSON.stringify({
       tenant_id:identity.tenantId,user_id:identity.userId,credential_mode:"PLATFORM",app_key:"harness-projects",scene_key:"ui_concept",
       request_id:"harness_ui_"+digest(requestId).slice(0,40),prompt,negative_prompt:"水印、浏览器外框、设备模型、乱码、密集小字、外部品牌标志、整页装饰遮挡控件",
