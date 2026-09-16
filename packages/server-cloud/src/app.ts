@@ -543,6 +543,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                 return reply;
               } catch (error) {
                 span.end({ error, attributes: { "gen_ai.request.index": modelCalls } });
+                const diagnostic = error instanceof Error ? error.message : "non-error rejection";
+                process.stderr.write(`Model request failed: ${diagnostic.slice(0, 300)}\n`);
                 if (error instanceof CloudError && error.code === "MODEL_CALL_LIMIT") throw error;
                 if (error instanceof CloudError && (
                   ["AUTHORIZATION_REVOKED", "AUTHENTICATION_REQUIRED", "APP_ACCESS_DENIED", "RUN_IDENTITY_MISMATCH"].includes(error.code) ||
