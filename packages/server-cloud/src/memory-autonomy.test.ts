@@ -59,6 +59,10 @@ const remember = (content = "以后回答简洁一点") => ({ key: "profile.resp
     const f = fixture();
     try {
       f.complete.mockResolvedValueOnce({ kind: "tool_calls", calls: [{ id: "save", name: "memory_remember", input: remember() }] });
+      f.complete.mockImplementationOnce(async (request) => {
+        expect(request.tools.map((tool) => tool.name)).not.toContain("memory_remember");
+        return { kind: "assistant", content: "偏好已保存。" };
+      });
       const first = await f.run(await f.session(), "以后回答简洁一点");
       expect(first.status, JSON.stringify(await f.repository.readEvents(f.actor, first.sessionId, 0, 200))).toBe("completed");
       const record = f.repository.memory.list(f.actor).items[0]!;

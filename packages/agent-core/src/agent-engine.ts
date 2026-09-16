@@ -54,6 +54,7 @@ export interface AgentEngineOptions {
 }
 
 type AppendEvent = <TType extends AgentEventType>(type: TType, payload: AgentEventPayloads[TType]) => Promise<AgentEvent>;
+const MEMORY_MUTATION_TOOL_NAMES = new Set(["memory_remember", "memory_update", "memory_forget"]);
 
 function modelFailure(error: unknown): { code: string; message: string } {
   if (error instanceof AgentPolicyError) return { code: error.code, message: error.message };
@@ -223,6 +224,7 @@ export class AgentEngine {
     }
     const current: ModelConversationItem[] = [{ role: "user", content: input.userMessage }];
     const toolReceipts: Array<{ toolCallId: string; name: string; ok: boolean; mutating: boolean }> = [];
+    const completedMemoryMutations = new Set<string>();
     let memoryCheckpoint: string | undefined;
     const seenIds = new Set<string>();
     const progress = new ToolProgressGuard(this.#maxUnchanged);
@@ -236,8 +238,9 @@ export class AgentEngine {
       let tools: ToolDescriptor[];
       try { tools = await this.#tools.descriptorsFor(executionContext); }
       catch { return signal.aborted ? cancel() : this.#fail(append, "AGENT_AUTHORIZATION_DENIED", "执行身份或工具授权已失效。"); }
-      const descriptors = new Map(tools.map((tool) => [tool.name, tool]));
+      tools = tools.filter((tool) => !completedMemoryMutations.has(tool.name));
       if (finalStep) tools = [];
+      const descriptors = new Map(tools.map((tool) => [tool.name, tool]));
       let reply: ModelReply;
       let streamed = "";
       const contentBlockId = `block_${crypto.randomUUID()}`;
@@ -392,8 +395,10 @@ export class AgentEngine {
           // Observe the returned outcome before cancellation, retaining completed side-effect evidence.
           progress.observe(call, result);
         }
-        if (result.ok) await append("tool.completed", { toolCallId: call.id, toolName: call.name, summary: result.summary, evidence: result.evidence });
-        else await append("tool.failed", { toolCallId: call.id, toolName: call.name, code: result.code,
+        if (result.ok) {
+          if (MEMORY_MUTATION_TOOL_NAMES.has(call.name)) completedMemoryMutations.add(call.name);
+          await append("tool.completed", { toolCallId: call.id, toolName: call.name, summary: result.summary, evidence: result.evidence });
+        } else await append("tool.failed", { toolCallId: call.id, toolName: call.name, code: result.code,
           message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) });
         current.push({ role: "tool", toolCallId: call.id, toolName: call.name, content: modelToolResult(result) });
         toolReceipts.push({ toolCallId: call.id, name: call.name, ok: result.ok, mutating: descriptor?.mutating ?? false });
