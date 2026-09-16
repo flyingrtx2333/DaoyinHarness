@@ -26,7 +26,8 @@ MAIN_ENV = pathlib.Path('/www/wwwroot/daoyintech/backend/.env')
 VHOSTS = pathlib.Path('/www/server/panel/vhost/nginx')
 NGINX = '/www/server/nginx/sbin/nginx'
 NODE = str(ROOT / 'node/bin/node')
-ORIGIN = 'https://www.daoyintech.com'
+PLATFORM_ORIGIN = 'https://www.daoyintech.com'
+WORKBENCH_ORIGIN = 'https://harness.daoyintech.com'
 
 
 def command(args, timeout=60, env=None):
@@ -118,7 +119,7 @@ def configure():
     key = current.get('DAOYIN_EVAL_SERVICE_TOKEN') or secrets.token_urlsafe(48)
     telemetry_key = current.get('DAOYIN_OTEL_INGEST_TOKEN') or secrets.token_urlsafe(48)
     patch_environment(ENV, {'DAOYIN_EVAL_DB': '/var/lib/daoyin-harness-evaluation/evaluation.sqlite',
-                           'DAOYIN_EVAL_SERVICE_TOKEN': key, 'DAOYIN_EVAL_PLATFORM_URL': ORIGIN,
+                           'DAOYIN_EVAL_SERVICE_TOKEN': key, 'DAOYIN_EVAL_PLATFORM_URL': PLATFORM_ORIGIN,
                            'DAOYIN_EVAL_PORT': '4711', 'DAOYIN_OTEL_INGEST_TOKEN': telemetry_key})
     patch_environment(CLOUD_ENV, {'DAOYIN_OTEL_EXPORT_URL': 'http://127.0.0.1:4711/v1/traces',
                                   'DAOYIN_OTEL_EXPORT_TOKEN': telemetry_key})
@@ -126,8 +127,8 @@ def configure():
     model = eval_model()
     if model and not current.get('DAOYIN_EVAL_MODEL_KEY'):
         patch_environment(ENV, model)
-    patch_environment(MAIN_ENV, {'HARNESS_EVALUATION_SERVICE_URL': ORIGIN + '/api/internal/harness-evaluation-runner',
-                                'HARNESS_EVALUATION_SERVICE_TOKEN': key, 'HARNESS_EVALUATION_ORIGIN': ORIGIN})
+    patch_environment(MAIN_ENV, {'HARNESS_EVALUATION_SERVICE_URL': PLATFORM_ORIGIN + '/api/internal/harness-evaluation-runner',
+                                'HARNESS_EVALUATION_SERVICE_TOKEN': key, 'HARNESS_EVALUATION_ORIGIN': WORKBENCH_ORIGIN})
     print(json.dumps({'evaluationConfigured': True, 'dedicatedModelConfigured': bool(environment(ENV).get('DAOYIN_EVAL_MODEL_KEY'))}))
 
 
