@@ -25,6 +25,12 @@ function assertPairs(messages: readonly ModelConversationItem[]): void {
 }
 
 describe("model context budgeting (pure projections; no model calls)", () => {
+  it("keeps trusted runtime receipts in system context and leaves the current user goal last", () => {
+    const messages = boundModelContext({ ...base, runtimeNote: "memory mutation completed" });
+    expect(messages.map((message) => message.role)).toEqual(["system", "system", "user"]);
+    expect(messages[1]).toEqual({ role: "system", content: "memory mutation completed" });
+    expect(messages.at(-1)).toEqual(base.current[0]);
+  });
   it("retains the current goal and latest whole batch within both limits", () => {
     const current = [...base.current, ...Array.from({ length: 15 }, (_, index) => group(index)).flat()];
     const history: ModelConversationItem[] = Array.from({ length: 30 }, (_, index) => [
