@@ -4,7 +4,7 @@
 @media(min-width:1500px){.sidebar{width:270px}.conversation-content,.composer-area{max-width:940px}}
 @media(max-width:900px){.sidebar{width:216px;padding:22px 12px 12px}.brand{font-size:15px}.topbar{padding:16px 22px}.conversation-content{padding:28px 24px 12px}.composer-area{padding:12px 24px}.empty-state h2{font-size:25px}}
 @media(max-width:640px){.sidebar{display:none;position:absolute;top:80px;bottom:0;left:0;z-index:3;width:min(290px,85vw);box-shadow:8px 0 25px #263c5914}.sidebar.is-open{display:flex}.menu-button{display:block;padding:8px 12px}.topbar{min-height:80px;padding:12px 14px;gap:10px}.session-heading h1{font-size: var(--ui-font-body)}.session-heading>span{font-size:10px}.refresh-button{padding:8px;font-size:11px}.conversation-content{padding:24px 18px 8px}.composer-area{padding:10px 14px max(12px,env(safe-area-inset-bottom))}.empty-state{padding:36px 0 24px}.empty-state h2{font-size:25px}.suggestions{flex-direction:column;align-items:stretch}.suggestions button{justify-content:space-between;text-align:left}.composer-note{font-size:9px}.user-message{padding:14px 16px}.markdown{font-size: var(--ui-font-body)}.turn{margin-bottom:30px}}
-@media(prefers-reduced-motion:reduce){.spinner{animation:none;background-position:0 0}}
+@media(prefers-reduced-motion:reduce){.spinner{animation-duration:1.6s}}
 
 .workspace-tabs { display:flex; gap:4px; padding:4px; margin:0 0 16px; background:#eceff4; border-radius:9px; }
 .workspace-tabs button { flex:1; min-height:40px; border:0; background:transparent; color:#68758a; padding:8px 12px; }

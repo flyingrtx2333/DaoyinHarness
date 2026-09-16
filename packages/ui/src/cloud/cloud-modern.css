@@ -286,5 +286,5 @@ button.primary:hover:enabled { background: #174bcb; }
 }
 @media (prefers-reduced-motion: reduce) {
   button, a, input, textarea { transition: none; }
-  .tool-status-icon[data-status="running"] { animation: none; background-position: 0 0; }
+  .tool-status-icon[data-status="running"] { animation-duration: 1.6s; }
 }
