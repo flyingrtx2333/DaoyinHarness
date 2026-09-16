@@ -48,6 +48,16 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
     expect(result?.tools[0]).toMatchObject({ status: "running", text: "已读取目录…" });
     expect(projectTurns([{ ...run, status: "cancelled" }], events)[0]?.tools[0]?.status).toBe("failed");
   });
+  it("updates one live phase row while model planning continues", () => {
+    const projected = projectTurns([{ ...run, status: "running", finalText: "" }], [
+      event(1, "phase.updated", { phase: "thinking", displayText: "正在规划下一步操作…", step: 0 }, "2026-09-05T12:00:00Z"),
+      event(2, "phase.updated", { phase: "thinking", displayText: "正在理解需求并整理目标…", step: 0 }, "2026-09-05T12:00:04Z"),
+      event(3, "phase.updated", { phase: "thinking", displayText: "正在选择合适的操作步骤…", step: 0 }, "2026-09-05T12:00:11Z"),
+    ])[0];
+    expect(projected?.activities).toHaveLength(1);
+    expect(projected?.activities[0]).toMatchObject({ status: "running", text: "正在选择合适的操作步骤…",
+      startedAt: "2026-09-05T12:00:00Z", phaseGroup: "thinking:0" });
+  });
   it("orders turns chronologically and never duplicates replayed deltas", () => {
     const delta = event(1, "assistant.delta", { delta: "答案", contentBlockId: "block_1" });
     const projected = projectTurns([{ ...run, id: "run_2" }, run], [delta, delta]);

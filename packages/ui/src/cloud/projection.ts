@@ -10,6 +10,7 @@ export interface ActivityView {
   text: string;
   startedAt: string;
   finishedAt?: string;
+  phaseGroup?: string;
 }
 export interface ToolView extends ActivityView { kind: "tool" }
 export interface TurnView { run: CloudRun; text: string; phaseText: string; activities: ActivityView[]; tools: ToolView[]; sources: PublicSource[]; images: EventImage[]; assistantOccurredAt: string }
@@ -131,11 +132,16 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
           `已准备 ${packCount} 个相关能力包 · ${toolCount} 个工具`, startedAt: event.occurredAt });
     }
     if (event.type === "phase.updated") {
-      finishNonToolActivity(turn, event.occurredAt);
       turn.phaseText = event.payload.displayText;
       if (event.payload.phase !== "tool") {
-        turn.activities.push({ id: `phase_${event.eventSeq}`, kind: "phase", status: "running",
-          text: event.payload.displayText, startedAt: event.occurredAt });
+        const phaseGroup = event.payload.phase + ":" + String(event.payload.step);
+        const active = [...turn.activities].reverse().find((activity) => activity.kind === "phase" && activity.status === "running");
+        if (active?.phaseGroup === phaseGroup) active.text = event.payload.displayText;
+        else {
+          finishNonToolActivity(turn, event.occurredAt);
+          turn.activities.push({ id: "phase_" + String(event.eventSeq), kind: "phase", status: "running",
+            text: event.payload.displayText, startedAt: event.occurredAt, phaseGroup });
+        }
       }
     }
     if (event.type === "tool.started" || event.type === "tool.progress" || event.type === "tool.completed" || event.type === "tool.failed") {

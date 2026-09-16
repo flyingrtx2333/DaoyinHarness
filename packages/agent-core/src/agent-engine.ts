@@ -55,6 +55,29 @@ export interface AgentEngineOptions {
 
 type AppendEvent = <TType extends AgentEventType>(type: TType, payload: AgentEventPayloads[TType]) => Promise<AgentEvent>;
 const MEMORY_MUTATION_TOOL_NAMES = new Set(["memory_remember", "memory_update", "memory_forget"]);
+const MODEL_PROGRESS_INITIAL_DELAY_MS = 4_000;
+const MODEL_PROGRESS_INTERVAL_MS = 7_000;
+function progressDelay(milliseconds: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { signal.removeEventListener("abort", stop); resolve(true); }, milliseconds);
+    const stop = () => { clearTimeout(timer); resolve(false); };
+    signal.addEventListener("abort", stop, { once: true });
+  });
+}
+async function publishModelProgress(append: AppendEvent, step: number, signal: AbortSignal): Promise<void> {
+  const planning = ["正在理解需求并整理目标…", "正在选择合适的操作步骤…", "正在等待规划结果…", "仍在处理，请稍候…"];
+  const followUp = ["正在分析操作结果…", "正在整理下一步处理…", "正在等待后续处理结果…", "仍在处理，请稍候…"];
+  const messages = step === 0 ? planning : followUp;
+  let index = 0;
+  let delay = MODEL_PROGRESS_INITIAL_DELAY_MS;
+  while (await progressDelay(delay, signal)) {
+    await append("phase.updated", { phase: step === 0 ? "thinking" : "synthesizing",
+      displayText: messages[Math.min(index, messages.length - 1)]!, step });
+    index += 1;
+    delay = MODEL_PROGRESS_INTERVAL_MS;
+  }
+}
 
 function modelFailure(error: unknown): { code: string; message: string } {
   if (error instanceof AgentPolicyError) return { code: error.code, message: error.message };
@@ -274,7 +297,11 @@ export class AgentEngine {
           displayText: step === 0 ? "正在规划下一步操作…" : "正在根据操作结果继续处理…", step });
         const timeout = AbortSignal.timeout(this.#modelTimeoutMs);
         const streamFailure = new AbortController();
-        const modelSignal = AbortSignal.any([signal, timeout, streamFailure.signal]);
+        const progressAbort = new AbortController();
+        const progressFailure = new AbortController();
+        const progressTask = publishModelProgress(append, step, AbortSignal.any([signal, progressAbort.signal]))
+          .catch((error: unknown) => progressFailure.abort(error));
+        const modelSignal = AbortSignal.any([signal, timeout, streamFailure.signal, progressFailure.signal]);
         const snapshot = memorySnapshot;
         const textBuffer = new TextDeltaBuffer({ signal: modelSignal,
           onFailure: (error) => streamFailure.abort(error instanceof AgentPolicyError ? error :
@@ -292,10 +319,12 @@ export class AgentEngine {
               modelSignal.throwIfAborted();
               if (typeof delta !== "string" || streamed.length + delta.length > 16_000) throw new Error("Invalid model stream.");
               if (!delta) return;
+              progressAbort.abort();
               streamed += delta;
               await textBuffer.push(delta);
             },
           }), modelSignal);
+          progressAbort.abort();
           if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
           modelSignal.throwIfAborted();
           reply = validateModelReply(raw, seenIds);
@@ -303,11 +332,14 @@ export class AgentEngine {
           // Flush validated text before tools or success; do not flush unvalidated late content.
           await textBuffer.finish();
         } catch (error) {
+          if (progressFailure.signal.aborted) throw progressFailure.signal.reason;
           if (!signal.aborted && timeout.aborted) throw new AgentPolicyError("MODEL_TIMEOUT", "模型响应超时；请求结果不确定，未自动重试。");
           if (streamFailure.signal.aborted) throw streamFailure.signal.reason;
           throw error;
         } finally {
           // Wait for in-flight persistence, even on cancel. No timer can write after terminal state.
+          progressAbort.abort();
+          await progressTask;
           await textBuffer.discard();
         }
         if (signal.aborted) return cancel();
