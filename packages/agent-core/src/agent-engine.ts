@@ -206,7 +206,7 @@ export class AgentEngine {
     };
     const started = await append("turn.started", { status: "running", userMessageId: `msg_${crypto.randomUUID()}`, userMessage: input.userMessage });
     if (signal.aborted) return cancel();
-    await append("phase.updated", { phase: "thinking", displayText: "正在理解需求并规划下一步…", step: 0 });
+    await append("phase.updated", { phase: "thinking", displayText: "正在准备任务上下文…", step: 0 });
     let compaction: SessionCompaction | undefined;
     let history: ModelConversationItem[];
     try {
@@ -267,6 +267,8 @@ export class AgentEngine {
           overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
           maxCharacters: this.#maxContextCharacters, maxMessages: this.#maxContextMessages });
         if (signal.aborted) return cancel();
+        await append("phase.updated", { phase: step === 0 ? "thinking" : "synthesizing",
+          displayText: step === 0 ? "正在规划下一步操作…" : "正在根据操作结果继续处理…", step });
         const timeout = AbortSignal.timeout(this.#modelTimeoutMs);
         const streamFailure = new AbortController();
         const modelSignal = AbortSignal.any([signal, timeout, streamFailure.signal]);
@@ -424,7 +426,6 @@ export class AgentEngine {
           }
         }
       }
-      await append("phase.updated", { phase: "synthesizing", displayText: "正在根据操作结果继续处理…", step: step + 1 });
     }
     return this.#fail(append, "AGENT_STEP_LIMIT", "Agent 超过了推理步数上限。");
   }

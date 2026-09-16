@@ -221,6 +221,10 @@ button.primary:hover:enabled { background: #174bcb; }
 .assistant-label .message-time { color: var(--ui-muted); font-weight: 400; }
 .mini-mark { width: 30px; height: 30px; }
 .tool-line { min-height: var(--ui-control-height); padding: var(--ui-space-2) 0; align-items: center; }
+.activity-timeline { margin: 0 0 var(--ui-space-3); }
+.activity-timeline .tool-line { border-bottom: 1px solid #edf0f6; }
+.activity-timeline .tool-line:last-child { border-bottom: 0; }
+.activity-timeline .tool-line[data-kind="routing"] { color: #637087; }
 .tool-status-icon { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 50%; }
 .tool-status-icon[data-status="running"] { border: 1.5px solid #cbd7fa; border-top-color: var(--accent); animation: spin .8s linear infinite; }
 .tool-status-icon[data-status="completed"] { position: relative; border: 1.5px solid #159e81; background: #f2fcf9; }

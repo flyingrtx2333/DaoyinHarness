@@ -370,12 +370,12 @@ export function App(): React.JSX.Element {
           {turns.map((turn) => <article className="turn" key={turn.run.id} aria-label="一轮对话">
             <div className="user-message"><div className="message-meta"><span className="message-label">你</span><MessageTime value={turn.run.createdAt} /></div><p>{visibleUserMessage(turn.run.userMessage)}</p></div>
             <div className="assistant-message"><div className="assistant-label"><span className="mini-mark" aria-hidden="true"><HarnessLogo /></span><span>Harness</span><span className="run-status">{statusText[turn.run.status]}</span><MessageTime value={turn.assistantOccurredAt} /></div>
-              {turn.tools.length > 0 && <ToolActivity tools={turn.tools} />}
+              {turn.activities.length > 0 && <ToolActivity activities={turn.activities} />}
               <div className="markdown">{turn.text && !hasCreatedStoryVideo(events, turn.run.id) && !storyProductionIds(events, turn.run.id).length && <MarkdownMessage text={turn.text} />}</div>
               <StoryVideos key={`${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
               <StoryProductions key={`production:${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
               {turn.images.length > 0 && <ImageGallery key={`${client.accountScope}:${turn.run.id}`} images={turn.images} accountScope={client.accountScope} />}
-              {(turn.run.status === "running" || turn.run.status === "queued") && !turn.tools.some((tool) => tool.status === "running") && <p className="thinking" role="status"><span className="spinner" />{turn.run.status === "queued" ? "正在等待处理…" : turn.phaseText || (turn.text ? "正在回复…" : "正在处理你的问题…")}</p>}
+              {(turn.run.status === "running" || turn.run.status === "queued") && turn.activities.length === 0 && <p className="thinking" role="status"><span className="spinner" />{turn.run.status === "queued" ? "正在等待处理…" : "正在接收任务…"}</p>}
               {turn.sources.length > 0 && <details className="sources"><summary>参考资料 <span>{turn.sources.length}</span></summary>{turn.sources.map((source) => <details className="source" key={source.id}><summary>{source.title || "公开资料"}{source.location && <small>{source.location}</small>}</summary><p>{source.content}</p></details>)}</details>}
               {turn.run.cancelRequested && turn.run.status === "running" && <p role="status" className="muted">正在停止，已完成的记录会保留。</p>}
             </div>
