@@ -43,7 +43,7 @@ function boundedDetail(value: unknown, depth = 0): unknown {
   if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
   if (Array.isArray(value)) return value.slice(0, 20).map((item) => boundedDetail(item, depth + 1));
   if (!record(value)) return String(value ?? "");
-  return Object.fromEntries(Object.entries(value).filter(([key, item]) => item !== undefined && !sensitiveKey.test(key)).slice(0, 30)
+  return Object.fromEntries(Object.entries(value).filter(([key, item]) => item !== undefined && item !== "undefined" && !sensitiveKey.test(key)).slice(0, 30)
     .map(([key, item]) => [key, boundedDetail(item, depth + 1)]));
 }
 function detailText(value: unknown): string {
@@ -93,7 +93,10 @@ function setDetail(activity: ActivityView, label: string, value: unknown): void 
 }
 function appendDetail(activity: ActivityView, label: string, value: unknown): void {
   activity.details ??= [];
-  activity.details.push({ label, value: detailText(value) });
+  const next = { label, value: detailText(value) };
+  const previous = activity.details.at(-1);
+  if (previous?.label === next.label && previous.value === next.value) return;
+  activity.details.push(next);
   if (activity.details.length > 24) activity.details.splice(1, activity.details.length - 24);
 }
 const toolLabels: Record<string, string> = {

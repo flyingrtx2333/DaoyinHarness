@@ -51,11 +51,14 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
   it("projects live command and result details while removing sensitive fields", () => {
     const projected = projectTurns([run], [
       event(1, "tool.started", { toolCallId: "build", toolName: "project_check", input: {
-        command: "npm", args: ["run", "build"], cwd: "/workspace/site", authorization: "Bearer secret", nested: { apiKey: "hidden" }
+        command: "npm", args: ["run", "build"], cwd: "/workspace/site", revision: "undefined",
+        authorization: "Bearer secret", nested: { apiKey: "hidden" }
       } }),
       event(2, "tool.progress", { toolCallId: "build", toolName: "project_check", displayText: "正在编译前端", completed: 2, total: 4,
         detail: { command: "node /opt/harness/build.mjs", sandbox: "gVisor" } }),
-      event(3, "tool.completed", { toolCallId: "build", toolName: "project_check", summary: "构建通过",
+      event(3, "tool.progress", { toolCallId: "build", toolName: "project_check", displayText: "正在编译前端", completed: 2, total: 4,
+        detail: { command: "node /opt/harness/build.mjs", sandbox: "gVisor" } }),
+      event(4, "tool.completed", { toolCallId: "build", toolName: "project_check", summary: "构建通过",
         evidence: { result: { tool: "project_check", data: { items: [{ path: "dist/index.html" }] }, cookie: "hidden" } } }),
     ])[0]?.tools[0];
     expect(projected).toMatchObject({ status: "completed", text: "检查项目完成",
