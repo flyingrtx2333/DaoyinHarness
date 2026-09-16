@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { WorkbenchClient } from "./client.js";
+import { WorkbenchError, type WorkbenchClient } from "./client.js";
 import "./conversation-preview.css";
 
 interface Project { id: string; title: string }
@@ -33,6 +33,10 @@ export function safePreviewUrl(projectId: string, value: string): string | null 
   } catch { return null; }
 }
 
+export function previewNeedsRestart(error: unknown): boolean {
+  return error instanceof WorkbenchError && error.status === 409 && error.message === "预览已休眠，请重新启动。";
+}
+
 export function ConversationProjectPreview({ client, sessionId, refreshKey }: {
   client: WorkbenchClient;
   sessionId: string;
@@ -60,7 +64,14 @@ export function ConversationProjectPreview({ client, sessionId, refreshKey }: {
       if (!completed) return null;
       const previous = stateRef.current;
       if (previous?.project.id === bound.project.id && previous.operationId === completed.id && previous.url) return { ...previous, updating: false, error: "" };
-      const ticket = await client.project<{ url: string }>({ action: "ticket", projectId: bound.project.id });
+      let ticket: { url: string };
+      try {
+        ticket = await client.project<{ url: string }>({ action: "ticket", projectId: bound.project.id });
+      } catch (error) {
+        if (!previewNeedsRestart(error)) throw error;
+        const restarted = await client.project<{ operation: Operation }>({ action: "preview", projectId: bound.project.id, requestId: crypto.randomUUID() });
+        return { project: bound.project, operationId: restarted.operation.id, url: "", updating: true, error: "" };
+      }
       const url = safePreviewUrl(bound.project.id, ticket.url);
       if (!url) throw new Error("预览地址校验失败。");
       return { project: bound.project, operationId: completed.id, url, updating: false, error: "" };

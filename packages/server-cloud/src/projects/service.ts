@@ -138,6 +138,9 @@ async function control(input:RequestBody,signal?:AbortSignal):Promise<unknown>{
   if(input.action==="ticket"){
     const op=(await repository.operations(owner,id)).find(o=>o.kind==="preview"&&o.status==="completed");
     if(!op)throw new ProjectError("PROJECT_PREVIEW_NOT_READY","请先生成预览。",409);
+    const versionId=identifier(op.result?.versionId,"ver");
+    const state=await exec({action:"status",projectId:id,versionId,mode:"development"});
+    if(state.running!==true)throw new ProjectError("PROJECT_PREVIEW_SLEEPING","预览已休眠，请重新启动。",409);
     const ticket=await repository.ticket(owner,id);
     return{url:"https://p-"+id.slice(4)+".demo.daoyintech.com/__preview?ticket="+encodeURIComponent(ticket)};
   }

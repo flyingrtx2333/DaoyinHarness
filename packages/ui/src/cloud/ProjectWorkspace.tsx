@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useRef,useState} from "react";
-import type {WorkbenchClient} from "./client.js";
+import {WorkbenchError,type WorkbenchClient} from "./client.js";
 import "./projects.css";
 interface Project {id:string;title:string;slug:string;revision:number;activeVersion:string|null}
 interface File {path:string;content:string}
@@ -52,6 +52,23 @@ export function ProjectWorkspace({client,ready,onDevelop}:{client:WorkbenchClien
   if(!project)return;
   await client.project({action:kind,projectId:project.id,requestId:crypto.randomUUID()});await inspect(project.id);
  });
+ async function openPreview():Promise<void>{
+  if(!project)return;
+  try{
+   const result=await client.project<{url:string}>({action:"ticket",projectId:project.id});setPreview(result.url);return;
+  }catch(cause){
+   if(!(cause instanceof WorkbenchError&&cause.status===409&&cause.message==="预览已休眠，请重新启动。"))throw cause;
+  }
+  const accepted=await client.project<{operation:Operation}>({action:"preview",projectId:project.id,requestId:crypto.randomUUID()});
+  let operation=accepted.operation;setPreview("");
+  for(let attempt=0;attempt<40&&["queued","running"].includes(operation.status);attempt++){
+   await new Promise<void>(resolve=>window.setTimeout(resolve,1500));
+   const result=await client.project<{operations:Operation[]}>({action:"operations",projectId:project.id});
+   setOperations(result.operations);operation=result.operations.find(item=>item.id===operation.id)??operation;
+  }
+  if(operation.status!=="completed")throw new Error(operation.error??"预览重新启动未完成，请稍后重试。");
+  const ticket=await client.project<{url:string}>({action:"ticket",projectId:project.id});setPreview(ticket.url);await inspect(project.id);
+ }
  return <section className="project-workspace" aria-label="云端项目">
   <header className="project-heading"><h1>云端项目</h1><button disabled={!enabled||busy} onClick={()=>void perform(async()=>{await refresh();if(selected)await inspect(selected);})}>刷新</button></header>
   {error&&<p className="project-error" role="alert">{error}</p>}
@@ -91,9 +108,7 @@ export function ProjectWorkspace({client,ready,onDevelop}:{client:WorkbenchClien
      </section>}
      <div className="project-file-bar"><label>项目文件<select value={file} onChange={e=>setFile(e.target.value)}>{files.map(f=><option key={f.path}>{f.path}</option>)}</select></label><span>版本 {project.revision}</span></div>
      {current&&<pre className="project-source" tabIndex={0} aria-label={current.path+" 源代码"}><code>{current.content}</code></pre>}
-     <div className="project-toolbar"><button disabled={busy||!operations.some(o=>o.kind==="preview"&&o.status==="completed")} onClick={()=>void perform(async()=>{
-      const result=await client.project<{url:string}>({action:"ticket",projectId:project.id});setPreview(result.url);
-     })}>打开预览</button>
+     <div className="project-toolbar"><button disabled={busy||!operations.some(o=>o.kind==="preview"&&o.status==="completed")} onClick={()=>void perform(openPreview)}>打开预览</button>
       <label>回滚版本<select aria-label="回滚到已发布版本" defaultValue="" disabled={busy||!!pending} onChange={e=>{
        const versionId=e.target.value;e.currentTarget.value="";if(!versionId)return;
        void perform(async()=>{await client.project({action:"rollback",projectId:project.id,versionId,requestId:crypto.randomUUID()});await inspect(project.id);});

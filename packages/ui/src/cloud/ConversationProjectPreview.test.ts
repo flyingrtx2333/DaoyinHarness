@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { completedPreviewOperation, safePreviewUrl } from "./ConversationProjectPreview.js";
+import { WorkbenchError } from "./client.js";
+import { completedPreviewOperation, previewNeedsRestart, safePreviewUrl } from "./ConversationProjectPreview.js";
 
 const projectId = "prj_412187209e7d6f7a369ed98e";
 describe("conversation project preview", () => {
@@ -16,5 +17,11 @@ describe("conversation project preview", () => {
     expect(safePreviewUrl(projectId, `https://p-412187209e7d6f7a369ed98e.demo.daoyintech.com/__preview?ticket=${ticket}`)).toContain(ticket);
     expect(safePreviewUrl(projectId, `https://evil.example/__preview?ticket=${ticket}`)).toBeNull();
     expect(safePreviewUrl(projectId, `https://p-412187209e7d6f7a369ed98e.demo.daoyintech.com/__preview?ticket=${ticket}&next=evil`)).toBeNull();
+  });
+
+  it("restarts only an explicitly sleeping preview", () => {
+    expect(previewNeedsRestart(new WorkbenchError("预览已休眠，请重新启动。", 409))).toBe(true);
+    expect(previewNeedsRestart(new WorkbenchError("请先生成预览。", 409))).toBe(false);
+    expect(previewNeedsRestart(new WorkbenchError("预览已休眠，请重新启动。", 503))).toBe(false);
   });
 });
