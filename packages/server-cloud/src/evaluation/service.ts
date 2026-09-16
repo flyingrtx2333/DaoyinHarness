@@ -4,13 +4,14 @@ import { EvaluationError, EVALUATOR_VERSION, metrics, parseSpec, prepareCases, t
 import { EvaluationStore, type Authority } from "./store.js";
 import { PlatformEvaluationRuntime, runLiveTrial } from "./live-runner.js";
 import type { EvaluationModelConfig } from "./provider.js";
+import { parseOtlpJson } from "./telemetry.js";
 
 export interface EvaluationServiceOptions {
   store: EvaluationStore; serviceToken: string; revision: string | null;
   authorize(authority: Authority, signal: AbortSignal): Promise<boolean>;
   runtime?: PlatformEvaluationRuntime;
   /** Retained for historical source compatibility; never used as an execution fallback. */
-  model?: EvaluationModelConfig; fetcher?: typeof fetch;
+  model?: EvaluationModelConfig; fetcher?: typeof fetch; telemetryToken: string;
 }
 const liveTemplates: Array<{ id: TemplateId; name: string; fixture: string; facts: string[] }> = [
   { id: "saishi-materials", name: "真实赛事查询", fixture: "查询当前账号已有权限内的真实赛事数据，不预置素材数量或查询结果。", facts: [] },
@@ -21,7 +22,8 @@ const safeEqual = (actual: unknown, expected: string): boolean => typeof actual 
 const idParams = { type: "object", required: ["id"], additionalProperties: false, properties: { id: { type: "string", pattern: "^ev_[a-f0-9]{32}$" } } };
 export function createEvaluationService(options: EvaluationServiceOptions) {
   if (!/^[\x21-\x7e]{32,256}$/u.test(options.serviceToken)) throw new Error("A dedicated evaluation service credential is required.");
-  const app = Fastify({ logger: false, bodyLimit: 512_000, ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
+  if (!/^[\x21-\x7e]{32,256}$/u.test(options.telemetryToken)) throw new Error("A dedicated telemetry ingest credential is required.");
+  const app = Fastify({ logger: false, forceCloseConnections: true, bodyLimit: 512_000, ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const actors = new WeakMap<FastifyRequest, Authority>();
   let active: { id: string; controller: AbortController; done: Promise<void>; caseId: string; repetition: number; stage: string } | undefined;
   let closing = false;
@@ -37,6 +39,13 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
     if (request.url === "/health" && request.method === "GET") return;
     if (closing) throw new EvaluationError(503, "EVAL_NOT_READY", "评估服务暂不可用。");
+    if (request.url === "/v1/traces" && request.method === "POST") {
+      if (request.headers.origin !== undefined || !["127.0.0.1", "::1"].includes(request.ip) ||
+          !safeEqual(request.headers["x-otlp-token"], options.telemetryToken)) {
+        throw new EvaluationError(401, "OTLP_INGEST_DENIED", "遥测写入身份无效。");
+      }
+      return;
+    }
     if (request.headers.origin !== undefined || !safeEqual(request.headers["x-eval-service-token"], options.serviceToken)) throw new EvaluationError(401, "EVAL_SERVICE_AUTH", "评估服务鉴权失败。");
     const actorId = request.headers["x-eval-actor"]; const sessionId = request.headers["x-eval-session"];
     if (typeof actorId !== "string" || !/^[1-9][0-9]{0,15}$/u.test(actorId) || typeof sessionId !== "string" || !/^[a-f0-9]{48}$/u.test(sessionId)) throw new EvaluationError(401, "EVAL_ACTOR_REQUIRED", "缺少可信操作者。");
@@ -83,6 +92,26 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
       maxCases: 5, maxTrials: 5, maxRepetitions: 5, scope: "real-platform-account-runtime", runtime: actual?.runtime ?? null,
       excludes: ["browser-websocket", "automatic-business-ground-truth", "recall-without-ground-truth", "financial-settlement"] };
   });
+  app.post("/v1/traces", async (request, reply) => {
+    const spans = parseOtlpJson(request.body);
+    const accepted = options.store.ingestTelemetry(spans);
+    return reply.code(200).send({ partialSuccess: accepted === spans.length ? {} : {
+      rejectedSpans: spans.length - accepted, errorMessage: "duplicate spans ignored",
+    } });
+  });
+  app.get<{ Querystring: { hours?: string } }>("/observability/summary", {
+    schema: { querystring: { type: "object", additionalProperties: false,
+      properties: { hours: { type: "string", enum: ["1", "6", "24"] } } } },
+  }, async request => options.store.telemetrySummary(Number(request.query.hours ?? "1")));
+  app.get<{ Querystring: { hours?: string; offset?: string } }>("/observability/traces", {
+    schema: { querystring: { type: "object", additionalProperties: false, properties: {
+      hours: { type: "string", enum: ["1", "6", "24"] }, offset: { type: "string", pattern: "^[0-9]{1,5}$" },
+    } } },
+  }, async request => ({ traces: options.store.telemetryTraces(Number(request.query.hours ?? "1"), Number(request.query.offset ?? "0")) }));
+  app.get<{ Params: { traceId: string } }>("/observability/traces/:traceId", {
+    schema: { params: { type: "object", required: ["traceId"], additionalProperties: false,
+      properties: { traceId: { type: "string", pattern: "^[a-f0-9]{32}$" } } } },
+  }, async request => ({ traceId: request.params.traceId, spans: options.store.telemetryTrace(request.params.traceId) }));
   app.post("/prepare", async request => {
     const cases = prepareCases(request.body);
     if (cases.length > 5) throw new EvaluationError(400, "CASE_LIMIT", "每批最多五道真实问题。");

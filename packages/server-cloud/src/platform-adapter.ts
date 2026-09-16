@@ -227,11 +227,12 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   };
 }
 
-export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick<CloudServerOptions, "repository" | "maxConcurrentRuns" | "runTimeoutMs" | "buildInfo" | "capabilityRouterMode">): ReturnType<typeof createCloudServer> {
+export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick<CloudServerOptions, "repository" | "maxConcurrentRuns" | "runTimeoutMs" | "buildInfo" | "capabilityRouterMode" | "telemetry">): ReturnType<typeof createCloudServer> {
   return createCloudServer({ ...createPlatformAdapters(options), repository: options.repository,
     ...(options.buildInfo === undefined ? {} : { buildInfo: options.buildInfo }),
     ...(options.maxConcurrentRuns === undefined ? {} : { maxConcurrentRuns: options.maxConcurrentRuns }),
     ...(options.runTimeoutMs === undefined ? {} : { runTimeoutMs: options.runTimeoutMs }),
     ...(options.capabilityRouterMode === undefined ? {} : { capabilityRouterMode: options.capabilityRouterMode }),
+    ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
   });
 }

@@ -6,6 +6,18 @@ export interface EvaluationView extends Experiment {
   active: { caseId: string; repetition: number; stage: string } | null;
 }
 export interface HistoryItem { id: string; title: string; status: Experiment["status"]; createdAt: string; mode: "live" | "replay"; planned: number; completed: number }
+export interface ObservabilitySummary {
+  windowHours: number; traces: number; errors: number; errorRate: number; p50Ms: number | null; p95Ms: number | null;
+  operations: Array<{ name: string; count: number; errors: number; averageMs: number }>;
+}
+export interface TelemetryTraceSummary {
+  traceId: string; name: string; serviceName: string; serviceVersion: string; startedAt: string;
+  durationMs: number; status: "ok" | "error"; spanCount: number; errorCount: number;
+}
+export interface TelemetrySpanView {
+  traceId: string; spanId: string; parentSpanId: string; name: string; serviceName: string; serviceVersion: string;
+  startedAt: string; durationMs: number; status: "ok" | "error"; attributes: Record<string, string | number | boolean>;
+}
 export class EvaluationApiError extends Error {
   public constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
 }
@@ -46,6 +58,15 @@ export class EvaluationClient {
     this.#csrf = value.csrfToken; this.#scope = value.accountScope;
   }
   public catalog(signal?: AbortSignal): Promise<Catalog> { return this.request("/catalog", undefined, signal); }
+  public observabilitySummary(hours: number, signal?: AbortSignal): Promise<ObservabilitySummary> {
+    return this.request(`/observability/summary?hours=${String(hours)}`, undefined, signal);
+  }
+  public observabilityTraces(hours: number, signal?: AbortSignal): Promise<{ traces: TelemetryTraceSummary[] }> {
+    return this.request(`/observability/traces?hours=${String(hours)}`, undefined, signal);
+  }
+  public observabilityTrace(traceId: string, signal?: AbortSignal): Promise<{ traceId: string; spans: TelemetrySpanView[] }> {
+    return this.request(`/observability/traces/${encodeURIComponent(traceId)}`, undefined, signal);
+  }
   public async prepare(lines: string): Promise<EvaluationCase[]> { return (await this.request<{ cases: EvaluationCase[] }>("/prepare", { lines })).cases; }
   public history(offset: number, signal?: AbortSignal): Promise<{ runs: HistoryItem[] }> { return this.request(`/runs?offset=${offset}`, undefined, signal); }
   public create(spec: EvaluationSpec): Promise<{ run: EvaluationView; reused: boolean }> { return this.request("/runs", spec); }

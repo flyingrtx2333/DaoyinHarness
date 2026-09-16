@@ -21,6 +21,7 @@ import urllib.request
 ROOT = pathlib.Path('/opt/daoyin-harness')
 EVAL = pathlib.Path('/opt/daoyin-harness-evaluation')
 ENV = pathlib.Path('/etc/daoyin-harness-evaluation/environment')
+CLOUD_ENV = pathlib.Path('/etc/daoyin-harness/cloud.env')
 MAIN_ENV = pathlib.Path('/www/wwwroot/daoyintech/backend/.env')
 VHOSTS = pathlib.Path('/www/server/panel/vhost/nginx')
 NGINX = '/www/server/nginx/sbin/nginx'
@@ -115,9 +116,12 @@ def configure():
     backup()
     current = environment(ENV)
     key = current.get('DAOYIN_EVAL_SERVICE_TOKEN') or secrets.token_urlsafe(48)
+    telemetry_key = current.get('DAOYIN_OTEL_INGEST_TOKEN') or secrets.token_urlsafe(48)
     patch_environment(ENV, {'DAOYIN_EVAL_DB': '/var/lib/daoyin-harness-evaluation/evaluation.sqlite',
                            'DAOYIN_EVAL_SERVICE_TOKEN': key, 'DAOYIN_EVAL_PLATFORM_URL': ORIGIN,
-                           'DAOYIN_EVAL_PORT': '4711'})
+                           'DAOYIN_EVAL_PORT': '4711', 'DAOYIN_OTEL_INGEST_TOKEN': telemetry_key})
+    patch_environment(CLOUD_ENV, {'DAOYIN_OTEL_EXPORT_URL': 'http://127.0.0.1:4711/v1/traces',
+                                  'DAOYIN_OTEL_EXPORT_TOKEN': telemetry_key})
     # Reuse only the dedicated evaluation model, never a business provider or service key.
     model = eval_model()
     if model and not current.get('DAOYIN_EVAL_MODEL_KEY'):

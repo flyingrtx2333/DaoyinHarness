@@ -22,6 +22,7 @@ import { ReadinessProbe, runtimeBuild, type RuntimeBuild } from "./runtime-healt
 import { describeRun, RunMeasurements } from "./run-diagnostics.js";
 import { VIDEO_CONFIRMATION_INSTRUCTIONS, VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS, VideoInteractionCoordinator } from "./video-interaction.js";
 import { createExplicitVideoFlow } from "./explicit-video-flow.js";
+import { disabledTelemetry, type Telemetry } from "./observability.js";
 
 export interface CloudToolBinding {
   definition: ToolDefinition;
@@ -57,6 +58,7 @@ export interface CloudServerOptions {
   eventStream?: EventStreamLimits;
   capabilityRouterMode?: "off" | "shadow" | "enforce";
   createCapabilitySemantic?(identity: ExecutionIdentity, run: CloudRun): CapabilitySemanticProvider;
+  telemetry?: Telemetry;
   /** Trusted platform check; absence disables cross-application memory sharing. */
   authorizeMemoryShare?(identity: ExecutionIdentity, targetAppId: string, signal: AbortSignal): Promise<boolean>;
 }
@@ -146,6 +148,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   let closing = false;
   let storageFault = false;
   const measurements = new RunMeasurements();
+  const telemetry = options.telemetry ?? disabledTelemetry;
   const videoInteractions = new VideoInteractionCoordinator();
   const buildInfo = runtimeBuild(options.buildInfo);
   const readiness = new ReadinessProbe(async (signal) => {
@@ -347,6 +350,10 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
 
   function startRun(identity: ExecutionIdentity, profile: CloudProfile, run: CloudRun, maxModelCalls = 12): void {
     const controller = new AbortController();
+    const runSpan = telemetry.startSpan("agent.run", { attributes: {
+      "daoyin.run.id": run.id, "daoyin.session.id": run.sessionId, "daoyin.profile.id": profile.id,
+      "daoyin.space.kind": identity.space.kind, "daoyin.router.mode": capabilityRouterMode,
+    } });
     let remainingRunMs = runTimeoutMs;
     let activeSince = Date.now();
     let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -395,14 +402,20 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const wrappedDefinitions = runBindings.map<ToolDefinition>((binding) => ({
           ...binding.definition,
           execute: (input, signal, context) => measurements.measure(run.id, "tool_inclusive", async () => {
-            await ensureActive(identity, signal);
-            chargeTool();
+            const span = telemetry.startSpan("agent.tool", { parent: runSpan.context,
+              attributes: { "tool.name": binding.definition.name, "tool.mutating": binding.definition.mutating } });
             const suspendsDeadline = binding.definition.name === "project_concept_generate";
-            if (suspendsDeadline) suspendRunDeadline();
             try {
+              await ensureActive(identity, signal);
+              chargeTool();
+              if (suspendsDeadline) suspendRunDeadline();
               const result = await abortable(() => binding.definition.execute(input, signal, context), signal);
               await ensureActive(identity, signal);
+              span.end({ attributes: { "tool.success": result.ok } });
               return result;
+            } catch (error) {
+              span.end({ error });
+              throw error;
             } finally {
               if (suspendsDeadline) resumeRunDeadline();
             }
@@ -418,14 +431,27 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           .slice(-2).map((event) => event.payload.userMessage).join("\n").slice(0, 1_500);
         const packs = capabilityPacksFor(routableDefinitions);
         const highRiskPacks = explicitHighRiskPacks(run.userMessage, packs);
-        const capabilityRoute = capabilityRouterMode === "off" || routableDefinitions.length === 0 ? undefined :
-          await routeCapabilities({
-            message: run.userMessage, continuity, packs,
-            tools: routableDefinitions, explicitHighRiskPackIds: highRiskPacks, pinnedPackIds: highRiskPacks,
-            ...(options.createCapabilitySemantic === undefined ? {} :
-              { semantic: options.createCapabilitySemantic(identity, run) }),
-            signal: controller.signal,
-          });
+        const routeSpan = capabilityRouterMode === "off" || routableDefinitions.length === 0 ? undefined :
+          telemetry.startSpan("agent.capability_route", { parent: runSpan.context,
+            attributes: { "daoyin.router.eligible_tools": routableDefinitions.length } });
+        let capabilityRoute: Awaited<ReturnType<typeof routeCapabilities>> | undefined;
+        try {
+          capabilityRoute = routeSpan === undefined ? undefined : await routeCapabilities({
+              message: run.userMessage, continuity, packs,
+              tools: routableDefinitions, explicitHighRiskPackIds: highRiskPacks, pinnedPackIds: highRiskPacks,
+              ...(options.createCapabilitySemantic === undefined ? {} :
+                { semantic: options.createCapabilitySemantic(identity, run) }),
+              signal: controller.signal,
+            });
+          routeSpan?.end({ attributes: capabilityRoute === undefined ? {} : {
+            "daoyin.router.selected_packs": capabilityRoute.decision.selectedPackIds.length,
+            "daoyin.router.exposed_tools": capabilityRoute.decision.exposedToolCount,
+            "daoyin.router.fallback": capabilityRoute.decision.fallback,
+          } });
+        } catch (error) {
+          routeSpan?.end({ error });
+          throw error;
+        }
         const routeAllows = (name: string): boolean => capabilityRouterMode !== "enforce" ||
           capabilityRoute === undefined || capabilityRoute.selectedToolNames.has(name);
         const capabilitySearchTool: ToolDefinition | undefined = capabilityRoute === undefined ? undefined : {
@@ -495,6 +521,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const createMeteredModel = async (targetRun: CloudRun, parentSignal: AbortSignal): Promise<ModelClient> => {
           return {
             complete: (request) => measurements.measure(run.id, "model_inclusive", async () => {
+              const span = telemetry.startSpan("gen_ai.model.request", { parent: runSpan.context,
+                attributes: { "gen_ai.operation.name": "chat", "daoyin.child_run": targetRun.id !== run.id } });
               const modelSignal = AbortSignal.any([request.signal, parentSignal, controller.signal]);
               try {
                 await ensureActive(identity, modelSignal);
@@ -511,8 +539,10 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                 }), modelSignal);
                 await ensureActive(identity, modelSignal);
                 if (Buffer.byteLength(JSON.stringify(reply), "utf8") > 96_000) throw new Error("Model output exceeds limit.");
+                span.end({ attributes: { "gen_ai.request.index": modelCalls } });
                 return reply;
               } catch (error) {
+                span.end({ error, attributes: { "gen_ai.request.index": modelCalls } });
                 if (error instanceof CloudError && error.code === "MODEL_CALL_LIMIT") throw error;
                 if (error instanceof CloudError && (
                   ["AUTHORIZATION_REVOKED", "AUTHENTICATION_REQUIRED", "APP_ACCESS_DENIED", "RUN_IDENTITY_MISMATCH"].includes(error.code) ||
@@ -573,9 +603,12 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           accountId: stores.accountId, scopeId: stores.scopeId, sessionId: run.sessionId, turnId: run.id,
           userMessage: run.userMessage, executionIdentity: identity, signal: controller.signal,
         });
+        runSpan.end({ attributes: { "daoyin.model.calls": modelCalls, "daoyin.tool.calls": toolCalls } });
       } catch (error) {
         const failureId = randomUUID();
         const candidate = error as { code?: unknown; name?: unknown; stack?: unknown };
+        runSpan.end({ error, attributes: { "daoyin.failure.id": failureId,
+          ...(typeof candidate.code === "string" ? { "error.code": candidate.code.slice(0, 80) } : {}) } });
         console.error(JSON.stringify({ event: "cloud.run_internal_error", failureId, runId: run.id,
           errorName: typeof candidate.name === "string" ? candidate.name.slice(0, 80) : "unknown",
           errorCode: typeof candidate.code === "string" ? candidate.code.slice(0, 80) : undefined,

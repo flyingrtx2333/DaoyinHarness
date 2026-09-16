@@ -2,6 +2,7 @@ import { createPlatformCloudServer } from "./platform-adapter.js";
 import { createConfiguredMemoryRetriever } from "./memory-retrieval-config.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
 import { loadRuntimeBuild } from "./runtime-health.js";
+import { configuredTelemetry, disabledTelemetry, type Telemetry } from "./observability.js";
 
 const databaseUrl = process.env.DAOYIN_CLOUD_POSTGRES_URL ?? "";
 const port = Number(process.env.DAOYIN_CLOUD_PORT ?? "4700");
@@ -34,6 +35,7 @@ const repository = await PostgresCloudRepository.open(databaseUrl, {
 let app: ReturnType<typeof createPlatformCloudServer> | undefined;
 let heartbeat: ReturnType<typeof setInterval> | undefined;
 let closing: Promise<void> | undefined;
+let telemetry: Telemetry = disabledTelemetry;
 
 function close(): Promise<void> {
   if (closing !== undefined) return closing;
@@ -41,8 +43,11 @@ function close(): Promise<void> {
   closing = (async () => {
     try { await app?.close(); }
     finally {
-      try { await repository.releaseRuntimeLease(); }
-      finally { await repository.close(); }
+      try { await telemetry.shutdown(); }
+      finally {
+        try { await repository.releaseRuntimeLease(); }
+        finally { await repository.close(); }
+      }
     }
   })();
   return closing;
@@ -58,8 +63,10 @@ function shutdown(failed = false): void {
 
 try {
   // Validate platform config before acquiring ownership or touching prior task states.
+  const buildInfo = await loadRuntimeBuild(new URL("./release.json", import.meta.url));
+  telemetry = configuredTelemetry(process.env, buildInfo.revision ?? "unknown");
   app = createPlatformCloudServer({ repository,
-    buildInfo: await loadRuntimeBuild(new URL("./release.json", import.meta.url)),
+    buildInfo, telemetry,
     platformUrl,
     serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
     capabilityRouterMode: capabilityRouterMode as "off" | "shadow" | "enforce",

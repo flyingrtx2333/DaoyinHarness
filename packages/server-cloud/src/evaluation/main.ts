@@ -9,10 +9,12 @@ import { record } from "./contracts.js";
 // This entry is never imported by the production Agent server. Use a separate OS user/env.
 const database = process.env.DAOYIN_EVAL_DB ?? "";
 const serviceToken = process.env.DAOYIN_EVAL_SERVICE_TOKEN ?? "";
+const telemetryToken = process.env.DAOYIN_OTEL_INGEST_TOKEN ?? "";
 const platform = new URL(process.env.DAOYIN_EVAL_PLATFORM_URL ?? "invalid:");
 const port = Number(process.env.DAOYIN_EVAL_PORT ?? 4711);
 if (!isAbsolute(database) || resolve(database) === resolve(process.env.DAOYIN_CLOUD_DATABASE ?? "public.sqlite") ||
     process.env.DAOYIN_CLOUD_POSTGRES_URL || !/^[\x21-\x7e]{32,256}$/u.test(serviceToken) ||
+    !/^[\x21-\x7e]{32,256}$/u.test(telemetryToken) ||
     !Number.isInteger(port) || port < 1024 || port > 65535 || platform.username || platform.password || platform.search || platform.hash || platform.pathname !== "/" ||
     !(platform.protocol === "https:" || platform.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(platform.hostname))) {
   throw new Error("Configure a separate evaluation database, service identity, platform origin and port; do not reuse the production runtime environment.");
@@ -21,7 +23,7 @@ const runtime = new PlatformEvaluationRuntime(platform, serviceToken);
 const build = await loadRuntimeBuild(new URL("./release.json", import.meta.url));
 await mkdir(dirname(database), { recursive: true, mode: 0o700 });
 const store = new EvaluationStore(database);
-const app = createEvaluationService({ store, serviceToken, revision: build.revision,
+const app = createEvaluationService({ store, serviceToken, telemetryToken, revision: build.revision,
   runtime,
   authorize: async (authority, parent) => {
     const signal = AbortSignal.any([parent, AbortSignal.timeout(5000)]);

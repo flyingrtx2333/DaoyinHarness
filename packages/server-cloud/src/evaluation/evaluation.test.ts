@@ -21,7 +21,7 @@ function spec(template: "saishi-materials" | "memory-current" | "explore" = "sai
 }
 async function fixture() {
   const store = new EvaluationStore(":memory:"); const state = { active: true };
-  const app = createEvaluationService({ store, serviceToken: token, revision: null,
+  const app = createEvaluationService({ store, serviceToken: token, telemetryToken: "telemetry-test-token-000000000000", revision: null,
     authorize: async actor => state.active && actor.actorId === authority.actorId && actor.sessionId === authority.sessionId });
   await app.ready(); cleanups.push(async () => { await app.close(); store.close(); });
   return { app, store, state };

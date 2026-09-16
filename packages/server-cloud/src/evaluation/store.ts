@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { EVALUATOR_VERSION, EvaluationError, type EvaluationSpec, type Experiment, type Trial } from "./contracts.js";
+import type { StoredTelemetrySpan } from "./telemetry.js";
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -9,13 +10,17 @@ function canonical(value: unknown): string {
 }
 export const fingerprint = (value: unknown): string => createHash("sha256").update(canonical(value)).digest("hex");
 export interface Authority { actorId: string; sessionId: string }
+export interface TelemetryTraceSummary {
+  traceId: string; name: string; serviceName: string; serviceVersion: string; startedAt: string;
+  durationMs: number; status: "ok" | "error"; spanCount: number; errorCount: number;
+}
 /** Separate evaluation DB, NOT the runtime's production cloud_* database. */
 export class EvaluationStore {
   readonly #db: DatabaseSync; readonly #owner = randomUUID();
   public constructor(path: string) {
     this.#db = new DatabaseSync(path);
     const tables = this.#db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-    if (tables.some(table => !["evaluation_lease", "evaluation_runs", "evaluation_calls"].includes(String(table.name)))) {
+    if (tables.some(table => !["evaluation_lease", "evaluation_runs", "evaluation_calls", "telemetry_spans"].includes(String(table.name)))) {
       this.#db.close(); throw new EvaluationError(503, "EVAL_DATABASE_SCOPE", "必须使用独立评估数据库，禁止复用业务或云端会话库。");
     }
     this.#db.exec(`PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
@@ -26,6 +31,12 @@ export class EvaluationStore {
       CREATE UNIQUE INDEX IF NOT EXISTS evaluation_one_active ON evaluation_runs((1)) WHERE status IN ('running','cancelling');
       CREATE TABLE IF NOT EXISTS evaluation_calls(run_id TEXT NOT NULL REFERENCES evaluation_runs(id), seq INTEGER NOT NULL,
         kind TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(run_id,seq)) STRICT;`);
+    this.#db.exec(`CREATE TABLE IF NOT EXISTS telemetry_spans(
+      trace_id TEXT NOT NULL, span_id TEXT PRIMARY KEY, parent_span_id TEXT NOT NULL, name TEXT NOT NULL,
+      service_name TEXT NOT NULL, service_version TEXT NOT NULL, started_at TEXT NOT NULL, duration_ms REAL NOT NULL,
+      status TEXT NOT NULL, attributes TEXT NOT NULL, ingested_at TEXT NOT NULL) STRICT;
+      CREATE INDEX IF NOT EXISTS telemetry_trace_started ON telemetry_spans(trace_id,started_at,span_id);
+      CREATE INDEX IF NOT EXISTS telemetry_recent_roots ON telemetry_spans(started_at DESC) WHERE parent_span_id='';`);
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       const old = this.#db.prepare("SELECT expires FROM evaluation_lease WHERE id=1").get();
@@ -53,6 +64,64 @@ export class EvaluationStore {
   public close(): void {
     try { this.#db.prepare("UPDATE evaluation_lease SET expires=0 WHERE id=1 AND owner=?").run(this.#owner); }
     finally { this.#db.close(); }
+  }
+  public ingestTelemetry(spans: readonly StoredTelemetrySpan[]): number {
+    return this.#transaction(() => {
+      const insert = this.#db.prepare(`INSERT OR IGNORE INTO telemetry_spans
+        (trace_id,span_id,parent_span_id,name,service_name,service_version,started_at,duration_ms,status,attributes,ingested_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+      const now = new Date().toISOString(); let inserted = 0;
+      for (const span of spans) inserted += Number(insert.run(span.traceId, span.spanId, span.parentSpanId, span.name,
+        span.serviceName, span.serviceVersion, span.startedAt, span.durationMs, span.status,
+        JSON.stringify(span.attributes), now).changes);
+      this.#db.prepare("DELETE FROM telemetry_spans WHERE ingested_at < ?").run(new Date(Date.now() - 7 * 86_400_000).toISOString());
+      const count = Number(this.#db.prepare("SELECT COUNT(*) AS n FROM telemetry_spans").get()?.n ?? 0);
+      if (count > 50_000) this.#db.prepare(`DELETE FROM telemetry_spans WHERE span_id IN
+        (SELECT span_id FROM telemetry_spans ORDER BY ingested_at,span_id LIMIT ?)` ).run(count - 50_000);
+      return inserted;
+    });
+  }
+  public telemetrySummary(hours: number): {
+    windowHours: number; traces: number; errors: number; errorRate: number; p50Ms: number | null; p95Ms: number | null;
+    operations: Array<{ name: string; count: number; errors: number; averageMs: number }>;
+  } {
+    this.assertOwner();
+    const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+    const roots = this.#db.prepare("SELECT duration_ms,status FROM telemetry_spans WHERE parent_span_id='' AND started_at>=? ORDER BY duration_ms").all(cutoff);
+    const durations = roots.map(row => Number(row.duration_ms));
+    const percentile = (ratio: number): number | null => durations.length ? Math.round(durations[Math.min(durations.length - 1, Math.floor((durations.length - 1) * ratio))]!) : null;
+    const errors = roots.filter(row => row.status === "error").length;
+    const operations = this.#db.prepare(`SELECT name,COUNT(*) AS count,
+      SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errors,AVG(duration_ms) AS average
+      FROM telemetry_spans WHERE started_at>=? GROUP BY name ORDER BY count DESC,name LIMIT 12`).all(cutoff)
+      .map(row => ({ name: String(row.name), count: Number(row.count), errors: Number(row.errors), averageMs: Math.round(Number(row.average)) }));
+    return { windowHours: hours, traces: roots.length, errors, errorRate: roots.length ? errors / roots.length : 0,
+      p50Ms: percentile(.5), p95Ms: percentile(.95), operations };
+  }
+  public telemetryTraces(hours: number, offset = 0): TelemetryTraceSummary[] {
+    this.assertOwner();
+    const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+    return this.#db.prepare(`SELECT root.trace_id,root.name,root.service_name,root.service_version,root.started_at,
+      root.duration_ms,root.status,COUNT(all_spans.span_id) AS span_count,
+      SUM(CASE WHEN all_spans.status='error' THEN 1 ELSE 0 END) AS error_count
+      FROM telemetry_spans root JOIN telemetry_spans all_spans ON all_spans.trace_id=root.trace_id
+      WHERE root.parent_span_id='' AND root.started_at>=?
+      GROUP BY root.span_id ORDER BY root.started_at DESC LIMIT 30 OFFSET ?`).all(cutoff, offset).map(row => ({
+        traceId: String(row.trace_id), name: String(row.name), serviceName: String(row.service_name),
+        serviceVersion: String(row.service_version), startedAt: String(row.started_at), durationMs: Math.round(Number(row.duration_ms)),
+        status: row.status === "error" ? "error" as const : "ok" as const,
+        spanCount: Number(row.span_count), errorCount: Number(row.error_count),
+      }));
+  }
+  public telemetryTrace(traceId: string): StoredTelemetrySpan[] {
+    this.assertOwner();
+    const rows = this.#db.prepare(`SELECT trace_id,span_id,parent_span_id,name,service_name,service_version,
+      started_at,duration_ms,status,attributes FROM telemetry_spans WHERE trace_id=? ORDER BY started_at,span_id`).all(traceId);
+    if (!rows.length) throw new EvaluationError(404, "TRACE_NOT_FOUND", "链路不存在或已超过保留期。");
+    return rows.map(row => ({ traceId: String(row.trace_id), spanId: String(row.span_id), parentSpanId: String(row.parent_span_id),
+      name: String(row.name), serviceName: String(row.service_name), serviceVersion: String(row.service_version),
+      startedAt: String(row.started_at), durationMs: Number(row.duration_ms), status: row.status === "error" ? "error" : "ok",
+      attributes: JSON.parse(String(row.attributes)) as Record<string, string | number | boolean> }));
   }
   public create(authority: Authority, spec: EvaluationSpec, model: string | null, revision: string | null): { run: Experiment; created: boolean } {
     return this.#transaction(() => {
