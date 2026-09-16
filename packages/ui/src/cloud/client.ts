@@ -3,6 +3,14 @@ import type { CloudRun, CloudSession, SessionAction } from "../../../server-clou
 
 export type { CloudRun, CloudSession, SessionAction };
 export interface AccountProfile { username: string; avatarUrl: string | null; availableCredits?: string }
+export type DurableMemory = {
+  id: string; revision: number; state: "pending" | "active" | "superseded" | "forgotten" | "rejected";
+  key: string; scope: "application" | "personal" | "organization";
+  kind: "preference" | "fact" | "goal" | "decision" | "note";
+  content: string; keywords: string[]; createdBy: string; originAppId: string;
+  source: { kind: "user_edit" | "conversation" | "agent"; basis?: "user_statement" | "tool_observation" };
+  expiresAt: number | null; createdAt: number; supersedes: string | null;
+}
 
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
 function accountProfile(value: unknown, credits?: unknown): AccountProfile | undefined {
@@ -124,6 +132,14 @@ export class WorkbenchClient {
   }
   public async storyAssets(category: string, offset: number, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.#request("/assets?category=" + encodeURIComponent(category) + "&offset=" + offset, undefined, signal);
+  }
+  public async memories(offset = 0, signal?: AbortSignal): Promise<{ items: DurableMemory[]; hasMore: boolean }> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 5000) throw new WorkbenchError("记忆页码无效。");
+    return this.#request("/memories?offset=" + offset, undefined, signal);
+  }
+  public async forgetMemory(id: string, revision: number): Promise<DurableMemory> {
+    if (!identifier(id) || !Number.isSafeInteger(revision) || revision < 1) throw new WorkbenchError("记忆版本无效。");
+    return (await this.#request<{ memory: DurableMemory }>("/memories/" + encodeURIComponent(id) + "/forget", { revision })).memory;
   }
   public async controlStoryProduction(id: string, action: "pause" | "resume" | "approve" | "cancel", revision?: string): Promise<Record<string, unknown>> {
     if (!identifier(id)) throw new WorkbenchError("制作任务标识无效。");
