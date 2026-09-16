@@ -32,6 +32,7 @@ const buildInfo = { version, revision, builtAt: new Date().toISOString(), channe
 const logoPath = "packages/ui/public/assets/harness-logo.png";
 const loginHeroPath = "packages/ui/public/assets/login-hero-ribbon-v2.png";
 const loginHeroVideoPath = "packages/ui/public/assets/login-hero-ribbon-loop-v1.mp4";
+const loaderSpritePath = "packages/ui/public/assets/harness-loader-sprite-v1.png";
 const output = resolve(".cache", "workbench-release", preview ? "preview" : revision);
 await mkdir(output, { recursive: true });
 const result = await build({
@@ -40,10 +41,10 @@ const result = await build({
   assetNames: "[name]-[hash]", publicPath: "/assets",
   define: { "process.env.NODE_ENV": '"production"', __HARNESS_BUILD_INFO__: JSON.stringify(buildInfo) }, metafile: true, legalComments: "eof",
   plugins: [{ name: "committed-workbench-source", setup(builder) {
-    builder.onLoad({ filter: /packages[\\/]ui[\\/]public[\\/]assets[\\/](?:(?:harness-logo|login-hero-ribbon-v2)\.png|login-hero-ribbon-loop-v1\.mp4)$/ }, async (args) => ({
+    builder.onLoad({ filter: /packages[\\/]ui[\\/]public[\\/]assets[\\/](?:(?:harness-logo|login-hero-ribbon-v2|harness-loader-sprite-v1)\.png|login-hero-ribbon-loop-v1\.mp4)$/ }, async (args) => ({
       contents: preview
         ? await readFile(args.path)
-        : execFileSync("git", ["show", `${revision}:${args.path.endsWith("login-hero-ribbon-loop-v1.mp4") ? loginHeroVideoPath : args.path.endsWith("login-hero-ribbon-v2.png") ? loginHeroPath : logoPath}`], { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }),
+        : execFileSync("git", ["show", `${revision}:${args.path.endsWith("login-hero-ribbon-loop-v1.mp4") ? loginHeroVideoPath : args.path.endsWith("login-hero-ribbon-v2.png") ? loginHeroPath : args.path.endsWith("harness-loader-sprite-v1.png") ? loaderSpritePath : logoPath}`], { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }),
       loader: "file",
     }));
     builder.onLoad({ filter: /packages[\\/]ui[\\/]src[\\/]/ }, async (args) => {
@@ -69,9 +70,10 @@ const css = outputs.find((path) => path.endsWith(".css"))?.split("/").at(-1);
 const logo = outputs.find((path) => /\/harness-logo-[^/]+\.png$/u.test(path))?.split("/").at(-1);
 const loginHero = outputs.find((path) => /\/login-hero-ribbon-v2-[^/]+\.png$/u.test(path))?.split("/").at(-1);
 const loginHeroVideo = outputs.find((path) => /\/login-hero-ribbon-loop-v1-[^/]+\.mp4$/u.test(path))?.split("/").at(-1);
-if (!js || !css || !logo || !loginHero || !loginHeroVideo) throw new Error("Workbench assets missing");
+const loaderSprite = outputs.find((path) => /\/harness-loader-sprite-v1-[^/]+\.png$/u.test(path))?.split("/").at(-1);
+if (!js || !css || !logo || !loginHero || !loginHeroVideo || !loaderSprite) throw new Error("Workbench assets missing");
 await writeFile(`${output}/index.html`, `<!doctype html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f6f7f9"><meta name="description" content="道引 Harness 云端工作台：公开知识问答、会话与资料引用。"><title>道引 Harness 工作台</title><link rel="icon" type="image/png" href="/assets/${logo}"><link rel="apple-touch-icon" href="/assets/${logo}"><link rel="stylesheet" href="/assets/${css}"><script type="module" src="/assets/${js}"></script></head><body><div id="root"></div><noscript>请启用 JavaScript 使用工作台。</noscript></body></html>\n`);
 const files = {};
-for (const file of ["index.html", `assets/${js}`, `assets/${css}`, `assets/${logo}`, `assets/${loginHero}`, `assets/${loginHeroVideo}`]) files[file] = createHash("sha256").update(await readFile(`${output}/${file}`)).digest("hex");
+for (const file of ["index.html", `assets/${js}`, `assets/${css}`, `assets/${logo}`, `assets/${loginHero}`, `assets/${loginHeroVideo}`, `assets/${loaderSprite}`]) files[file] = createHash("sha256").update(await readFile(`${output}/${file}`)).digest("hex");
 await writeFile(`${output}/release.json`, JSON.stringify({ ...buildInfo, ...(baseRevision?{baseRevision,scope:"independent-project-overlay"}:{}), preview, files }, null, 2));
 console.log(JSON.stringify({ output, ...buildInfo, preview, files }, null, 2));

@@ -238,7 +238,7 @@ button.primary:hover:enabled { background: #174bcb; }
 .activity-detail strong { display: block; margin-bottom: var(--ui-space-1); color: #536079; font-size: var(--ui-font-caption); font-weight: 600; }
 .activity-detail pre { max-height: 240px; margin: 0; overflow: auto; color: #273247; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-status-icon { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 50%; }
-.tool-status-icon[data-status="running"] { border: 0; border-radius: 0; background: url('/assets/harness-loader-sprite-v1.png') 0 0 / 128px 16px no-repeat; animation: harness-loader-frames .88s steps(8) infinite; }
+.tool-status-icon[data-status="running"] { border: 0; border-radius: 0; background: url('../../public/assets/harness-loader-sprite-v1.png') 0 0 / 128px 16px no-repeat; animation: harness-loader-frames .88s steps(8) infinite; }
 .tool-status-icon[data-status="completed"] { position: relative; border: 1.5px solid #159e81; background: #f2fcf9; }
 .tool-status-icon[data-status="completed"]::after { content: ""; width: 6px; height: 3px; border-left: 1.5px solid #159e81; border-bottom: 1.5px solid #159e81; transform: translateY(-1px) rotate(-45deg); }
 .tool-status-icon[data-status="failed"] { position: relative; border: 1.5px solid #c78139; background: #fff5e4; }
