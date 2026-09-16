@@ -10,6 +10,9 @@ interface ConceptSet {
   selectedDirection: "A" | "B" | "C" | null;
   concepts: Concept[];
 }
+export function shouldShowConversationConceptSet(status: ConceptSet["status"]): boolean {
+  return status === "generating" || status === "awaiting_selection";
+}
 export function ConversationConcepts({ client, sessionId, refreshKey, busy, onChoose }: {
   client: WorkbenchClient;
   sessionId: string;
@@ -36,7 +39,7 @@ export function ConversationConcepts({ client, sessionId, refreshKey, busy, onCh
     const timer = window.setTimeout(() => setPoll(value => value + 1), 2500);
     return () => window.clearTimeout(timer);
   }, [result?.conceptSet.status, poll]);
-  if (!result || result.conceptSet.status === "superseded" || result.conceptSet.concepts.length === 0) return null;
+  if (!result || !shouldShowConversationConceptSet(result.conceptSet.status) || result.conceptSet.concepts.length === 0) return null;
   const { project, conceptSet } = result;
   return <section className="conversation-concepts" aria-label="界面方案图片">
     <div className="conversation-concept-heading">

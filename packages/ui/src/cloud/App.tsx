@@ -18,6 +18,7 @@ import { StoryProductions, storyProductionIds } from "./StoryProductions.js";
 import { AssetLibrary } from "./AssetLibrary.js";
 import { MemoryWorkspace } from "./MemoryWorkspace.js";
 import { ConversationConcepts } from "./ConversationConcepts.js";
+import { ConversationProjectPreview } from "./ConversationProjectPreview.js";
 import { StoryUpload, type StoryReference } from "./StoryUpload.js";
 import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
@@ -385,6 +386,8 @@ export function App(): React.JSX.Element {
           {view === "chat" && phase === "ready" && selected && <ConversationConcepts client={client} sessionId={selected}
             refreshKey={`${revision}:${events.length}`} busy={pluginBusy}
             onChoose={(direction) => { void send(`选择 ${direction} 方案，请按这个方案继续实现页面。`); }} />}
+          {view === "chat" && phase === "ready" && selected && <ConversationProjectPreview client={client} sessionId={selected}
+            refreshKey={`${revision}:${events.length}`} />}
           {sendingMessage && <article className="turn" aria-label="正在发送的问题"><div className="user-message"><span className="message-label">你</span><p>{sendingMessage}</p></div><p className="thinking" role="status"><span className="spinner" />正在发送…</p></article>}
           <div ref={bottom} />
         </div>

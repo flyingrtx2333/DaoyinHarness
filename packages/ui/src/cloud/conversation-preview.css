@@ -1,0 +1,12 @@
+.conversation-preview{margin:var(--ui-space-4) 0 var(--ui-space-5);overflow:hidden;border:1px solid var(--ui-line);border-radius:var(--ui-radius-card);background:#fff}
+.conversation-preview>header{display:flex;align-items:center;justify-content:space-between;gap:var(--ui-space-3);min-height:var(--ui-control-height);padding:var(--ui-space-2) var(--ui-space-3);border-bottom:1px solid var(--ui-line)}
+.conversation-preview>header>div{display:flex;align-items:baseline;gap:var(--ui-space-2);min-width:0}
+.conversation-preview>header strong{font-size:var(--ui-font-section)}
+.conversation-preview>header span{overflow:hidden;color:var(--ui-muted);font-size:var(--ui-font-caption);text-overflow:ellipsis;white-space:nowrap}
+.conversation-preview>header button{flex-shrink:0;min-height:32px;padding:4px var(--ui-space-2);border-color:transparent;background:transparent;color:var(--ui-accent);font-size:var(--ui-font-caption)}
+.conversation-preview-status,.conversation-preview-error{display:flex;align-items:center;gap:var(--ui-space-2);min-height:120px;justify-content:center;padding:var(--ui-space-4);color:var(--ui-muted);font-size:var(--ui-font-control)}
+.conversation-preview-error{color:#a33c38}
+.conversation-preview-frame{position:relative;min-height:360px;background:#f5f7fb}
+.conversation-preview-frame iframe{display:block;width:100%;height:min(56vh,560px);min-height:360px;border:0;background:#fff}
+.conversation-preview-frame>span{position:absolute;top:var(--ui-space-2);right:var(--ui-space-2);display:flex;align-items:center;gap:var(--ui-space-2);padding:5px 8px;border:1px solid var(--ui-line);border-radius:var(--ui-radius-control);background:#fffffff2;color:var(--ui-muted);font-size:var(--ui-font-caption);box-shadow:0 3px 12px #26354f12}
+@media(max-width:640px){.conversation-preview{margin-block:var(--ui-space-3)}.conversation-preview>header{align-items:flex-start}.conversation-preview>header>div{display:grid;gap:1px}.conversation-preview-frame,.conversation-preview-frame iframe{min-height:320px;height:52vh}}
