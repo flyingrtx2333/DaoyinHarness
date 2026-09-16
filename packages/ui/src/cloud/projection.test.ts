@@ -57,6 +57,11 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
     expect(projected?.activities).toHaveLength(1);
     expect(projected?.activities[0]).toMatchObject({ status: "running", text: "正在选择合适的操作步骤…",
       startedAt: "2026-09-05T12:00:00Z", phaseGroup: "thinking:0" });
+    const completed = projectTurns([{ ...run, status: "completed" }], [
+      event(1, "phase.updated", { phase: "thinking", displayText: "仍在处理，请稍候…", step: 0 }),
+      event(2, "turn.completed", { status: "completed", assistantMessageId: "answer", outcomeSummary: "完成" }),
+    ])[0];
+    expect(completed?.activities[0]).toMatchObject({ status: "completed", text: "处理完成" });
   });
   it("orders turns chronologically and never duplicates replayed deltas", () => {
     const delta = event(1, "assistant.delta", { delta: "答案", contentBlockId: "block_1" });

@@ -73,7 +73,7 @@ async function publishModelProgress(append: AppendEvent, step: number, signal: A
   let delay = MODEL_PROGRESS_INITIAL_DELAY_MS;
   while (await progressDelay(delay, signal)) {
     await append("phase.updated", { phase: step === 0 ? "thinking" : "synthesizing",
-      displayText: messages[Math.min(index, messages.length - 1)]!, step });
+      displayText: messages[index % messages.length]!, step });
     index += 1;
     delay = MODEL_PROGRESS_INTERVAL_MS;
   }
