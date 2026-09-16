@@ -59,6 +59,11 @@ describe("kernel memory and the existing platform bridge (simulated transport, r
       await vi.waitFor(async () => expect((await repository.getRun(actor, runId)).status).toBe("completed"));
       expect(models).toBe(3);
       expect(invocations).toEqual(["saishi_list_events"]);
+      const events = await repository.readEvents(actor, sessionId, 0, 100);
+      const memoryCompleted = events.find((event) => event.type === "tool.completed" &&
+        event.payload.toolName === "memory_remember");
+      expect(memoryCompleted?.type === "tool.completed" ? memoryCompleted.payload.summary : "")
+        .toContain("不要再次调用记忆写入工具");
       expect(repository.memory.list(actor).items[0]).toMatchObject({ state: "active", scope: "application", source: { kind: "agent" } });
     } finally { await app.close(); repository.close(); }
   });

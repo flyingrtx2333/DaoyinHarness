@@ -199,7 +199,7 @@ export function createCloudMemoryRuntime(options: {
           dirty = true;
           if (proposal !== undefined && mutation.memory.state !== "active") throw new CloudError(409, "MEMORY_NOT_ACTIVE", "原请求对应的记忆已失效，未恢复旧内容。");
           const record = mutation.memory;
-          return success(name, name === "memory_forget" ? "已停止使用该记忆版本链。" : "记忆已保存并生效。", {
+          return success(name, name === "memory_forget" ? "已停止使用该记忆版本链。" : "记忆已保存并生效。本轮不要再次调用记忆写入工具，请直接回答用户。", {
             id: record.id, revision: record.revision, state: record.state, key: record.key, scope: record.scope,
             ...(record.state === "active" ? { content: record.content, provenance: record.source.kind } : {}),
           });
