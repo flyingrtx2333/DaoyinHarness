@@ -45,10 +45,19 @@ function toolLabel(name: unknown): string {
   if (name.includes("workflow") || name.includes("goal")) return "执行工作流";
   return "执行操作";
 }
+function completedActivityText(text: string): string {
+  const replacements: Record<string, string> = {
+    "正在准备任务上下文…": "任务上下文已准备",
+    "正在规划下一步操作…": "下一步操作规划完成",
+    "正在根据操作结果继续处理…": "操作结果处理完成",
+  };
+  return replacements[text] ?? text;
+}
 function finishNonToolActivity(turn: TurnView, finishedAt: string): void {
   for (const activity of turn.activities) {
     if (activity.kind !== "tool" && activity.status === "running") {
       activity.status = "completed";
+      activity.text = completedActivityText(activity.text);
       activity.finishedAt = finishedAt;
     }
   }
@@ -120,8 +129,10 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
     if (event.type === "phase.updated") {
       finishNonToolActivity(turn, event.occurredAt);
       turn.phaseText = event.payload.displayText;
-      turn.activities.push({ id: `phase_${event.eventSeq}`, kind: "phase", status: "running",
-        text: event.payload.displayText, startedAt: event.occurredAt });
+      if (event.payload.phase !== "tool") {
+        turn.activities.push({ id: `phase_${event.eventSeq}`, kind: "phase", status: "running",
+          text: event.payload.displayText, startedAt: event.occurredAt });
+      }
     }
     if (event.type === "tool.started" || event.type === "tool.progress" || event.type === "tool.completed" || event.type === "tool.failed") {
       const id = event.payload.toolCallId;
@@ -161,7 +172,9 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
     if (["turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted"].includes(event.type)) {
       const status = event.type === "turn.completed" ? "completed" : "failed";
       for (const activity of turn.activities) if (activity.status === "running") {
-        activity.status = status; activity.finishedAt = event.occurredAt;
+        activity.status = status;
+        if (status === "completed" && activity.kind !== "tool") activity.text = completedActivityText(activity.text);
+        activity.finishedAt = event.occurredAt;
       }
     }
   }
@@ -173,6 +186,7 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
     }
     if (terminal) for (const activity of turn.activities) if (activity.status === "running") {
       activity.status = turn.run.status === "completed" ? "completed" : "failed";
+      if (activity.status === "completed" && activity.kind !== "tool") activity.text = completedActivityText(activity.text);
       activity.finishedAt = turn.assistantOccurredAt;
     }
   }
