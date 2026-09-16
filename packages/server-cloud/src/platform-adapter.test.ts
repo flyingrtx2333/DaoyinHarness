@@ -20,6 +20,14 @@ describe("platform adapter (real engine/SQLite, explicitly simulated platform an
       [{ name: "capability_search" }], [])).toBe(false);
     expect(privateModelCallAllowed("capability_search", { query: "赛事资料" }, [], [])).toBe(false);
   });
+  it("accepts only exposed memory calls that satisfy the kernel contract", () => {
+    const exposed = [{ name: "memory_remember" }];
+    const valid = { key: "acceptance.code", scope: "personal", kind: "fact", content: "青竹-9173",
+      basis: "user_statement", excerpt: "请记住青竹-9173" };
+    expect(privateModelCallAllowed("memory_remember", valid, exposed, [])).toBe(true);
+    expect(privateModelCallAllowed("memory_remember", { ...valid, unexpected: true }, exposed, [])).toBe(false);
+    expect(privateModelCallAllowed("memory_remember", valid, [], [])).toBe(false);
+  });
   it("accepts the local video confirmation control only for an exposed, schema-valid generation operation", () => {
     const input = { modelName: "doubao-seedance-2-0-mini-260615", resolution: "720p", durationSeconds: 10,
       prompt: "高燃混剪视频", aspectRatio: "16:9", target: "new", request_key: "gaoran_hunjian_10s_720p_20260913" };

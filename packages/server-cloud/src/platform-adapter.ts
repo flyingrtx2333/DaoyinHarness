@@ -10,6 +10,8 @@ import { createStoryProfile, isStoryIdentity } from "./story-profile.js";
 import { createWorkbenchProfile, isWorkbenchIdentity } from "./workbench-profile.js";
 import { readModelStream } from "./model-stream.js";
 import { VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS } from "./video-interaction.js";
+import { isMemoryToolName } from "./memory-agent-policy.js";
+import { validateMemoryToolInput } from "./memory-tools.js";
 
 export interface PlatformAdapterOptions {
   /** Fixed trusted origin, HTTPS except explicit loopback development. */
@@ -31,6 +33,7 @@ export function privateModelCallAllowed(name: string, input: Record<string, unkn
   if (name === "capability_search") return Object.keys(input).length === 1 &&
     typeof input.query === "string" && input.query.trim().length > 0 && input.query.length <= 500;
   if (isProjectTool(name)) return validateProjectInput(name, input);
+  if (isMemoryToolName(name)) return validateMemoryToolInput(name, input);
   const direct = bindings.find((binding) => binding.definition.name === name);
   if (direct !== undefined) return direct.validateInput(input);
   if (name !== VIDEO_CONFIRMATION_TOOL || typeof input.operation !== "string" || !VIDEO_GENERATION_OPERATIONS.has(input.operation) ||
