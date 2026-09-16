@@ -43,7 +43,7 @@ function boundedDetail(value: unknown, depth = 0): unknown {
   if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
   if (Array.isArray(value)) return value.slice(0, 20).map((item) => boundedDetail(item, depth + 1));
   if (!record(value)) return String(value ?? "");
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !sensitiveKey.test(key)).slice(0, 30)
+  return Object.fromEntries(Object.entries(value).filter(([key, item]) => item !== undefined && !sensitiveKey.test(key)).slice(0, 30)
     .map(([key, item]) => [key, boundedDetail(item, depth + 1)]));
 }
 function detailText(value: unknown): string {
@@ -257,7 +257,7 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       if (event.type === "tool.completed") {
         const result: unknown = event.payload.evidence.result;
         tool.status = "completed"; tool.text = `${label}完成`;
-        tool.detailSummary = event.payload.summary || resultCount(result) || tool.detailSummary;
+        tool.detailSummary = resultCount(result) || event.payload.summary || tool.detailSummary;
         setDetail(tool, "结果摘要", event.payload.summary || resultCount(result) || "已完成");
         if (result !== undefined) setDetail(tool, "结果数据", result);
         if (record(result) && result.tool === name && record(result.data)) {
