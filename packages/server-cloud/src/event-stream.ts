@@ -210,12 +210,19 @@ export function registerCloudEventStream(app: FastifyInstance, options: Options)
           }
         } while (dirty && !stopped);
       } catch (error) {
+        if (error instanceof CloudError && error.code === "PLATFORM_AUTH_TIMEOUT") {
+          // A transport-only timeout does not prove revocation. Keep the durable cursor and
+          // retry on the same connection; writes and tool execution use strict authorization.
+          wakeTimer = setTimeout(() => { wakeTimer = undefined; wake(true); }, 1_000);
+          wakeTimer.unref();
+          return;
+        }
         const status = error instanceof CloudError ? error.statusCode : error instanceof ExecutionAccessError ? 401 : 503;
         const code = status === 401 ? 4401 : status === 403 ? 4403 : status === 404 ? 4404 : status === 409 ? 4409 : 1013;
         end(code, code === 1013 ? "reconnect and replay" : "subscription no longer valid");
       } finally {
         busy = false;
-        if (dirty && !stopped) wake(true);
+        if (dirty && !stopped && wakeTimer === undefined) wake(true);
       }
     }
     return () => end(1012, "service restart");

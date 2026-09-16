@@ -36,6 +36,24 @@ export function watchCloudSession(client: FeedClient, sessionId: string, options
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let watchTimer: ReturnType<typeof setTimeout> | undefined;
+  let transientFailures = 0;
+  let transientSince = 0;
+  let transientReported = false;
+
+  function transportRecovered(): void {
+    transientFailures = 0;
+    transientSince = 0;
+    transientReported = false;
+  }
+  function transportFailed(error: unknown): void {
+    const now = Date.now();
+    transientFailures += 1;
+    transientSince ||= now;
+    if (!transientReported && transientFailures >= 3 && now - transientSince >= 10_000) {
+      transientReported = true;
+      options.onError(error);
+    }
+  }
 
   function update(): void {
     if (stopped) return;
@@ -97,11 +115,12 @@ export function watchCloudSession(client: FeedClient, sessionId: string, options
       if (stopped) return;
       addEvents(additions);
       for (const run of currentRuns) addRun(run);
+      transportRecovered();
       update();
     } catch (error) {
       if (stopped) return;
       if (error instanceof WorkbenchError && (error.status === 401 || error.status === 403)) { deny(error.status); return; }
-      options.onError(error);
+      transportFailed(error);
     } finally {
       httpBusy = false;
       if (!stopped && !live) schedulePoll([...runs.values()].some((run) => ['running', 'queued'].includes(run.status)) ? 2000 : 10_000);
@@ -141,7 +160,7 @@ export function watchCloudSession(client: FeedClient, sessionId: string, options
           } else if (frame.type === "run") addRun(frame.run);
           else if (frame.type === "ready") {
             if (!sequence(frame.lastEventSeq) || frame.lastEventSeq > cursor) throw new Error("Replay gap");
-            live = true; reconnects = 0; clearTimeout(pollTimer);
+            live = true; reconnects = 0; clearTimeout(pollTimer); transportRecovered();
             options.onTransport?.("websocket");
           } else if (frame.type === "heartbeat") {
             if (!sequence(frame.lastEventSeq) || frame.lastEventSeq > cursor) throw new Error("Missed events");
