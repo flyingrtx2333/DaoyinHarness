@@ -84,6 +84,14 @@ function resultCount(value: unknown): string | undefined {
   }
   return undefined;
 }
+function phaseDetailSummary(value: unknown): string | undefined {
+  if (!record(value)) return undefined;
+  if (Array.isArray(value.actions)) {
+    const labels = value.actions.flatMap((action) => record(action) ? [toolLabel(action.toolName)] : []).slice(0, 4);
+    if (labels.length) return `下一步：${labels.join(" → ")}`;
+  }
+  return compactValue(value.next) || compactValue(value.status);
+}
 function setDetail(activity: ActivityView, label: string, value: unknown): void {
   const next = { label, value: detailText(value) };
   activity.details ??= [];
@@ -221,17 +229,22 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
     }
     if (event.type === "phase.updated") {
       turn.phaseText = event.payload.displayText;
-      if (event.payload.phase !== "tool") {
-        const phaseGroup = event.payload.phase + ":" + String(event.payload.step);
-        const active = [...turn.activities].reverse().find((activity) => activity.kind === "phase" && activity.status === "running");
-        if (active?.phaseGroup === phaseGroup) active.text = event.payload.displayText;
-        else {
-          finishNonToolActivity(turn, event.occurredAt);
-          turn.activities.push({ id: "phase_" + String(event.eventSeq), kind: "phase", status: "running",
-            text: event.payload.displayText, startedAt: event.occurredAt, phaseGroup,
-            detailSummary: `${event.payload.phase} · 第 ${event.payload.step + 1} 步`,
-            details: [{ label: "阶段", value: detailText({ phase: event.payload.phase, step: event.payload.step + 1 }) }] });
+      const phaseGroup = event.payload.phase + ":" + String(event.payload.step);
+      const active = [...turn.activities].reverse().find((activity) => activity.kind === "phase" && activity.status === "running");
+      if (active?.phaseGroup === phaseGroup) {
+        active.text = event.payload.displayText;
+        if (event.payload.detail !== undefined) {
+          active.detailSummary = phaseDetailSummary(event.payload.detail) ?? active.detailSummary;
+          setDetail(active, "公开规划", event.payload.detail);
         }
+      } else {
+        finishNonToolActivity(turn, event.occurredAt);
+        const detail = event.payload.detail;
+        turn.activities.push({ id: "phase_" + String(event.eventSeq), kind: "phase", status: "running",
+          text: event.payload.displayText, startedAt: event.occurredAt, phaseGroup,
+          detailSummary: phaseDetailSummary(detail) ?? `${event.payload.phase} · 第 ${event.payload.step + 1} 步`,
+          details: [{ label: detail === undefined ? "阶段" : "公开规划",
+            value: detailText(detail ?? { phase: event.payload.phase, step: event.payload.step + 1 }) }] });
       }
     }
     if (event.type === "tool.started" || event.type === "tool.progress" || event.type === "tool.completed" || event.type === "tool.failed") {

@@ -156,6 +156,7 @@ export interface AgentEventPayloads {
     phase: "thinking" | "tool" | "synthesizing";
     displayText: string;
     step: number;
+    detail?: JsonValue;
   };
   "tool.started": {
     toolCallId: string;

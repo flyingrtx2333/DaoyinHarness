@@ -240,7 +240,8 @@ export class AgentEngine {
     };
     const started = await append("turn.started", { status: "running", userMessageId: `msg_${crypto.randomUUID()}`, userMessage: input.userMessage });
     if (signal.aborted) return cancel();
-    await append("phase.updated", { phase: "thinking", displayText: "正在准备任务上下文…", step: 0 });
+    await append("phase.updated", { phase: "thinking", displayText: "正在准备任务上下文…", step: 0,
+      detail: { status: "读取会话历史、长期记忆与本轮授权能力", next: "完成上下文整理后请求模型规划下一步" } });
     let compaction: SessionCompaction | undefined;
     let history: ModelConversationItem[];
     try {
@@ -304,7 +305,9 @@ export class AgentEngine {
           maxCharacters: this.#maxContextCharacters, maxMessages: this.#maxContextMessages });
         if (signal.aborted) return cancel();
         await append("phase.updated", { phase: step === 0 ? "thinking" : "synthesizing",
-          displayText: step === 0 ? "正在规划下一步操作…" : "正在根据操作结果继续处理…", step });
+          displayText: step === 0 ? "正在规划下一步操作…" : "正在根据操作结果继续处理…", step,
+          detail: { step: step + 1, availableToolCount: tools.length, completedToolCount: toolReceipts.length,
+            next: step === 0 ? "等待模型选择回答或已授权工具" : "根据已完成工具证据决定继续操作或输出回答" } });
         const timeout = AbortSignal.timeout(this.#modelTimeoutMs);
         const streamFailure = new AbortController();
         const progressAbort = new AbortController();
@@ -373,7 +376,12 @@ export class AgentEngine {
       for (const call of reply.calls) seenIds.add(call.id);
       current.push({ role: "assistant_tool_calls", content: reply.content ?? "", calls: reply.calls });
       if (reply.content && !streamed) await append("assistant.delta", { contentBlockId, delta: reply.content });
-      await append("phase.updated", { phase: "tool", displayText: "正在执行所需操作…", step });
+      await append("phase.updated", { phase: "tool", displayText: `已规划 ${reply.calls.length} 项下一步操作`, step,
+        detail: { source: "模型返回的实际工具调用计划", policy: "每项操作仍需通过权限、资源归属与参数校验",
+          actions: reply.calls.map((call, index) => { const descriptor = descriptors.get(call.name); return {
+            order: index + 1, toolName: call.name, description: descriptor?.description ?? "已授权操作",
+            mutating: descriptor?.mutating ?? false, input: toJsonValue(this.#tools.auditInput(call.name, call.input)),
+          }; }) } });
       for (const [callIndex, call] of reply.calls.entries()) {
         if (signal.aborted) return cancel();
         const snapshot = memorySnapshot;

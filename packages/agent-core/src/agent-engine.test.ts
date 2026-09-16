@@ -202,6 +202,10 @@ describe("AgentEngine", () => {
     expect(events.filter(event => event.type === "tool.progress")).toHaveLength(1);
     expect(events.findIndex(event => event.type === "tool.progress"))
       .toBeLessThan(events.findIndex(event => event.type === "tool.completed"));
+    const planEvent = events.find(event => event.type === "phase.updated" && event.payload.phase === "tool");
+    expect(planEvent).toMatchObject({ payload: { displayText: "已规划 1 项下一步操作", detail: {
+      source: "模型返回的实际工具调用计划", actions: [{ order: 1, toolName: "progress_tool", mutating: false, input: {} }],
+    } } });
   });
 
   it("reassembles dynamic prompt sections for every step and persists tool inputs for later evidence", async () => {

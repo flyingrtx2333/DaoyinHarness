@@ -86,6 +86,20 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
     ])[0];
     expect(completed?.activities[0]).toMatchObject({ status: "completed", text: "处理完成" });
   });
+  it("shows the model's public tool plan without exposing hidden reasoning", () => {
+    const projected = projectTurns([{ ...run, status: "running", finalText: "" }], [
+      event(1, "phase.updated", { phase: "thinking", displayText: "正在规划下一步操作…", step: 0,
+        detail: { availableToolCount: 9, next: "等待模型选择回答或已授权工具" } }),
+      event(2, "phase.updated", { phase: "tool", displayText: "已规划 2 项下一步操作", step: 0,
+        detail: { source: "模型返回的实际工具调用计划", actions: [
+          { order: 1, toolName: "project_list", mutating: false, input: {} },
+          { order: 2, toolName: "project_check", mutating: true, input: { projectId: "prj_demo" } },
+        ] } }),
+    ])[0];
+    expect(projected?.activities[1]).toMatchObject({ text: "已规划 2 项下一步操作",
+      detailSummary: "下一步：查看云端项目 → 检查项目", details: [{ label: "公开规划" }] });
+    expect(JSON.stringify(projected?.activities)).not.toContain("chain-of-thought");
+  });
   it("orders turns chronologically and never duplicates replayed deltas", () => {
     const delta = event(1, "assistant.delta", { delta: "答案", contentBlockId: "block_1" });
     const projected = projectTurns([{ ...run, id: "run_2" }, run], [delta, delta]);
