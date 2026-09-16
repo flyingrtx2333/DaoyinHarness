@@ -16,7 +16,7 @@ it("allows image references but rejects media URLs and credentials in persisted 
 
 it("prevents repeated pages and unbounded automatic pagination, reset per turn (mocked business API)", async () => {
   const call = vi.fn(async () => result);
-  const profile = createSaishiProfile({ id: "saishi-readonly", version: "1", instructions: "Show images", tools: [{ name, description: "Images", requiredPermissions: ["saishi.materials.read"],
+  const profile = createSaishiProfile({ id: "saishi-readonly", version: "2", instructions: "Show images", tools: [{ name, description: "Images", requiredPermissions: ["saishi.materials.read"],
     annotations: { readOnlyHint: true, destructiveHint: false }, inputSchema: { type: "object", additionalProperties: false, required: ["event_id"], properties: { event_id: { type: "integer", minimum: 1 }, after_id: { type: "integer", minimum: 0 } } } }] }, identity, { call, authorize: async () => true });
   const context: ToolExecutionContext = { accountId: "8", scopeId: "scope", sessionId: "session", turnId: "turn", sourceEventIds: [], executionIdentity: identity, toolCallId: "call" };
   const execute = profile.tools[0]!.definition.execute;
@@ -30,4 +30,30 @@ it("prevents repeated pages and unbounded automatic pagination, reset per turn (
   const registry = new ToolRegistry([profile.tools[0]!.definition], { authorize: async () => true });
   const blocked = await registry.execute({ id: "another", name, input: { event_id: 2 } }, signal, context);
   expect(blocked).toMatchObject({ ok: false, code: "MEDIA_PAGE_LIMIT", message: expect.stringContaining("不重复翻页") });
+});
+
+it("accepts reviewed write tools and optional Pydantic fields while preserving mutating evidence", async () => {
+  const writeName = "saishi_create_event";
+  const writeIdentity: ExecutionIdentity = { ...identity, permissions: ["agent.use", "saishi.events.read", "saishi.events.write"],
+    allowedTools: [writeName] };
+  const response = { schemaVersion: 1, tool: writeName, readOnly: false, untrusted: true,
+    data: { id: 9, tenant_id: 7, competition_id: 2, competition_name: "Cup", title: "Night race", description: null, status: 0,
+      orienteering_map_published: false } };
+  const call = vi.fn(async () => response);
+  const schema = { type: "object", additionalProperties: false, required: ["competition_id", "title", "idempotency_key"], properties: {
+    competition_id: { type: "integer", minimum: 1 }, title: { type: "string", minLength: 1, maxLength: 255 },
+    idempotency_key: { type: "string", minLength: 8, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" },
+    description: { anyOf: [{ type: "string", maxLength: 2000 }, { type: "null" }], default: null },
+  } };
+  const profile = createSaishiProfile({ id: "saishi-readonly", version: "2", instructions: "Write only after confirmation", tools: [{
+    name: writeName, description: "Create event", requiredPermissions: ["saishi.events.write"], inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  }] }, writeIdentity, { call, authorize: async () => true });
+  expect(profile.version).toBe("2");
+  expect(profile.tools[0]!.definition.mutating).toBe(true);
+  expect(profile.tools[0]!.validateInput({ competition_id: 2, title: "Night race", idempotency_key: "night-001", description: null })).toBe(true);
+  const output = await profile.tools[0]!.definition.execute({ competition_id: 2, title: "Night race", idempotency_key: "night-001" },
+    new AbortController().signal, { accountId: "8", scopeId: "scope", sessionId: "session", turnId: "turn", sourceEventIds: [],
+      executionIdentity: writeIdentity, toolCallId: "call" });
+  expect(output).toMatchObject({ ok: true, summary: "赛事操作已完成", evidence: { result: response } });
 });

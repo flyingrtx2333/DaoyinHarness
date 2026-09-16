@@ -5,7 +5,8 @@ import { orchestrationPolicyBindings, parseSaishiResult, validateSaishiInput, ty
 import { validateStoryInput } from "./story-profile.js";
 
 const SAISHI = new Set(["saishi_list_events", "saishi_get_event", "saishi_list_cameras", "saishi_list_materials",
-  "saishi_list_images", "saishi_get_map", "saishi_find_participants", "saishi_get_timeline", "saishi_get_job"]);
+  "saishi_list_images", "saishi_get_map", "saishi_find_participants", "saishi_get_timeline", "saishi_get_job",
+  "saishi_list_registrations", "saishi_list_appeals", "saishi_list_scores"]);
 const STORY = new Set(["story_video_options", "story_recent_videos", "story_get_video", "story_estimate_video", "story_create_video",
   "story_capabilities", "story_media_capabilities", "story_video_workflows", "story_call", "story_get_job",
   "story_wait_job", "story_recent_mcp_calls", "story_create_production", "story_get_production",

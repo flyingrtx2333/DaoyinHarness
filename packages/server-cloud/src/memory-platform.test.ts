@@ -10,7 +10,7 @@ const identity = (): ExecutionIdentity => ({ actorUserId: "7", space: { kind: "o
   appInstallationId: `saishi-readonly:3:${"a".repeat(24)}`, authorizationId: `sag_${"b".repeat(48)}`,
   billingAccountId: "saishi:3:7", expiresAt: Date.now() + 120_000,
   permissions: ["agent.use", "saishi.events.read", "memory.read", "memory.write"], allowedTools: ["saishi_list_events", ...MEMORY_TOOL_NAMES] });
-const catalog = { id: "saishi-readonly", version: "1", instructions: "按已授权的工具查询赛事。", tools: [{
+const catalog = { id: "saishi-readonly", version: "2", instructions: "按已授权的工具查询赛事。", tools: [{
   name: "saishi_list_events", description: "Read events", inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false }, requiredPermissions: ["saishi.events.read"],
 }] };
