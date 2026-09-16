@@ -222,18 +222,29 @@ button.primary:hover:enabled { background: #174bcb; }
 .mini-mark { width: 30px; height: 30px; }
 .tool-line { min-height: var(--ui-control-height); padding: var(--ui-space-2) 0; align-items: center; }
 .activity-timeline { margin: 0 0 var(--ui-space-3); }
-.activity-timeline .tool-line { border-bottom: 1px solid #edf0f6; }
-.activity-timeline .tool-line:last-child { border-bottom: 0; }
-.activity-timeline .tool-line[data-kind="routing"] { color: #637087; }
+.activity-timeline .tool-line { display: flex; gap: var(--ui-space-2); border-bottom: 1px solid #edf0f6; }
+.activity-timeline > :last-child > .tool-line, .activity-timeline > .tool-line:last-child { border-bottom: 0; }
+.activity-timeline .tool-line[data-kind="routing"], .activity-timeline .activity-node[data-kind="routing"] > .tool-line { color: #637087; }
+.activity-node { margin: 0; }
+.activity-node > summary { list-style: none; cursor: pointer; }
+.activity-node > summary::-webkit-details-marker { display: none; }
+.activity-line-copy { display: flex; min-width: 0; flex: 1; gap: var(--ui-space-2); align-items: baseline; }
+.activity-title { flex: 0 0 auto; }
+.activity-summary { min-width: 0; overflow: hidden; color: var(--ui-muted); font-size: var(--ui-font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.activity-chevron { width: 7px; height: 7px; flex: 0 0 7px; border-right: 1.5px solid #7d899f; border-bottom: 1.5px solid #7d899f; transform: rotate(45deg) translateY(-2px); transition: transform .16s ease; }
+.activity-node[open] .activity-chevron { transform: rotate(225deg) translate(-1px, -1px); }
+.activity-details { margin: 0 0 var(--ui-space-2) 24px; padding: var(--ui-space-2) var(--ui-space-3); border-left: 2px solid #dce5fb; border-radius: 0 var(--ui-radius-control) var(--ui-radius-control) 0; background: #f8faff; }
+.activity-detail + .activity-detail { margin-top: var(--ui-space-2); }
+.activity-detail strong { display: block; margin-bottom: var(--ui-space-1); color: #536079; font-size: var(--ui-font-caption); font-weight: 600; }
+.activity-detail pre { max-height: 240px; margin: 0; overflow: auto; color: #273247; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-status-icon { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 50%; }
 .tool-status-icon[data-status="running"] { border: 1.5px solid #cbd7fa; border-top-color: var(--accent); animation: spin .8s linear infinite; }
 .tool-status-icon[data-status="completed"] { position: relative; border: 1.5px solid #159e81; background: #f2fcf9; }
 .tool-status-icon[data-status="completed"]::after { content: ""; width: 6px; height: 3px; border-left: 1.5px solid #159e81; border-bottom: 1.5px solid #159e81; transform: translateY(-1px) rotate(-45deg); }
 .tool-status-icon[data-status="failed"] { position: relative; border: 1.5px solid #c78139; background: #fff5e4; }
 .tool-status-icon[data-status="failed"]::after { content: "!"; color: #a86524; font-size: 11px; font-weight: 650; line-height: 1; }
-.tool-line > span:nth-child(2) { flex: 1; }
 .tool-elapsed { color: var(--ui-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tool-line[data-status="failed"] { color: #904f30; }
+.tool-line[data-status="failed"], .activity-node[data-status="failed"] > .tool-line { color: #904f30; }
 .thinking { padding: var(--ui-space-2) 0; }
 .markdown { font-size: var(--ui-font-body); }
 .sources { border-color: #e8ecf5; }
@@ -264,6 +275,9 @@ button.primary:hover:enabled { background: #174bcb; }
   .composer-controls { gap: var(--ui-space-2); }
   .composer-controls .plugin-close { min-width: var(--ui-touch-target); min-height: var(--ui-touch-target); }
   .plugin-picker { max-width: calc(100vw - 64px); }
+  .activity-line-copy { display: grid; gap: 1px; }
+  .activity-title, .activity-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .activity-details { margin-left: 20px; }
 }
 @media (max-height: 700px) {
   .empty-state { padding-top: var(--ui-space-6); }

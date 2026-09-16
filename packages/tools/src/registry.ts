@@ -26,6 +26,8 @@ export interface ToolProgressUpdate {
   displayText: string;
   completed?: number;
   total?: number;
+  /** Bounded user-safe execution detail. Secrets and host-management commands are forbidden. */
+  detail?: JsonValue;
 }
 export interface ToolExecutionContext {
   accountId: string;

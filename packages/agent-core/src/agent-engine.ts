@@ -100,6 +100,16 @@ function toJsonValue(value: unknown, depth = 0): JsonValue {
   return String(value);
 }
 
+function progressDetail(value: unknown): JsonValue {
+  const detail = toJsonValue(value);
+  const serialized = JSON.stringify(detail);
+  if (serialized.length > 8000 || /"(?:authorization|cookie|credential|password|secret|token|api[_-]?key|stack)"\s*:/iu.test(serialized) ||
+      /bearer\s+[a-z0-9._~+/-]{8,}|\bsk-[a-z0-9_-]{8,}\b/iu.test(serialized)) {
+    throw new AgentPolicyError("TOOL_PROGRESS_DETAIL_INVALID", "工具返回了不安全或过长的进度详情。");
+  }
+  return detail;
+}
+
 function limit(value: number, min: number, max: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(`Invalid ${name}.`);
   return value;
@@ -419,7 +429,8 @@ export class AgentEngine {
             if (now - lastProgressAt < 150) return;
             lastProgressAt = now;
             await append("tool.progress", { toolCallId: call.id, toolName: call.name, displayText,
-              ...(completed === undefined ? {} : { completed }), ...(total === undefined ? {} : { total }) });
+              ...(completed === undefined ? {} : { completed }), ...(total === undefined ? {} : { total }),
+              ...(update.detail === undefined ? {} : { detail: progressDetail(update.detail) }) });
           };
           result = await this.#tools.execute(structuredClone(call), signal, {
             ...executionContext, sourceEventIds: [started.id, toolStarted.id], reportProgress,

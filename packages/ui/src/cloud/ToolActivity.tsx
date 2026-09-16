@@ -12,9 +12,18 @@ export function ToolActivity({ activities }: { activities: ActivityView[] }): Re
   }, [running]);
   return <div className="tools activity-timeline" role="log" aria-label="任务实时进度" aria-live="polite">{activities.map(activity => {
     const elapsed = Math.max(0, Math.floor(((activity.finishedAt ? Date.parse(activity.finishedAt) : now) - Date.parse(activity.startedAt)) / 1000));
-    return <div className="tool-line" data-kind={activity.kind} data-status={activity.status} key={activity.id}>
+    const line = <>
       <span className="tool-status-icon" data-status={activity.status} aria-hidden="true" />
-      <span>{activity.text}</span>{Number.isFinite(elapsed) && <span className="tool-elapsed" aria-hidden="true">{elapsed < 1 ? "<1 秒" : `${elapsed} 秒`}</span>}
-    </div>;
+      <span className="activity-line-copy"><span className="activity-title">{activity.text}</span>
+        {activity.detailSummary && <span className="activity-summary">{activity.detailSummary}</span>}</span>
+      {Number.isFinite(elapsed) && <span className="tool-elapsed" aria-hidden="true">{elapsed < 1 ? "<1 秒" : `${elapsed} 秒`}</span>}
+    </>;
+    if (!activity.details?.length) return <div className="tool-line" data-kind={activity.kind} data-status={activity.status} key={activity.id}>{line}</div>;
+    return <details className="activity-node" data-kind={activity.kind} data-status={activity.status} key={activity.id}>
+      <summary className="tool-line">{line}<span className="activity-chevron" aria-hidden="true" /></summary>
+      <div className="activity-details">{activity.details.map((detail, index) => <div className="activity-detail" key={`${detail.label}-${index}`}>
+        <strong>{detail.label}</strong><pre>{detail.value}</pre>
+      </div>)}</div>
+    </details>;
   })}</div>;
 }

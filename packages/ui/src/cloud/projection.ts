@@ -11,7 +11,10 @@ export interface ActivityView {
   startedAt: string;
   finishedAt?: string;
   phaseGroup?: string;
+  detailSummary?: string | undefined;
+  details?: ActivityDetail[];
 }
+export interface ActivityDetail { label: string; value: string }
 export interface ToolView extends ActivityView { kind: "tool" }
 export interface TurnView { run: CloudRun; text: string; phaseText: string; activities: ActivityView[]; tools: ToolView[]; sources: PublicSource[]; images: EventImage[]; assistantOccurredAt: string }
 export interface PendingVideoInteraction {
@@ -23,6 +26,76 @@ export interface PendingVideoInteraction {
   firstFrameUrl?: string;
 }
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const sensitiveKey = /authorization|cookie|credential|password|secret|token|api[_-]?key|stack/i;
+const detailLabels: Record<string, string> = {
+  args: "参数", argv: "参数", command: "命令", completed: "已完成", cwd: "工作目录", filePath: "文件", limit: "数量",
+  method: "请求方式", operation: "操作", path: "路径", projectId: "项目", query: "查询", total: "总数", url: "地址",
+};
+function redactDetailString(value: string): string {
+  return value.slice(0, 2000)
+    .replace(/(bearer\s+)[a-z0-9._~+/-]+/gi, "$1[已隐藏]")
+    .replace(/([?&](?:access_token|api_key|key|secret|token)=)[^&\s]+/gi, "$1[已隐藏]")
+    .replace(/\bsk-[a-z0-9_-]{8,}\b/gi, "[已隐藏]");
+}
+function boundedDetail(value: unknown, depth = 0): unknown {
+  if (depth > 4) return "…";
+  if (typeof value === "string") return redactDetailString(value);
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => boundedDetail(item, depth + 1));
+  if (!record(value)) return String(value ?? "");
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !sensitiveKey.test(key)).slice(0, 30)
+    .map(([key, item]) => [key, boundedDetail(item, depth + 1)]));
+}
+function detailText(value: unknown): string {
+  const safe = boundedDetail(value);
+  const text = typeof safe === "string" ? safe : JSON.stringify(safe, null, 2);
+  return (text || "无").slice(0, 12000);
+}
+function compactValue(value: unknown): string {
+  if (typeof value === "string") return redactDetailString(value).replace(/\s+/g, " ").trim().slice(0, 180);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.slice(0, 8).map(compactValue).filter(Boolean).join(" ").slice(0, 180);
+  return "";
+}
+function summarizeInput(value: unknown): string | undefined {
+  if (!record(value)) return undefined;
+  const command = compactValue(value.command);
+  const program = compactValue(value.program);
+  const args = compactValue(value.args ?? value.argv);
+  const commands = compactValue(value.commands);
+  if (command) return `命令：${command}${args ? ` ${args}` : ""}`.slice(0, 240);
+  if (program) return `命令：${program}${args ? ` ${args}` : ""}`.slice(0, 240);
+  if (commands) return `命令：${commands}`.slice(0, 240);
+  const preferred = ["query", "path", "filePath", "url", "operation", "projectId", "method", "limit"];
+  const parts = preferred.flatMap((key) => {
+    const compact = compactValue(value[key]);
+    return compact ? [`${detailLabels[key] ?? key}：${compact}`] : [];
+  });
+  if (parts.length) return parts.slice(0, 2).join(" · ").slice(0, 240);
+  const fallback = Object.entries(value).filter(([key, item]) => !sensitiveKey.test(key) && compactValue(item)).slice(0, 2)
+    .map(([key, item]) => `${detailLabels[key] ?? key}：${compactValue(item)}`);
+  return fallback.length ? fallback.join(" · ").slice(0, 240) : undefined;
+}
+function resultCount(value: unknown): string | undefined {
+  if (!record(value)) return undefined;
+  const data = record(value.data) ? value.data : value;
+  for (const key of ["items", "results", "records", "files", "projects"]) {
+    if (Array.isArray(data[key])) return `获取 ${data[key].length} 条数据`;
+  }
+  return undefined;
+}
+function setDetail(activity: ActivityView, label: string, value: unknown): void {
+  const next = { label, value: detailText(value) };
+  activity.details ??= [];
+  const index = activity.details.findIndex((item) => item.label === label);
+  if (index >= 0) activity.details[index] = next;
+  else activity.details.push(next);
+}
+function appendDetail(activity: ActivityView, label: string, value: unknown): void {
+  activity.details ??= [];
+  activity.details.push({ label, value: detailText(value) });
+  if (activity.details.length > 24) activity.details.splice(1, activity.details.length - 24);
+}
 const toolLabels: Record<string, string> = {
   project_list: "查看云端项目", project_create: "创建云端项目", project_files: "读取项目文件",
   project_write: "更新项目文件", project_concepts: "读取界面方案", project_concept_generate: "生成界面方案",
@@ -136,7 +209,12 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       const toolCount = event.payload.exposedToolCount;
       turn.activities.push({ id: `route_${event.eventSeq}`, kind: "routing", status: "running",
         text: event.payload.phase === "expansion" ? `已追加 ${packCount} 个相关能力包` :
-          `已准备 ${packCount} 个相关能力包 · ${toolCount} 个工具`, startedAt: event.occurredAt });
+          `已准备 ${packCount} 个相关能力包 · ${toolCount} 个工具`, startedAt: event.occurredAt,
+        detailSummary: event.payload.selectedPackIds.slice(0, 3).join("、"), details: [
+          { label: "已选能力包", value: event.payload.selectedPackIds.join("\n") || "无" },
+          { label: "路由信息", value: detailText({ exposedToolCount: toolCount, schemaCharacters: event.payload.schemaCharacters,
+            fallback: event.payload.fallback, blockedHighRiskPackIds: event.payload.blockedHighRiskPackIds }) },
+        ] });
     }
     if (event.type === "phase.updated") {
       turn.phaseText = event.payload.displayText;
@@ -147,7 +225,9 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
         else {
           finishNonToolActivity(turn, event.occurredAt);
           turn.activities.push({ id: "phase_" + String(event.eventSeq), kind: "phase", status: "running",
-            text: event.payload.displayText, startedAt: event.occurredAt, phaseGroup });
+            text: event.payload.displayText, startedAt: event.occurredAt, phaseGroup,
+            detailSummary: `${event.payload.phase} · 第 ${event.payload.step + 1} 步`,
+            details: [{ label: "阶段", value: detailText({ phase: event.payload.phase, step: event.payload.step + 1 }) }] });
         }
       }
     }
@@ -162,11 +242,24 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
         tool = { id, kind: "tool", status: "running", text: `正在${label}…`, startedAt: event.occurredAt };
         turn.tools.push(tool); turn.activities.push(tool);
       }
-      if (event.type === "tool.progress") tool.text = event.payload.displayText;
+      if (event.type === "tool.started") {
+        const input = record(payload) ? payload.input : undefined;
+        tool.detailSummary = summarizeInput(input);
+        if (input !== undefined) setDetail(tool, "输入", input);
+      }
+      if (event.type === "tool.progress") {
+        tool.text = event.payload.displayText;
+        tool.detailSummary = summarizeInput(event.payload.detail) || event.payload.displayText;
+        appendDetail(tool, "执行进度", { displayText: event.payload.displayText,
+          completed: event.payload.completed, total: event.payload.total, detail: event.payload.detail });
+      }
       if (event.type === "tool.completed" || event.type === "tool.failed") tool.finishedAt = event.occurredAt;
       if (event.type === "tool.completed") {
         const result: unknown = event.payload.evidence.result;
         tool.status = "completed"; tool.text = `${label}完成`;
+        tool.detailSummary = event.payload.summary || resultCount(result) || tool.detailSummary;
+        setDetail(tool, "结果摘要", event.payload.summary || resultCount(result) || "已完成");
+        if (result !== undefined) setDetail(tool, "结果数据", result);
         if (record(result) && result.tool === name && record(result.data)) {
           if (name === "saishi_list_images" && Array.isArray(result.data.items)) {
             for (const image of result.data.items.slice(0, 12)) appendImage(turn, image);
@@ -184,7 +277,11 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
           }
         }
       }
-      if (event.type === "tool.failed") { tool.status = "failed"; tool.text = `${label}未完成`; }
+      if (event.type === "tool.failed") {
+        tool.status = "failed"; tool.text = `${label}未完成`; tool.detailSummary = event.payload.message;
+        setDetail(tool, "错误", { code: event.payload.code, message: event.payload.message, retryable: event.payload.retryable,
+          details: event.payload.details });
+      }
     }
     if (["turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted"].includes(event.type)) {
       const status = event.type === "turn.completed" ? "completed" : "failed";

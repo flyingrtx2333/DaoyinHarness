@@ -186,7 +186,8 @@ describe("AgentEngine", () => {
       name: "progress_tool", description: "Reports safe progress.", category: "system", mutating: false,
       inputSchema: { type: "object" },
       async execute(_input, _signal, context) {
-        await context.reportProgress?.({ displayText: "已完成 1 / 3 步", completed: 1, total: 3 });
+        await context.reportProgress?.({ displayText: "已完成 1 / 3 步", completed: 1, total: 3,
+          detail: { command: "node /opt/harness/build.mjs", sandbox: "gVisor" } });
         await context.reportProgress?.({ displayText: "此更新过于频繁", completed: 2, total: 3 });
         return { ok: true, summary: "Done",
           evidence: { schemaVersion: 1, toolName: "progress_tool", result: {}, artifacts: [], diagnostics: [] } };
@@ -197,7 +198,7 @@ describe("AgentEngine", () => {
     const events = await store.read("session_test");
     const progressEvent = events.find(event => event.type === "tool.progress");
     expect(progressEvent).toMatchObject({ payload: { toolCallId: "call_progress", displayText: "已完成 1 / 3 步",
-      completed: 1, total: 3 } });
+      completed: 1, total: 3, detail: { command: "node /opt/harness/build.mjs", sandbox: "gVisor" } } });
     expect(events.filter(event => event.type === "tool.progress")).toHaveLength(1);
     expect(events.findIndex(event => event.type === "tool.progress"))
       .toBeLessThan(events.findIndex(event => event.type === "tool.completed"));

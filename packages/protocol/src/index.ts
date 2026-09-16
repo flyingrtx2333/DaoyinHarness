@@ -169,6 +169,7 @@ export interface AgentEventPayloads {
     displayText: string;
     completed?: number;
     total?: number;
+    detail?: JsonValue;
   };
   "tool.completed": {
     toolCallId: string;

@@ -48,6 +48,24 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
     expect(result?.tools[0]).toMatchObject({ status: "running", text: "已读取目录…" });
     expect(projectTurns([{ ...run, status: "cancelled" }], events)[0]?.tools[0]?.status).toBe("failed");
   });
+  it("projects live command and result details while removing sensitive fields", () => {
+    const projected = projectTurns([run], [
+      event(1, "tool.started", { toolCallId: "build", toolName: "project_check", input: {
+        command: "npm", args: ["run", "build"], cwd: "/workspace/site", authorization: "Bearer secret", nested: { apiKey: "hidden" }
+      } }),
+      event(2, "tool.progress", { toolCallId: "build", toolName: "project_check", displayText: "正在编译前端", completed: 2, total: 4,
+        detail: { command: "node /opt/harness/build.mjs", sandbox: "gVisor" } }),
+      event(3, "tool.completed", { toolCallId: "build", toolName: "project_check", summary: "构建通过",
+        evidence: { result: { tool: "project_check", data: { items: [{ path: "dist/index.html" }] }, cookie: "hidden" } } }),
+    ])[0]?.tools[0];
+    expect(projected).toMatchObject({ status: "completed", text: "检查项目完成", detailSummary: "构建通过" });
+    expect(projected?.details?.map((item) => item.label)).toEqual(["输入", "执行进度", "结果摘要", "结果数据"]);
+    const rendered = JSON.stringify(projected?.details);
+    expect(rendered).toContain("npm");
+    expect(rendered).toContain("dist/index.html");
+    expect(rendered).not.toContain("Bearer secret");
+    expect(rendered).not.toContain("hidden");
+  });
   it("updates one live phase row while model planning continues", () => {
     const projected = projectTurns([{ ...run, status: "running", finalText: "" }], [
       event(1, "phase.updated", { phase: "thinking", displayText: "正在规划下一步操作…", step: 0 }, "2026-09-05T12:00:00Z"),

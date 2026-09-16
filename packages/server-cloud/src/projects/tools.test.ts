@@ -1,5 +1,5 @@
 import {describe,expect,it} from "vitest";
-import {PROJECT_DEFINITIONS,PROJECT_INSTRUCTIONS,validateProjectInput} from "./tools.js";
+import {PROJECT_DEFINITIONS,PROJECT_INSTRUCTIONS,projectProgressDetail,validateProjectInput} from "./tools.js";
 
 const projectId="prj_"+"a".repeat(24);
 describe("independent project concept-to-ui policy",()=>{
@@ -21,5 +21,11 @@ describe("independent project concept-to-ui policy",()=>{
     expect(validateProjectInput("project_concept_generate",{...valid,width:1440})).toBe(false);
     expect(validateProjectInput("project_concept_generate",{...valid,unknown:true})).toBe(false);
     expect(validateProjectInput("project_concept_select",{projectId,direction:"B"})).toBe(true);
+  });
+  it("reports user-safe sandbox commands without host-management details",()=>{
+    expect(projectProgressDetail("preview","running")).toEqual({stage:"build_and_start",
+      commands:["node /opt/harness/build.mjs","tsx server.ts"],sandbox:"gVisor",environment:"development"});
+    expect(JSON.stringify(projectProgressDetail("preview","running"))).not.toContain("docker");
+    expect(projectProgressDetail("check","queued")).toEqual({stage:"resource_queue",resource:"隔离开发环境"});
   });
 });
