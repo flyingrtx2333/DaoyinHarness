@@ -12,7 +12,7 @@ export const fingerprint = (value: unknown): string => createHash("sha256").upda
 export interface Authority { actorId: string; sessionId: string }
 export interface TelemetryTraceSummary {
   traceId: string; name: string; serviceName: string; serviceVersion: string; startedAt: string;
-  durationMs: number; status: "ok" | "error"; spanCount: number; errorCount: number;
+  durationMs: number; status: "ok" | "error"; spanCount: number; errorCount: number; toolNames: string[];
 }
 /** Separate evaluation DB, NOT the runtime's production cloud_* database. */
 export class EvaluationStore {
@@ -103,6 +103,8 @@ export class EvaluationStore {
     const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
     return this.#db.prepare(`SELECT root.trace_id,root.name,root.service_name,root.service_version,root.started_at,
       root.duration_ms,root.status,COUNT(all_spans.span_id) AS span_count,
+      GROUP_CONCAT(DISTINCT CASE WHEN all_spans.name='agent.tool'
+        THEN json_extract(all_spans.attributes,'$."tool.name"') END) AS tool_names,
       SUM(CASE WHEN all_spans.status='error' THEN 1 ELSE 0 END) AS error_count
       FROM telemetry_spans root JOIN telemetry_spans all_spans ON all_spans.trace_id=root.trace_id
       WHERE root.parent_span_id='' AND root.started_at>=?
@@ -111,6 +113,7 @@ export class EvaluationStore {
         serviceVersion: String(row.service_version), startedAt: String(row.started_at), durationMs: Math.round(Number(row.duration_ms)),
         status: row.status === "error" ? "error" as const : "ok" as const,
         spanCount: Number(row.span_count), errorCount: Number(row.error_count),
+        toolNames: typeof row.tool_names === "string" && row.tool_names ? row.tool_names.split(",").slice(0, 8) : [],
       }));
   }
   public telemetryTrace(traceId: string): StoredTelemetrySpan[] {

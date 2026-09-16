@@ -12,7 +12,7 @@ export interface ObservabilitySummary {
 }
 export interface TelemetryTraceSummary {
   traceId: string; name: string; serviceName: string; serviceVersion: string; startedAt: string;
-  durationMs: number; status: "ok" | "error"; spanCount: number; errorCount: number;
+  durationMs: number; status: "ok" | "error"; spanCount: number; errorCount: number; toolNames: string[];
 }
 export interface TelemetrySpanView {
   traceId: string; spanId: string; parentSpanId: string; name: string; serviceName: string; serviceVersion: string;
