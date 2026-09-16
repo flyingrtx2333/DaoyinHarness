@@ -257,7 +257,9 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       if (event.type === "tool.completed") {
         const result: unknown = event.payload.evidence.result;
         tool.status = "completed"; tool.text = `${label}完成`;
-        tool.detailSummary = resultCount(result) || event.payload.summary || tool.detailSummary;
+        const outcomeSummary = resultCount(result) || event.payload.summary;
+        tool.detailSummary = tool.detailSummary?.startsWith("命令：") && outcomeSummary
+          ? `${tool.detailSummary} · ${outcomeSummary}`.slice(0, 320) : outcomeSummary || tool.detailSummary;
         setDetail(tool, "结果摘要", event.payload.summary || resultCount(result) || "已完成");
         if (result !== undefined) setDetail(tool, "结果数据", result);
         if (record(result) && result.tool === name && record(result.data)) {

@@ -58,7 +58,8 @@ describe("cloud workbench transcript projection (replay fixtures)", () => {
       event(3, "tool.completed", { toolCallId: "build", toolName: "project_check", summary: "构建通过",
         evidence: { result: { tool: "project_check", data: { items: [{ path: "dist/index.html" }] }, cookie: "hidden" } } }),
     ])[0]?.tools[0];
-    expect(projected).toMatchObject({ status: "completed", text: "检查项目完成", detailSummary: "获取 1 条数据" });
+    expect(projected).toMatchObject({ status: "completed", text: "检查项目完成",
+      detailSummary: "命令：node /opt/harness/build.mjs · 获取 1 条数据" });
     expect(projected?.details?.map((item) => item.label)).toEqual(["输入", "执行进度", "结果摘要", "结果数据"]);
     const rendered = JSON.stringify(projected?.details);
     expect(rendered).toContain("npm");
