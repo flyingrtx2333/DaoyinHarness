@@ -207,6 +207,22 @@ describe("cloud HTTP vertical slice (real API/core/SQLite; mocked auth, model an
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("leases read authorization but rechecks every write at the request boundary", async () => {
+    let active = true;
+    const isAuthorizationActive = vi.fn(async () => active);
+    const current = fixture({ isAuthorizationActive });
+
+    expect((await current.app.inject({ method: "GET", url: "/api/v1/cloud/sessions", headers: headers() })).statusCode).toBe(200);
+    expect((await current.app.inject({ method: "GET", url: "/api/v1/cloud/sessions", headers: headers() })).statusCode).toBe(200);
+    expect(isAuthorizationActive).toHaveBeenCalledOnce();
+
+    active = false;
+    const denied = await current.app.inject({ method: "POST", url: "/api/v1/cloud/sessions", headers: headers(), payload: {} });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ error: { code: "AUTHORIZATION_REVOKED" } });
+    expect(isAuthorizationActive).toHaveBeenCalledTimes(2);
+  });
+
   it("requires real adapter authentication and rejects bearer/expiry/origin/entitlement failures", async () => {
     const { app, complete } = fixture();
     for (const token of ["unknown", "expired"]) {

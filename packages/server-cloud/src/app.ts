@@ -169,13 +169,13 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   }
 
   const authorizationLeases = new Map<string, { checkedAt: number; pending?: Promise<void> }>();
-  const authorizationLeaseMs = 1_000;
+  const authorizationLeaseMs = 30_000;
   const authorizationKey = (identity: ExecutionIdentity): string =>
     JSON.stringify([identity.authorizationId, executionScopeKey(identity), identity.expiresAt]);
 
   function trimAuthorizationLeases(now: number): void {
     for (const [key, lease] of authorizationLeases) {
-      if (lease.pending === undefined && now - lease.checkedAt > 10_000) authorizationLeases.delete(key);
+      if (lease.pending === undefined && now - lease.checkedAt > authorizationLeaseMs * 2) authorizationLeases.delete(key);
     }
     if (authorizationLeases.size < 512) return;
     const removable = [...authorizationLeases].find(([, lease]) => lease.pending === undefined);
@@ -255,7 +255,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     assertExecutionIdentity(resolved);
     const identity = snapshotExecutionIdentity(resolved);
     if (!identity.permissions.includes("agent.use")) throw new CloudError(403, "APP_ACCESS_DENIED", "未开通当前应用的 Agent 使用权限。");
-    await ensureTransportActive(identity);
+    if (request.method === "GET" || request.method === "HEAD") await ensureTransportActive(identity);
+    else await ensureActive(identity);
     identities.set(request, identity);
   });
 
