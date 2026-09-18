@@ -11,52 +11,102 @@ import { memoryContextView, memoryOperation, type AgentMemoryProvider, type Memo
 import type { ModelClient, ModelConversationItem, ModelReply } from "./model.js";
 import { createDefaultPromptRegistry, SystemPromptRegistry } from "./prompt-registry.js";
 
+/**
+ * Agent 回合输入参数接口
+ */
 export interface AgentTurnInput {
+  /** 账号唯一标识（用于身份校验与数据隔离） */
   accountId: string;
+  /** 作用域标识（租户或资源空间） */
   scopeId: string;
+  /** 会话标识（对应唯一的对话流） */
   sessionId: string;
+  /** 回合标识（单次用户提问与模型推理交互流的唯一 ID） */
   turnId: string;
+  /** 用户的输入提示词/指令内容 */
   userMessage: string;
+  /** 系统级临时补充指令（可选） */
   systemInstruction?: string;
+  /** 继承自父会话/祖先的不可变事件切片（用于分支或多智能体委派） */
   inheritedEvents?: readonly AgentEvent[];
+  /** 严格的执行身份快照（包含空间、租户、授权 ID 与已允许的工具清单） */
   executionIdentity?: ExecutionIdentity;
+  /** 用于外部取消任务的中断信号（如用户点击停止按钮） */
   signal?: AbortSignal;
 }
 
+/**
+ * Agent 回合运行结果
+ */
 export interface AgentRunResult {
+  /** 最终执行状态：完成、失败或被取消 */
   status: "completed" | "failed" | "cancelled";
+  /** 交付给用户的最终总结文本 */
   finalText: string;
+  /** 本回合持久化落盘的最后一条事件序列号（用于断线增量回放） */
   lastEventSeq: number;
 }
 
+/**
+ * AgentEngine 引擎初始化配置选项
+ */
 export interface AgentEngineOptions {
+  /** 模型调用客户端（对接 Daoyin AI Gateway 或本地模型网关） */
   model: ModelClient;
+  /** 工具注册表（管理所有可调用的工具、Schema 校验与审计） */
   tools: ToolRegistry;
+  /** 事件持久化存储（追加式 JSONL 或数据库） */
   events: SessionEventStore;
+  /** 简易单体系统提示词（与 promptRegistry 二选一） */
   systemPrompt?: string;
+  /** 结构化系统提示词注册表（支持分段、优先级与动态/稳定切分） */
   promptRegistry?: SystemPromptRegistry;
+  /** 单回合最大推理步数（防止死循环，默认 16） */
   maxSteps?: number;
+  /** 单回合累计工具调用上限（防止无限调用，默认 32） */
   maxToolCalls?: number;
+  /** 上下文中保留的最大历史轮数 */
   historyMaxTurns?: number;
+  /** 上下文中保留的最大字符上限 */
   historyMaxCharacters?: number;
+  /** 送往大模型的最大总上下文字符预算（防溢出） */
   maxContextCharacters?: number;
+  /** 送往大模型的最大消息条数 */
   maxContextMessages?: number;
+  /** 工具连续返回无变化结果的容忍次数（防止重复空转，默认 3 次） */
   maxUnchangedToolResults?: number;
+  /** 单次模型请求超时时间毫秒数（默认 90,000 毫秒） */
   modelTimeoutMs?: number;
-  /** Trusted, namespace-bound long-term memory; no model-selected identity. */
+  /** 受信任且绑定命名空间的长期记忆提供方（不接受模型自选身份） */
   memory?: AgentMemoryProvider;
+  /** 会话压缩摘要存储（用于长会话自动压缩落盘） */
   compactionStore?: SessionCompactionStore;
+  /** 压缩时保留的最近完整轮数（防止最近上下文被压缩丢失细节） */
   compactionRetainRecentTurns?: number;
+  /** 触发自动压缩的未压缩轮数阈值 */
   compactionTriggerUncompactedTurns?: number;
+  /** 触发自动压缩的字符量阈值 */
   compactionTriggerCharacters?: number;
+  /** 压缩后摘要的最大字符限制 */
   compactionMaxSummaryCharacters?: number;
+  /** 外部事件监听回调（用于 WebSocket 实时广播或日志监听） */
   onEvent?: (event: AgentEvent) => void | Promise<void>;
 }
 
+/** 追加事件的辅助类型定义 */
 type AppendEvent = <TType extends AgentEventType>(type: TType, payload: AgentEventPayloads[TType]) => Promise<AgentEvent>;
+
+/** 会引起记忆变更的工具名称集合（单回合内只允许变更一次） */
 const MEMORY_MUTATION_TOOL_NAMES = new Set(["memory_remember", "memory_update", "memory_forget"]);
+
+/** 模型等待时展示进度状态提示的初始延迟毫秒数（4秒） */
 const MODEL_PROGRESS_INITIAL_DELAY_MS = 4_000;
+/** 模型等待时轮询更新提示的间隔毫秒数（7秒） */
 const MODEL_PROGRESS_INTERVAL_MS = 7_000;
+
+/**
+ * 带有超时控制和中断信号的异步等待延迟函数
+ */
 function progressDelay(milliseconds: number, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return Promise.resolve(false);
   return new Promise((resolve) => {
@@ -65,6 +115,10 @@ function progressDelay(milliseconds: number, signal: AbortSignal): Promise<boole
     signal.addEventListener("abort", stop, { once: true });
   });
 }
+
+/**
+ * 在模型长思考等待期间，定期向前端广播友好的进度状态（如“正在理解需求并整理目标…”）
+ */
 async function publishModelProgress(append: AppendEvent, step: number, signal: AbortSignal): Promise<void> {
   const planning = ["正在理解需求并整理目标…", "正在选择合适的操作步骤…", "正在等待规划结果…", "仍在处理，请稍候…"];
   const followUp = ["正在分析操作结果…", "正在整理下一步处理…", "正在等待后续处理结果…", "仍在处理，请稍候…"];
@@ -79,6 +133,9 @@ async function publishModelProgress(append: AppendEvent, step: number, signal: A
   }
 }
 
+/**
+ * 将各类错误归一化为标准的模型错误结构体
+ */
 function modelFailure(error: unknown): { code: string; message: string } {
   if (error instanceof AgentPolicyError) return { code: error.code, message: error.message };
   const message = error instanceof Error ? error.message : "Model request failed.";
@@ -89,6 +146,9 @@ function modelFailure(error: unknown): { code: string; message: string } {
   return { code: "MODEL_REQUEST_FAILED", message };
 }
 
+/**
+ * 安全地将未知值转换为符合规范的 JsonValue，防止循环引用或超深嵌套递归
+ */
 function toJsonValue(value: unknown, depth = 0): JsonValue {
   if (depth > 12) return "[depth-limit]";
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
@@ -100,6 +160,9 @@ function toJsonValue(value: unknown, depth = 0): JsonValue {
   return String(value);
 }
 
+/**
+ * 校验并清理工具返回的进度详情，严禁泄露密钥、Token、Cookie 等敏感字段，且限制长度
+ */
 function progressDetail(value: unknown): JsonValue {
   const detail = toJsonValue(value);
   const serialized = JSON.stringify(detail);
@@ -110,12 +173,17 @@ function progressDetail(value: unknown): JsonValue {
   return detail;
 }
 
+/**
+ * 校验数值是否在合理的安全整数范围内
+ */
 function limit(value: number, min: number, max: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(`Invalid ${name}.`);
   return value;
 }
 
-/** Cancellation/timeout stops waiting; a late provider reply can never dispatch tools. No retries. */
+/**
+ * 模型请求执行包装器：支持超时与信号中断；若等待终止，迟到的模型回复绝不派发工具，禁止自动重试
+ */
 async function modelResponse(operation: () => Promise<ModelReply>, signal: AbortSignal): Promise<ModelReply> {
   signal.throwIfAborted();
   let listener: (() => void) | undefined;
@@ -128,6 +196,9 @@ async function modelResponse(operation: () => Promise<ModelReply>, signal: Abort
   } finally { if (listener !== undefined) signal.removeEventListener("abort", listener); }
 }
 
+/**
+ * 回合幂等性检查：如果该回合之前已执行完毕，直接返回历史终态结果，避免重复执行
+ */
 function existingResult(events: readonly AgentEvent[], input: AgentTurnInput): AgentRunResult | undefined {
   const own = events.filter((event) => event.turnId === input.turnId);
   if (!own.length) return undefined;
