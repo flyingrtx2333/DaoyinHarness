@@ -33,6 +33,15 @@ The planned public package is `@daoyin/harness`; the CLI command is `daoyin-harn
 - Keep commits focused and use Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, or `chore:`.
 - Do not publish npm packages, push a release, deploy, modify Daoyin platform services, or migrate user data without explicit authorization.
 
+## Production checkout
+
+- Use this Windows root checkout on `main` for development. Fetch and fast-forward before starting, preserve unrelated local work, then run the required Windows validation before committing and pushing focused changes.
+- The production checkout lives on `42.194.159.81` at `/root/DaoyinHarness`, on `main`, kept in sync with `origin/main`.
+- The running release under `/opt/daoyin-harness/current` is built from that checkout's Git objects. Treat the server checkout as the authority for what is actually deployed, never a local copy.
+- Deploy only a pushed, exact commit: fast-forward the server checkout, build revision-stamped release artifacts there, switch the required component, and verify the public revision and health. UI-only releases must not restart the Agent runtime.
+- Server inspection is read-only by default: `git log`, `git status`, reading files. Do not edit, commit, build, restart services, or switch releases there without explicit authorization.
+- A local checkout that is behind `origin/main` must not be treated as the deployed state. Use `git fetch origin main` plus `git rev-list --count HEAD..origin/main` to measure the gap.
+
 ## Data invariants
 
 - A session transcript is append-only. Never rewrite or delete prior events during normal operation.

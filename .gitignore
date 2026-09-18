@@ -41,6 +41,19 @@ Thumbs.db
 playwright-report/
 test-results/
 __pycache__/
+/.playwright-cli/
+
+# Local archives and clean-room comparison checkouts
+/*.7z
+/example-project/
+
+# Disposable local validation and cross-project media output
+/output/validation-*/
+/output/jump-rope-*/
+/output/production-*-server/
+/output/finished-video-pipeline/
+/evidence/ui-login-*/
+/evidence/ui-concepts/login/
 # Server-side deployment scratch files retained outside version control.
 /output/deploy-harness-gateway-patch.py
 /output/harness-gateway-patch.tar
