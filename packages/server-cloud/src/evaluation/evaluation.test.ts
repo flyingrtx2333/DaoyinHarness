@@ -6,7 +6,6 @@ import path from "node:path";
 import { EvaluationStore } from "./store.js";
 import { createEvaluationService } from "./service.js";
 import { parseSpec, prepareCases, metrics, TEMPLATES, type EvaluationSpec, type Experiment } from "./contracts.js";
-import { runTrial } from "./runner.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -54,14 +53,6 @@ describe("Harness evaluator: real cloud/core/SQLite; fixture auth, scripted mode
     expect((await f.app.inject({ url: "/requests/request_a", headers })).json().run.id).toBe(id);
     expect(f.store.counts(id)).toEqual({ agent: 4, judge: 0 });
     expect((await f.app.inject({ method: "POST", url: "/runs", headers, payload: { ...spec(), title: "changed" } })).statusCode).toBe(409);
-  });
-  it("measures actual memory references; free exploration cannot pass from a nonempty answer", async () => {
-    for (const template of ["memory-current", "explore"] as const) {
-      const s = spec(template);
-      const result = await runTrial({ spec: s, test: s.cases[0]!, repetition: 1, signal: new AbortController().signal, budget: { take: () => undefined } });
-      if (template === "explore") expect(result.verdict).toBe("review");
-      else { expect(result.verdict).toBe("passed"); expect(result.recall).toBe(1); expect(result.retrievedMemoryIds).toContain("current-preference"); expect(result.retrievedMemoryIds).not.toContain("forbidden-reference"); }
-    }
   });
   it("blocks missing service identity, forged actors, revoked admins and browser origins", async () => {
     const f = await fixture();

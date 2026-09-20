@@ -3,15 +3,14 @@ import { timingSafeEqual } from "node:crypto";
 import { EvaluationError, EVALUATOR_VERSION, metrics, parseSpec, prepareCases, type Experiment, type TemplateId } from "./contracts.js";
 import { EvaluationStore, type Authority } from "./store.js";
 import { PlatformEvaluationRuntime, runLiveTrial } from "./live-runner.js";
-import type { EvaluationModelConfig } from "./provider.js";
 import { parseOtlpJson } from "./telemetry.js";
 
 export interface EvaluationServiceOptions {
   store: EvaluationStore; serviceToken: string; revision: string | null;
   authorize(authority: Authority, signal: AbortSignal): Promise<boolean>;
   runtime?: PlatformEvaluationRuntime;
-  /** Retained for historical source compatibility; never used as an execution fallback. */
-  model?: EvaluationModelConfig; fetcher?: typeof fetch; telemetryToken: string;
+  /** 遥测上报专用令牌 */
+  telemetryToken: string;
 }
 const liveTemplates: Array<{ id: TemplateId; name: string; fixture: string; facts: string[] }> = [
   { id: "saishi-materials", name: "真实赛事查询", fixture: "查询当前账号已有权限内的真实赛事数据，不预置素材数量或查询结果。", facts: [] },

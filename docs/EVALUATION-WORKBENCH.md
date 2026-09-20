@@ -55,7 +55,7 @@
 
 ## 执行、持久化和预算
 
-`evaluation/service.ts → runTrial() → createCloudServer() → AgentEngine → fixture/provider → 独立判分 → EvaluationStore.append()`。
+`evaluation/service.ts → runLiveTrial() → PlatformEvaluationRuntime → 主平台真实账号运行时 → EvaluationStore.append()`。
 
 独立SQLite文件保存：
 
@@ -87,7 +87,7 @@
 
 ## 验证
 
-新增 `evaluation/evaluation.test.ts`、`evaluation/provider.test.ts`、`ui/src/cloud/evaluation-client.test.ts` 与主平台 `tests/test_harness_evaluation.py`。覆盖实际共享内核回放、真实记忆引用、未配置模型拒绝、伪造身份/越权、幂等、取消/重启、评委缺证据、旧账号回包隔离。模型HTTP和身份/业务I/O的模拟边界在文件内注明。
+保留 `evaluation/evaluation.test.ts`、`ui/src/cloud/evaluation-client.test.ts` 与主平台真实链路验收入口。当前行为验收只允许小样本真实账号、真实模型和真实工具链路；旧回放夹具与独立模型模拟器不再属于生产源码。
 
 Windows环境：
 
