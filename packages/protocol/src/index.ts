@@ -143,7 +143,7 @@ export interface AgentEventPayloads {
     selectedPackIds: string[];
     exposedToolCount: number;
     schemaCharacters: number;
-    intents: Array<{ label: string; confidence: number; packIds: string[] }>;
+    intents: Array<{ label: string; objective: string; confidence: number; packIds: string[] }>;
     fallback: "none" | "lexical" | "safe-readonly";
     blockedHighRiskPackIds: string[];
     latencyMs: { eligibility: number; retrieval: number; rerank: number; classify: number };
@@ -155,8 +155,8 @@ export interface AgentEventPayloads {
   "assistant.commentary": {
     contentBlockId: string;
     text: string;
-    source: "model" | "system-fallback";
-    stage: "before_tool";
+    source: "model" | "router-model" | "system-fallback";
+    stage: "before_model" | "before_tool";
     toolCallIds: string[];
   };
   "phase.updated": {

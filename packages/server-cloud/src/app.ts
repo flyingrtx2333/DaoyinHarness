@@ -590,6 +590,18 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             const event = await stores.events.append(pending);
             if (initialRoutePending && pending.type === "turn.started") {
               initialRoutePending = false;
+              const objectives = capabilityRoute.decision.intents
+                .map((intent) => intent.objective.trim())
+                .filter((objective, index, values) => objective.length > 0 && values.indexOf(objective) === index)
+                .slice(0, 3);
+              if (objectives.length > 0) {
+                await stores.events.append({
+                  type: "assistant.commentary", accountId: stores.accountId, scopeId: stores.scopeId,
+                  sessionId: run.sessionId, turnId: run.id,
+                  payload: { contentBlockId: `block_${randomUUID()}`, text: objectives.join("；"),
+                    source: "router-model", stage: "before_model", toolCallIds: [] },
+                });
+              }
               await stores.events.append({
                 type: "capability.routed", accountId: stores.accountId, scopeId: stores.scopeId,
                 sessionId: run.sessionId, turnId: run.id,

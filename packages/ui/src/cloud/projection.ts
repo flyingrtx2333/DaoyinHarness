@@ -201,7 +201,8 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
         text: event.payload.text,
         startedAt: event.occurredAt,
         finishedAt: event.occurredAt,
-        detailSummary: event.payload.source === "model" ? "模型公开说明" : "系统兜底说明",
+        detailSummary: event.payload.source === "model" ? "主模型公开说明" :
+          event.payload.source === "router-model" ? "路由模型公开计划" : "系统兜底说明",
       });
     }
     if (event.type === "capability.routed") {

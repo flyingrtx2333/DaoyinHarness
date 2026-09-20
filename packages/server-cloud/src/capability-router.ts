@@ -23,7 +23,7 @@ export interface CapabilitySemanticProvider {
 export interface CapabilityRouteDecision {
   algorithmVersion: "hybrid-v1"; catalogDigest: string; eligiblePackCount: number; selectedPackIds: string[];
   exposedToolCount: number; schemaCharacters: number;
-  intents: Array<{ label: string; confidence: number; packIds: string[] }>;
+  intents: Array<{ label: string; objective: string; confidence: number; packIds: string[] }>;
   fallback: "none" | "lexical" | "safe-readonly"; blockedHighRiskPackIds: string[];
   latencyMs: { eligibility: number; retrieval: number; rerank: number; classify: number };
 }
@@ -268,7 +268,7 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
     selectedPackIds: [...selectedPackIds], exposedToolCount: names.size,
     schemaCharacters: [...names].reduce((sum, name) => sum + descriptorSize(byName.get(name)!), 0),
     intents: (semantic?.intents ?? []).filter((intent) => intent.confidence >= 0.55).map((intent) => ({
-      label: intent.label, confidence: intent.confidence,
+      label: intent.label, objective: intent.objective, confidence: intent.confidence,
       packIds: intent.packIds.filter((packId) => selectedPackIds.has(packId)),
     })),
     fallback, blockedHighRiskPackIds,
