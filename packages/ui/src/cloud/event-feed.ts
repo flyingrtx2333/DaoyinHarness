@@ -11,7 +11,7 @@ interface Options {
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const identifier = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{1,160}$/u.test(value);
 const sequence = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-const eventTypes = new Set(["turn.started", "capability.routed", "assistant.delta", "phase.updated", "tool.started", "tool.progress", "tool.completed", "tool.failed", "interaction.requested", "interaction.resolved", "turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted"]);
+const eventTypes = new Set(["turn.started", "capability.routed", "assistant.delta", "assistant.commentary", "phase.updated", "tool.started", "tool.progress", "tool.completed", "tool.failed", "interaction.requested", "interaction.resolved", "turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted"]);
 function eventValue(value: unknown, sessionId: string): value is AgentEvent {
   return record(value) && value.sessionId === sessionId && identifier(value.id) && identifier(value.turnId) &&
     sequence(value.eventSeq) && value.eventSeq > 0 && typeof value.type === "string" && eventTypes.has(value.type) && record(value.payload);
