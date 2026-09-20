@@ -192,12 +192,13 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
   }
   const eligibilityMs = elapsed(eligibilityStarted), retrievalStarted = performance.now();
   const clauses = splitCapabilityIntents(input.message);
+  const semanticSignal = AbortSignal.any([input.signal, AbortSignal.timeout(1_500)]);
   let vectorScores: Readonly<Record<string, number>> = {};
   let fallback: CapabilityRouteDecision["fallback"] = "none";
   if (input.semantic?.retrieve && eligible.length) {
     try {
       vectorScores = await input.semantic.retrieve({
-        query: input.message, clauses, candidates: eligible, signal: input.signal,
+        query: input.message, clauses, candidates: eligible, signal: semanticSignal,
       });
       const allowed = new Set(eligible.map((pack) => pack.id));
       if (Object.entries(vectorScores).some(([packId, score]) =>
@@ -213,7 +214,7 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
   if (input.semantic && ranked.length) {
     try {
       semantic = await input.semantic.analyze({
-        query: input.message, clauses, candidates: ranked.slice(0, 20).map((item) => item.pack), signal: input.signal,
+        query: input.message, clauses, candidates: ranked.slice(0, 20).map((item) => item.pack), signal: semanticSignal,
       });
       const allowed = new Set(ranked.slice(0, 20).map((item) => item.pack.id));
       if (semantic.intents.length > 6 || semantic.intents.some((intent) =>
@@ -274,12 +275,14 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
     fallback, blockedHighRiskPackIds,
     latencyMs: { eligibility: eligibilityMs, retrieval: retrievalMs, rerank: semanticMs, classify: semanticMs },
   };
-  const commentary = [...new Set((semantic?.intents ?? [])
+  const semanticCommentary = [...new Set((semantic?.intents ?? [])
     .filter((intent) => intent.confidence >= 0.55)
     .map((intent) => intent.objective.trim())
     .filter(Boolean))]
     .slice(0, 3)
     .join("；");
+  const lexicalObjectives = clauses.map((clause) => clause.trim()).filter(Boolean).slice(0, 3).join("；");
+  const commentary = semanticCommentary || (lexicalObjectives ? `当前目标：${lexicalObjectives}` : "");
   return {
     decision, ...(commentary ? { commentary } : {}), selectedToolNames: names,
     expandReadonly(query: string) {

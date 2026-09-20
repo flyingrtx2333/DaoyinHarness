@@ -233,9 +233,8 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
         const detail = event.payload.detail;
         turn.activities.push({ id: "phase_" + String(event.eventSeq), kind: "phase", status: "running",
           text: event.payload.displayText, startedAt: event.occurredAt, phaseGroup,
-          detailSummary: phaseDetailSummary(detail) ?? `${event.payload.phase} · 第 ${event.payload.step + 1} 步`,
-          details: [{ label: detail === undefined ? "阶段" : "公开规划",
-            value: detailText(detail ?? { phase: event.payload.phase, step: event.payload.step + 1 }) }] });
+          detailSummary: phaseDetailSummary(detail) ?? "等待模型首个可显示响应",
+          ...(detail === undefined ? {} : { details: [{ label: "公开规划", value: detailText(detail) }] }) });
       }
     }
     if (event.type === "tool.started" || event.type === "tool.progress" || event.type === "tool.completed" || event.type === "tool.failed") {
