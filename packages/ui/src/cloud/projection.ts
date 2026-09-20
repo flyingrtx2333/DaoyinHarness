@@ -193,6 +193,12 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       turn.text += event.payload.delta;
     }
     if (event.type === "assistant.commentary") {
+      const currentBlock = blocks.get(event.turnId);
+      const visibleText = turn.text.trimEnd();
+      if (currentBlock === event.payload.contentBlockId && visibleText.endsWith(event.payload.text)) {
+        turn.text = visibleText.slice(0, -event.payload.text.length).trimEnd();
+        blocks.delete(event.turnId);
+      }
       finishNonToolActivity(turn, event.occurredAt);
       turn.activities.push({
         id: `commentary_${event.eventSeq}`,

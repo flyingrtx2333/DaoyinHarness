@@ -416,7 +416,7 @@ export class AgentEngine {
       for (const call of reply.calls) seenIds.add(call.id);
       current.push({ role: "assistant_tool_calls", content: reply.content ?? "", calls: reply.calls });
       const commentary = reply.content?.trim();
-      if (!streamed && commentary) {
+      if (commentary) {
         await append("assistant.commentary", {
           contentBlockId,
           text: commentary,
