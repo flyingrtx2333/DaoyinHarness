@@ -99,40 +99,6 @@ type AppendEvent = <TType extends AgentEventType>(type: TType, payload: AgentEve
 /** 会引起记忆变更的工具名称集合（单回合内只允许变更一次） */
 const MEMORY_MUTATION_TOOL_NAMES = new Set(["memory_remember", "memory_update", "memory_forget"]);
 
-/** 模型等待时展示进度状态提示的初始延迟毫秒数（4秒） */
-const MODEL_PROGRESS_INITIAL_DELAY_MS = 4_000;
-/** 模型等待时轮询更新提示的间隔毫秒数（7秒） */
-const MODEL_PROGRESS_INTERVAL_MS = 7_000;
-
-/**
- * 带有超时控制和中断信号的异步等待延迟函数
- */
-function progressDelay(milliseconds: number, signal: AbortSignal): Promise<boolean> {
-  if (signal.aborted) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => { signal.removeEventListener("abort", stop); resolve(true); }, milliseconds);
-    const stop = () => { clearTimeout(timer); resolve(false); };
-    signal.addEventListener("abort", stop, { once: true });
-  });
-}
-
-/**
- * 在模型长思考等待期间，定期向前端广播友好的进度状态（如“正在理解需求并整理目标…”）
- */
-async function publishModelProgress(append: AppendEvent, step: number, signal: AbortSignal): Promise<void> {
-  const planning = ["正在理解需求并整理目标…", "正在选择合适的操作步骤…", "正在等待规划结果…", "仍在处理，请稍候…"];
-  const followUp = ["正在分析操作结果…", "正在整理下一步处理…", "正在等待后续处理结果…", "仍在处理，请稍候…"];
-  const messages = step === 0 ? planning : followUp;
-  let index = 0;
-  let delay = MODEL_PROGRESS_INITIAL_DELAY_MS;
-  while (await progressDelay(delay, signal)) {
-    await append("phase.updated", { phase: step === 0 ? "thinking" : "synthesizing",
-      displayText: messages[index % messages.length]!, step });
-    index += 1;
-    delay = MODEL_PROGRESS_INTERVAL_MS;
-  }
-}
-
 /**
  * 将各类错误归一化为标准的模型错误结构体
  */
@@ -311,8 +277,6 @@ export class AgentEngine {
     };
     const started = await append("turn.started", { status: "running", userMessageId: `msg_${crypto.randomUUID()}`, userMessage: input.userMessage });
     if (signal.aborted) return cancel();
-    await append("phase.updated", { phase: "thinking", displayText: "正在准备任务上下文…", step: 0,
-      detail: { status: "读取会话历史、长期记忆与本轮授权能力", next: "完成上下文整理后请求模型规划下一步" } });
     let compaction: SessionCompaction | undefined;
     let history: ModelConversationItem[];
     try {
@@ -375,17 +339,14 @@ export class AgentEngine {
           overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
           maxCharacters: this.#maxContextCharacters, maxMessages: this.#maxContextMessages });
         if (signal.aborted) return cancel();
-        await append("phase.updated", { phase: step === 0 ? "thinking" : "synthesizing",
-          displayText: step === 0 ? "正在规划下一步操作…" : "正在根据操作结果继续处理…", step,
-          detail: { step: step + 1, availableToolCount: tools.length, completedToolCount: toolReceipts.length,
-            next: step === 0 ? "等待模型选择回答或已授权工具" : "根据已完成工具证据决定继续操作或输出回答" } });
+        await append("phase.updated", {
+          phase: step === 0 ? "thinking" : "synthesizing",
+          displayText: "模型正在生成…",
+          step,
+        });
         const timeout = AbortSignal.timeout(this.#modelTimeoutMs);
         const streamFailure = new AbortController();
-        const progressAbort = new AbortController();
-        const progressFailure = new AbortController();
-        const progressTask = publishModelProgress(append, step, AbortSignal.any([signal, progressAbort.signal]))
-          .catch((error: unknown) => progressFailure.abort(error));
-        const modelSignal = AbortSignal.any([signal, timeout, streamFailure.signal, progressFailure.signal]);
+        const modelSignal = AbortSignal.any([signal, timeout, streamFailure.signal]);
         const snapshot = memorySnapshot;
         const textBuffer = new TextDeltaBuffer({ signal: modelSignal,
           onFailure: (error) => streamFailure.abort(error instanceof AgentPolicyError ? error :
@@ -403,12 +364,10 @@ export class AgentEngine {
               modelSignal.throwIfAborted();
               if (typeof delta !== "string" || streamed.length + delta.length > 16_000) throw new Error("Invalid model stream.");
               if (!delta) return;
-              progressAbort.abort();
               streamed += delta;
               await textBuffer.push(delta);
             },
           }), modelSignal);
-          progressAbort.abort();
           if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
           modelSignal.throwIfAborted();
           reply = validateModelReply(raw, seenIds);
@@ -416,14 +375,10 @@ export class AgentEngine {
           // Flush validated text before tools or success; do not flush unvalidated late content.
           await textBuffer.finish();
         } catch (error) {
-          if (progressFailure.signal.aborted) throw progressFailure.signal.reason;
           if (!signal.aborted && timeout.aborted) throw new AgentPolicyError("MODEL_TIMEOUT", "模型响应超时；请求结果不确定，未自动重试。");
           if (streamFailure.signal.aborted) throw streamFailure.signal.reason;
           throw error;
         } finally {
-          // Wait for in-flight persistence, even on cancel. No timer can write after terminal state.
-          progressAbort.abort();
-          await progressTask;
           await textBuffer.discard();
         }
         if (signal.aborted) return cancel();
@@ -460,12 +415,12 @@ export class AgentEngine {
       // 记录已规划的工具调用 ID
       for (const call of reply.calls) seenIds.add(call.id);
       current.push({ role: "assistant_tool_calls", content: reply.content ?? "", calls: reply.calls });
-      if (!streamed) {
-        const commentary = reply.content?.trim();
+      const commentary = reply.content?.trim();
+      if (!streamed && commentary) {
         await append("assistant.commentary", {
           contentBlockId,
-          text: commentary || "已确定下一步操作，马上开始执行。",
-          source: commentary ? "model" : "system-fallback",
+          text: commentary,
+          source: "model",
           stage: "before_tool",
           toolCallIds: reply.calls.map((call) => call.id),
         });

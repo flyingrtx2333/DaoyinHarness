@@ -143,7 +143,7 @@ export interface AgentEventPayloads {
     selectedPackIds: string[];
     exposedToolCount: number;
     schemaCharacters: number;
-    intents: Array<{ label: string; objective: string; confidence: number; packIds: string[] }>;
+    intents: Array<{ label: string; confidence: number; packIds: string[] }>;
     fallback: "none" | "lexical" | "safe-readonly";
     blockedHighRiskPackIds: string[];
     latencyMs: { eligibility: number; retrieval: number; rerank: number; classify: number };
