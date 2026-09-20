@@ -5,7 +5,7 @@ export interface PublicSource { id: string; title: string; location: string; con
 export interface EventImage { id: number; eventId: number; kind: "event_cover" | "material" | "highlight" | "video_preview"; title: string }
 export interface ActivityView {
   id: string;
-  kind: "routing" | "phase" | "tool";
+  kind: "routing" | "phase" | "commentary" | "tool";
   status: "running" | "completed" | "failed";
   text: string;
   startedAt: string;
@@ -87,7 +87,7 @@ function resultCount(value: unknown): string | undefined {
 function phaseDetailSummary(value: unknown): string | undefined {
   if (!record(value)) return undefined;
   if (Array.isArray(value.actions)) {
-    const labels = value.actions.flatMap((action) => record(action) ? [toolLabel(action.toolName)] : []).slice(0, 4);
+    const labels = value.actions.flatMap((action) => record(action) ? [toolLabel(action)] : []).slice(0, 4);
     if (labels.length) return `下一步：${labels.join(" → ")}`;
   }
   return compactValue(value.next) || compactValue(value.status);
@@ -107,33 +107,11 @@ function appendDetail(activity: ActivityView, label: string, value: unknown): vo
   activity.details.push(next);
   if (activity.details.length > 24) activity.details.splice(1, activity.details.length - 24);
 }
-const toolLabels: Record<string, string> = {
-  project_list: "查看云端项目", project_create: "创建云端项目", project_files: "读取项目文件",
-  project_write: "更新项目文件", project_concepts: "读取界面方案", project_concept_generate: "生成界面方案",
-  project_concept_select: "选择界面方案", project_concept_discard: "放弃界面方案", project_check: "检查项目",
-  project_preview: "构建开发预览", project_publish: "发布正式网站", project_rollback: "回滚网站版本",
-  memory_search: "查询长期记忆", memory_remember: "保存长期记忆", memory_update: "更新长期记忆",
-  memory_forget: "删除长期记忆", capability_search: "查找可用能力",
-  search_company_knowledge: "检索公开资料", saishi_list_events: "查询赛事列表", saishi_get_event: "查询赛事详情",
-  saishi_list_cameras: "查询摄像机", saishi_list_materials: "查询素材", saishi_get_map: "查询赛事地图",
-  saishi_find_participants: "查询参赛者", saishi_get_timeline: "查询赛事时间线", saishi_get_job: "查询任务进度",
-  saishi_list_images: "查找赛事图片", saishi_list_registrations: "查询报名记录", saishi_list_appeals: "查询申诉记录",
-  saishi_list_scores: "查询成绩", saishi_create_competition: "创建大赛事", saishi_update_competition: "更新大赛事",
-  saishi_create_event: "创建赛事", saishi_update_event: "更新赛事", saishi_review_registration: "审核报名",
-  saishi_record_score: "录入成绩", saishi_resolve_appeal: "处理申诉", saishi_bind_camera: "绑定摄像机",
-  saishi_update_camera: "更新摄像机", saishi_retry_job: "重试任务", saishi_publish_map: "发布赛事地图",
-  story_video_options: "查询视频模型", story_recent_videos: "查询历史视频", story_get_video: "查询视频状态",
-  story_estimate_video: "估算视频费用", story_create_video: "提交视频生成",
-  request_video_confirmation: "等待视频确认",
-};
-function toolLabel(name: unknown): string {
-  if (typeof name !== "string") return "执行操作";
-  if (toolLabels[name]) return toolLabels[name];
-  if (name.startsWith("saishi_")) return "查询赛事数据";
-  if (name.includes("delegate")) return "分派子任务";
-  if (name.includes("workflow") || name.includes("goal")) return "执行工作流";
+function toolLabel(value: unknown): string {
+  if (record(value) && typeof value.displayName === "string" && value.displayName.trim()) return value.displayName.trim().slice(0, 80);
   return "执行操作";
 }
+
 function completedActivityText(text: string): string {
   const replacements: Record<string, string> = {
     "正在准备任务上下文…": "任务上下文已准备",
@@ -214,6 +192,18 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       blocks.set(event.turnId, event.payload.contentBlockId);
       turn.text += event.payload.delta;
     }
+    if (event.type === "assistant.commentary") {
+      finishNonToolActivity(turn, event.occurredAt);
+      turn.activities.push({
+        id: `commentary_${event.eventSeq}`,
+        kind: "commentary",
+        status: "completed",
+        text: event.payload.text,
+        startedAt: event.occurredAt,
+        finishedAt: event.occurredAt,
+        detailSummary: event.payload.source === "model" ? "模型公开说明" : "系统兜底说明",
+      });
+    }
     if (event.type === "capability.routed") {
       finishNonToolActivity(turn, event.occurredAt);
       const packCount = event.payload.selectedPackIds.length;
@@ -252,7 +242,7 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       let tool = turn.tools.find((item) => item.id === id);
       const payload: unknown = event.payload;
       const name = record(payload) ? payload.toolName ?? payload.name : undefined;
-      const label = toolLabel(name);
+      const label = toolLabel(payload);
       if (!tool) {
         finishNonToolActivity(turn, event.occurredAt);
         tool = { id, kind: "tool", status: "running", text: `正在${label}…`, startedAt: event.occurredAt };

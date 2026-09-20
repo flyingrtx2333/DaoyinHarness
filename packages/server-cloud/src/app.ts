@@ -9,6 +9,7 @@ import { AgentEngine, type ModelClient } from "@daoyin/harness-agent-core";
 import { capabilityPacksFor, explicitHighRiskPacks } from "./capability-packs.js";
 import { routeCapabilities, type CapabilitySemanticProvider } from "./capability-router.js";
 import { createCloudMemoryRuntime } from "./memory-tools.js";
+import { toolDisplayName } from "./tool-display-name.js";
 import { AUTONOMOUS_MEMORY_INSTRUCTIONS, isMemoryToolName } from "./memory-agent-policy.js";
 import { createCloudEpisodicMemoryRuntime, EPISODIC_MEMORY_INSTRUCTIONS, isEpisodicMemoryToolName } from "./episodic-memory-tools.js";
 import { ToolRegistry, type ToolAuthorization, type ToolDefinition, type ToolRequest } from "@daoyin/harness-tools/registry";
@@ -402,9 +403,12 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           : videoInteractions.createTool(run, identity, stores.events, bindings, { suspendRunDeadline, resumeRunDeadline });
         const wrappedDefinitions = runBindings.map<ToolDefinition>((binding) => ({
           ...binding.definition,
+          displayName: binding.definition.displayName ?? toolDisplayName(binding.definition.name, binding.definition.description),
           execute: (input, signal, context) => measurements.measure(run.id, "tool_inclusive", async () => {
             const span = telemetry.startSpan("agent.tool", { parent: runSpan.context,
-              attributes: { "tool.name": binding.definition.name, "tool.mutating": binding.definition.mutating } });
+              attributes: { "tool.name": binding.definition.name,
+              "tool.display_name": binding.definition.displayName ?? toolDisplayName(binding.definition.name, binding.definition.description),
+              "tool.mutating": binding.definition.mutating } });
             const suspendsDeadline = binding.definition.name === "project_concept_generate";
             try {
               await ensureActive(identity, signal);

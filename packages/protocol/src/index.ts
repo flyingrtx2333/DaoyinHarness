@@ -152,6 +152,13 @@ export interface AgentEventPayloads {
     contentBlockId: string;
     delta: string;
   };
+  "assistant.commentary": {
+    contentBlockId: string;
+    text: string;
+    source: "model" | "system-fallback";
+    stage: "before_tool";
+    toolCallIds: string[];
+  };
   "phase.updated": {
     phase: "thinking" | "tool" | "synthesizing";
     displayText: string;
@@ -161,12 +168,14 @@ export interface AgentEventPayloads {
   "tool.started": {
     toolCallId: string;
     toolName: string;
+    displayName?: string;
     displayText: string;
     input?: JsonValue;
   };
   "tool.progress": {
     toolCallId: string;
     toolName: string;
+    displayName?: string;
     displayText: string;
     completed?: number;
     total?: number;
@@ -175,12 +184,14 @@ export interface AgentEventPayloads {
   "tool.completed": {
     toolCallId: string;
     toolName: string;
+    displayName?: string;
     summary: string;
     evidence: ToolEvidence;
   };
   "tool.failed": {
     toolCallId: string;
     toolName: string;
+    displayName?: string;
     code: string;
     message: string;
     retryable: boolean;

@@ -83,6 +83,7 @@ export function createMemoryTools(store: MemoryStore): ToolDefinition[] {
   return [
     {
       name: "memory_search",
+      displayName: "查询长期记忆",
       description: "Search provenance-bound local memory visible to the current account/session/resource. Use it when stable prior preferences, decisions, goals, or facts may materially help the current task.",
       category: "system",
       mutating: false,
@@ -109,6 +110,7 @@ export function createMemoryTools(store: MemoryStore): ToolDefinition[] {
     },
     {
       name: "memory_remember",
+      displayName: "保存长期记忆",
       description: "Persist one stable, reusable memory with provenance. Use only when the user explicitly asks to remember something or when a durable preference/decision/goal is clearly useful beyond the current message. Do not store secrets, transient tool output, speculative inferences, or large copied text.",
       category: "system",
       mutating: true,
@@ -147,6 +149,7 @@ export function createMemoryTools(store: MemoryStore): ToolDefinition[] {
     },
     {
       name: "memory_update",
+      displayName: "更新长期记忆",
       description: "Supersede one visible memory with a corrected version while preserving append-only history and provenance. Use when a prior stable memory is explicitly corrected or replaced.",
       category: "system",
       mutating: true,
@@ -185,6 +188,7 @@ export function createMemoryTools(store: MemoryStore): ToolDefinition[] {
     },
     {
       name: "memory_forget",
+      displayName: "删除长期记忆",
       description: "Forget one visible stored memory by appending a tombstone. This never rewrites the historical record, but the forgotten memory stops participating in normal retrieval.",
       category: "system",
       mutating: true,

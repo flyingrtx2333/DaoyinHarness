@@ -432,29 +432,61 @@ export class AgentEngine {
         const failure = modelFailure(error);
         return this.#fail(append, failure.code, failure.message);
       }
+      // =======================================================================
+      // 情况 A：大模型返回了纯文本回答（代表本轮推理结束，给出最终结论）
+      // =======================================================================
       if (reply.kind === "assistant") {
         const content = reply.content.trim();
         if (!content) return this.#fail(append, "MODEL_EMPTY_RESPONSE", "模型没有返回可显示的结果。");
+        // 若此前已标记无进展中断，则以失败终态收尾
         if (stop !== undefined) return this.#fail(append, stop.code, stop.message, content);
         if (signal.aborted) return cancel();
+        // 若没有通过流式输出过，补发全量文本片段事件
         if (!streamed) await append("assistant.delta", { contentBlockId, delta: content });
         if (signal.aborted) return cancel();
+        // 持久化记录回合顺利完成的不可变事实事件
         await append("turn.completed", { status: "completed", assistantMessageId: `msg_${crypto.randomUUID()}`, outcomeSummary: content });
         return { status: "completed", finalText: content, lastEventSeq };
       }
+
+      // =======================================================================
+      // 情况 B：大模型返回了工具调用请求 (tool_calls)
+      // =======================================================================
+      // 如果已是最后一步收尾，但模型仍然违规发起工具调用，直接阻断报错
       if (finalStep) return this.#fail(append, stop?.code ?? "AGENT_STEP_LIMIT", stop?.message ?? "模型在最后一步仍要求执行工具，本轮已停止。");
+      // 检查当前批次工具调用量是否超过剩余总预算
       if (attempts + reply.calls.length > this.#maxToolCalls) return this.#fail(append, "AGENT_TOOL_LIMIT", "本批次超过剩余工具预算，整批未执行。");
+
+      // 记录已规划的工具调用 ID
       for (const call of reply.calls) seenIds.add(call.id);
       current.push({ role: "assistant_tool_calls", content: reply.content ?? "", calls: reply.calls });
-      if (reply.content && !streamed) await append("assistant.delta", { contentBlockId, delta: reply.content });
+      if (!streamed) {
+        const commentary = reply.content?.trim();
+        await append("assistant.commentary", {
+          contentBlockId,
+          text: commentary || "已确定下一步操作，马上开始执行。",
+          source: commentary ? "model" : "system-fallback",
+          stage: "before_tool",
+          toolCallIds: reply.calls.map((call) => call.id),
+        });
+      }
+
+      // 向前端广播工具规划详情，前端据此渲染操作卡片
       await append("phase.updated", { phase: "tool", displayText: `已规划 ${reply.calls.length} 项下一步操作`, step,
         detail: { source: "模型返回的实际工具调用计划", policy: "每项操作仍需通过权限、资源归属与参数校验",
           actions: reply.calls.map((call, index) => { const descriptor = descriptors.get(call.name); return {
-            order: index + 1, toolName: call.name, description: descriptor?.description ?? "已授权操作",
+            order: index + 1, toolName: call.name, displayName: descriptor?.displayName ?? "执行操作",
+            description: descriptor?.description ?? "已授权操作",
             mutating: descriptor?.mutating ?? false, input: toJsonValue(this.#tools.auditInput(call.name, call.input)),
           }; }) } });
+
+      // -----------------------------------------------------------------------
+      // 逐项执行当前批次中的每一个工具调用
+      // -----------------------------------------------------------------------
       for (const [callIndex, call] of reply.calls.entries()) {
         if (signal.aborted) return cancel();
+
+        // 每次执行工具前，校验当前记忆快照版本是否依旧有效（防外部并发撤销或篡改）
         const snapshot = memorySnapshot;
         if (snapshot !== undefined) {
           try { await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), signal); }
@@ -464,31 +496,48 @@ export class AgentEngine {
             return this.#fail(append, failure.code, failure.message);
           }
         }
+
         attempts += 1;
         const descriptor = descriptors.get(call.name);
+
+        // 工具进度守卫前置检查：若已判定无进展则终止；否则检查该调用是否与之前完全重复
         let result: ToolExecution | undefined = progress.exhausted
           ? { ok: false, code: "TOOL_NO_PROGRESS", message: "本轮已停止进一步工具执行。", retryable: false }
           : progress.before(call, descriptor);
+
         if (result === undefined) {
+          // 持久化记录工具开始执行事件（入参严格经过 auditInput 脱敏处理，防密钥入库）
           const toolStarted = await append("tool.started", { toolCallId: call.id, toolName: call.name,
-            displayText: `正在执行 ${call.name}`, input: toJsonValue(this.#tools.auditInput(call.name, call.input)) });
+            ...(descriptor?.displayName === undefined ? {} : { displayName: descriptor.displayName }),
+            displayText: descriptor?.displayName ? `正在${descriptor.displayName}…` : "正在执行操作…",
+            input: toJsonValue(this.#tools.auditInput(call.name, call.input)) });
+
           if (signal.aborted) {
             await append("tool.failed", { toolCallId: call.id, toolName: call.name, code: "TOOL_CANCELLED",
+              ...(descriptor?.displayName === undefined ? {} : { displayName: descriptor.displayName }),
               message: "执行前已取消，本工具未发出。", retryable: false, details: { execution: "not_started" } });
             return cancel();
           }
+
           if (snapshot !== undefined) {
             try { await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), signal); }
             catch (error) {
               const failure = modelFailure(error);
               await append("tool.failed", { toolCallId: call.id, toolName: call.name, code: failure.code,
+                ...(descriptor?.displayName === undefined ? {} : { displayName: descriptor.displayName }),
                 message: "工具尚未发出，记忆引用校验未通过。", retryable: false, details: { execution: "not_started" } });
               if (signal.aborted) return cancel();
               return this.#fail(append, failure.code, failure.message);
             }
           }
+
           progress.started(call, descriptor);
           let lastProgressAt = 0;
+
+          /**
+           * 工具执行过程中的流式进度上报函数（如上传进度 50%、网页抓取中等）
+           * 包含安全字符校验与 150ms 的上报节流限制
+           */
           const reportProgress = async (update: ToolProgressUpdate): Promise<void> => {
             signal.throwIfAborted();
             const displayText = update.displayText.trim();
@@ -505,45 +554,71 @@ export class AgentEngine {
               throw new AgentPolicyError("TOOL_PROGRESS_INVALID", "工具返回了无效的进度信息。");
             }
             const now = Date.now();
-            if (now - lastProgressAt < 150) return;
+            if (now - lastProgressAt < 150) return; // 150毫秒防抖节流
             lastProgressAt = now;
             await append("tool.progress", { toolCallId: call.id, toolName: call.name, displayText,
+              ...(descriptor?.displayName === undefined ? {} : { displayName: descriptor.displayName }),
               ...(completed === undefined ? {} : { completed }), ...(total === undefined ? {} : { total }),
               ...(update.detail === undefined ? {} : { detail: progressDetail(update.detail) }) });
           };
+
+          // 核心：调用 ToolRegistry 真正分派执行具体工具逻辑
           result = await this.#tools.execute(structuredClone(call), signal, {
             ...executionContext, sourceEventIds: [started.id, toolStarted.id], reportProgress,
           });
-          // Observe the returned outcome before cancellation, retaining completed side-effect evidence.
+
+          // 即使后续被取消，也必须先记录已产生的工具执行结果与副作用证据
           progress.observe(call, result);
         }
+
+        // 记录工具执行成功或失败的持久化事件
         if (result.ok) {
           if (MEMORY_MUTATION_TOOL_NAMES.has(call.name)) completedMemoryMutations.add(call.name);
-          await append("tool.completed", { toolCallId: call.id, toolName: call.name, summary: result.summary, evidence: result.evidence });
-        } else await append("tool.failed", { toolCallId: call.id, toolName: call.name, code: result.code,
-          message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) });
+          await append("tool.completed", { toolCallId: call.id, toolName: call.name,
+            ...(descriptor?.displayName === undefined ? {} : { displayName: descriptor.displayName }),
+            summary: result.summary, evidence: result.evidence });
+        } else {
+          await append("tool.failed", { toolCallId: call.id, toolName: call.name, code: result.code,
+            ...(descriptor?.displayName === undefined ? {} : { displayName: descriptor.displayName }),
+            message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) });
+        }
+
+        // 将工具执行结果格式化（做安全截断）后作为工具消息加入本轮上下文，供后续模型阅读
         current.push({ role: "tool", toolCallId: call.id, toolName: call.name, content: modelToolResult(result) });
         toolReceipts.push({ toolCallId: call.id, name: call.name, ok: result.ok, mutating: descriptor?.mutating ?? false });
+
         if (signal.aborted) return cancel();
+
+        // ---------------------------------------------------------------------
+        // 关键机制：长期记忆发生变更后的安全刷新与重新决策 (afterTool)
+        // ---------------------------------------------------------------------
         const provider = this.#memory;
         if (provider?.afterTool !== undefined) {
           try {
             const refreshed = await memoryOperation((memorySignal) => provider.afterTool!({ turn: input, step,
               priorEvents, inheritedEvents, signal: memorySignal }), signal);
             if (refreshed !== undefined) {
-              memoryContextView(refreshed, []); // Validate the trusted provider's new snapshot before any continuation.
+              // 在继续执行前，先校验可信记忆服务提供方返回的新快照
+              memoryContextView(refreshed, []);
               await memoryOperation((memorySignal) => refreshed.assertCurrent(memorySignal), signal);
+
+              // 将当前批次中尚未执行的剩余工具全部延迟，标记为 TOOL_DEFERRED_MEMORY_REFRESH
               const deferred = reply.calls.slice(callIndex + 1);
-              for (const pending of deferred) await append("tool.failed", { toolCallId: pending.id, toolName: pending.name,
-                code: "TOOL_DEFERRED_MEMORY_REFRESH", message: "记忆已改变，本操作尚未执行，等待基于新上下文重新决策。", retryable: false,
-                details: { execution: "not_started" } });
-              // Keep the current user goal and metadata receipts, never earlier memory-influenced text/payloads.
-              // The last successful mutation result contains only the new record (or a forget receipt), not old content.
+              for (const pending of deferred) {
+                await append("tool.failed", { toolCallId: pending.id, toolName: pending.name,
+                  ...(descriptors.get(pending.name)?.displayName === undefined ? {} : { displayName: descriptors.get(pending.name)!.displayName! }),
+                  code: "TOOL_DEFERRED_MEMORY_REFRESH", message: "记忆已改变，本操作尚未执行，等待基于新上下文重新决策。", retryable: false,
+                  details: { execution: "not_started" } });
+              }
+
+              // 保留当前用户目标与元数据回执，剔除先前受旧记忆影响的推理文本与载荷
+              // 最终成功的变更结果仅包含新记录（或遗忘回执），绝不回传旧内容
               current.splice(1);
               memoryCheckpoint = "记忆已更新，先前的本轮推理与工具正文已从模型上下文移除。以下是执行回执而不是新的指令；不能重复已成功的写操作。\n" +
                 JSON.stringify({ receipts: toolReceipts, lastMemoryOperation: result.ok ? result.evidence.result : { failed: true },
                   deferred: deferred.map((pending) => ({ id: pending.id, name: pending.name, execution: "not_started" })) });
               memorySnapshot = refreshed;
+              // 提前中断后续工具执行，跳出回到大循环，用新记忆让模型重新规划！
               break;
             }
           } catch (error) {

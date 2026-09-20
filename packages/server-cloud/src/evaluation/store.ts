@@ -98,13 +98,42 @@ export class EvaluationStore {
     return { windowHours: hours, traces: roots.length, errors, errorRate: roots.length ? errors / roots.length : 0,
       p50Ms: percentile(.5), p95Ms: percentile(.95), operations };
   }
+
+  /**
+   * 分页查询指定时间窗口内的根 Trace 链路摘要列表 (telemetryTraces)。
+   *
+   * @param {number} hours 统计窗口（小时）
+   * @param {number} [offset=0] 分页偏移量
+   * @returns {TelemetryTraceSummary[]} 链路摘要列表（每页最多 30 条）
+   *
+   * @example
+   * ```json
+   * // 调用: telemetryTraces(1, 0)
+   * // 返回值示例:
+   * [
+   *   {
+   *     "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+   *     "name": "agent.turn",
+   *     "serviceName": "daoyin-agent",
+   *     "serviceVersion": "1.0.0",
+   *     "startedAt": "2024-03-09T13:20:00.000Z",
+   *     "durationMs": 1500,
+   *     "status": "ok",
+   *     "spanCount": 4,
+   *     "errorCount": 0,
+   *     "toolNames": ["saishi_list_events", "saishi_list_materials"]
+   *   }
+   * ]
+   * ```
+   */
   public telemetryTraces(hours: number, offset = 0): TelemetryTraceSummary[] {
     this.assertOwner();
     const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
     return this.#db.prepare(`SELECT root.trace_id,root.name,root.service_name,root.service_version,root.started_at,
       root.duration_ms,root.status,COUNT(all_spans.span_id) AS span_count,
       GROUP_CONCAT(DISTINCT CASE WHEN all_spans.name='agent.tool'
-        THEN json_extract(all_spans.attributes,'$."tool.name"') END) AS tool_names,
+        THEN COALESCE(json_extract(all_spans.attributes,'$."tool.display_name"'),
+          json_extract(all_spans.attributes,'$."tool.name"')) END) AS tool_names,
       SUM(CASE WHEN all_spans.status='error' THEN 1 ELSE 0 END) AS error_count
       FROM telemetry_spans root JOIN telemetry_spans all_spans ON all_spans.trace_id=root.trace_id
       WHERE root.parent_span_id='' AND root.started_at>=?

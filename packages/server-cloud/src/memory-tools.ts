@@ -55,24 +55,31 @@ const descriptions: Record<MemoryToolName, string> = {
   memory_update: "自主更正已有记忆，按 memoryId/revision 替代旧版本并保留审计；不另写矛盾副本。excerpt 必须来自本轮真实用户消息或已完成业务工具。省略 kind/keywords/expiresAt 会沿用旧值。",
   memory_forget: "根据本轮用户要求或可复核的业务事实，停止使用指定记忆版本链，清空记忆正文并撤销旧共享。需要 memoryId/revision 及原文 excerpt；不是物理擦除历史聊天或备份。",
 };
+const displayNames: Record<MemoryToolName, string> = {
+  memory_search: "查询长期记忆",
+  memory_remember: "保存长期记忆",
+  memory_update: "更新长期记忆",
+  memory_forget: "删除长期记忆",
+};
 const success = (name: string, summary: string, result: JsonValue): ToolExecution => ({ ok: true, summary,
   evidence: { schemaVersion: 1, toolName: name, result, artifacts: [], diagnostics: [] } });
 const refKey = (ref: MemoryReference): string => JSON.stringify([ref.id, ref.revision, ref.grantId]);
 
-/** Catalog descriptors let the gateway validate kernel calls without routing execution to business backends.
- * createCloudServer replaces these non-executable catalog entries with run-bound implementations.
+/**
+ * 为业务 Profile 提供纯只读的记忆工具描述符绑定（用于向模型宣告工具 Schema，真实执行由运行时拦截替换）
  */
 export function createMemoryProfileBindings(identity: ExecutionIdentity): CloudToolBinding[] {
   return MEMORY_TOOL_NAMES.filter((name) => memoryToolAllowed(identity, name)).map<CloudToolBinding>((name) => ({
     requiredPermissions: name === "memory_search" ? ["memory.read"] : ["memory.read", "memory.write"],
     validateInput: (input: Record<string, unknown>) => validateMemoryToolInput(name, input),
     authorizeResource: async () => false,
-    definition: { name, description: descriptions[name], category: "system", mutating: name !== "memory_search",
+    definition: { name, displayName: displayNames[name], description: descriptions[name], category: "system", mutating: name !== "memory_search",
       inputSchema: { type: "object", additionalProperties: false, properties: Object.fromEntries(fields[name].map((key) => [key, properties[key]!])), required: required[name] },
       execute: async () => ({ ok: false, code: "MEMORY_RUNTIME_REQUIRED", message: "记忆工具只能由本轮绑定的内核运行时执行。", retryable: false }),
     },
   }));
 }
+
 
 /** Per-run mutable state is private to this trusted adapter, never carried in model arguments. */
 export function createCloudMemoryRuntime(options: {
@@ -146,7 +153,7 @@ export function createCloudMemoryRuntime(options: {
     validateInput: (input) => validateMemoryToolInput(name, input),
     authorizeResource: async (_request, current, signal) => !signal.aborted && sameExecutionScope(current, identity) &&
       current.authorizationId === identity.authorizationId && memoryToolAllowed(current, name),
-    definition: { name, description: descriptions[name], category: "system", mutating: name !== "memory_search", repeatable: true,
+    definition: { name, displayName: displayNames[name], description: descriptions[name], category: "system", mutating: name !== "memory_search", repeatable: true,
       inputSchema: { type: "object", additionalProperties: false, properties: Object.fromEntries(fields[name].map((key) => [key, properties[key]!])), required: required[name] },
       auditInput: () => ({ memoryOperation: name }),
       execute: async (input, signal, context) => {

@@ -20,29 +20,21 @@ const attributeLabels: Record<string, string> = {
   "daoyin.child_run": "是否为子任务",
   "gen_ai.request.index": "本轮第几次请求",
   "daoyin.tool.name": "业务操作",
+  "tool.display_name": "操作名称",
   "tool.name": "具体操作",
 };
 const technicalAttributes = new Set(["daoyin.run.id", "daoyin.session.id", "daoyin.profile.id"]);
-const toolLabels: Record<string, string> = {
-  project_list: "查看云端项目", project_create: "创建云端项目", project_files: "读取网站代码",
-  project_write: "更新网站代码", project_concepts: "查看界面方案", project_concept_generate: "生成界面方案",
-  project_concept_select: "选择界面方案", project_check: "检查网站", project_preview: "生成网站预览",
-  project_publish: "发布网站", project_rollback: "回滚网站版本", search_company_knowledge: "查询企业资料",
-  saishi_list_events: "查询赛事列表", saishi_get_event: "查询赛事详情", saishi_list_cameras: "查询赛事摄像机",
-  saishi_list_materials: "查询赛事素材", saishi_get_map: "查询赛事地图", saishi_find_participants: "查询参赛者",
-  saishi_get_timeline: "查询赛事时间线", saishi_get_job: "查询赛事任务", saishi_list_images: "查询赛事图片",
-  story_video_options: "查询视频模型", story_recent_videos: "查询历史视频", story_get_video: "查询视频状态",
-  story_estimate_video: "估算视频费用", story_create_video: "生成视频", request_video_confirmation: "等待视频确认",
-  memory_search: "查询长期记忆", memory_remember: "保存长期记忆", memory_update: "更新长期记忆",
-  memory_forget: "删除长期记忆", capability_search: "补充查找能力",
-};
-const toolLabel = (name: string): string => toolLabels[name] ?? "执行业务操作";
+function toolLabel(name: string): string {
+  return name || "业务操作";
+}
+
 function traceTitle(trace: TelemetryTraceSummary): string {
   if (trace.toolNames.length === 0) return "生成文字回答";
   const names = [...new Set(trace.toolNames.map(toolLabel))];
   return names.slice(0, 2).join("、") + (names.length > 2 ? `等 ${names.length} 项操作` : "");
 }
 const operationLabel = (name: string, attributes?: Record<string, string | number | boolean>): string => {
+  if (name === "agent.tool" && typeof attributes?.["tool.display_name"] === "string") return attributes["tool.display_name"];
   if (name === "agent.tool" && typeof attributes?.["tool.name"] === "string") return toolLabel(attributes["tool.name"]);
   return operationLabels[name] ?? "执行步骤";
 };

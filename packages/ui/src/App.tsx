@@ -41,6 +41,7 @@ interface ProcessPermissionView {
 interface ToolView {
   id: string;
   name: string;
+  displayName?: string;
   status: "running" | "completed" | "failed";
   text: string;
   permission?: ProcessPermissionView;
@@ -126,41 +127,6 @@ function processPermissionView(details: unknown): ProcessPermissionView | undefi
   return { requestId, displayCommand, risk, reason, status };
 }
 
-function toolLabel(name: string): string {
-  const labels: Record<string, string> = {
-    list_files: "查看工作区文件",
-    read_file: "读取文件",
-    search_text: "搜索本地内容",
-    write_file: "写入文件",
-    apply_patch: "修改文件",
-    process_inspect: "检查本地运行环境",
-    run_package_script: "运行工作区脚本",
-    web_search: "搜索网页",
-    web_fetch: "读取网页",
-    browser_open: "打开浏览器页面",
-    browser_snapshot: "查看浏览器页面",
-    browser_click: "点击网页元素",
-    browser_type: "填写网页内容",
-    browser_back: "浏览器后退",
-    browser_close: "关闭浏览器会话",
-    list_skills: "查看可用技能",
-    load_skill: "加载技能",
-    memory_search: "检索记忆",
-    memory_remember: "保存记忆",
-    memory_update: "更新记忆",
-    memory_forget: "忘记记忆",
-    goal_create: "创建任务目标",
-    goal_list: "查看任务目标",
-    goal_update: "更新任务进度",
-    workflow_create: "创建工作流",
-    workflow_list: "查看工作流",
-    workflow_run: "运行工作流",
-    delegate_agent: "委派子 Agent",
-  };
-  if (name.startsWith("mcp_")) return "MCP 扩展工具";
-  return labels[name] ?? name;
-}
-
 function orchestrationStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     active: "进行中",
@@ -200,6 +166,7 @@ function buildTurns(events: AgentEvent[]): TurnView[] {
       turn.tools.push({
         id: event.payload.toolCallId,
         name: event.payload.toolName,
+        ...(event.payload.displayName === undefined ? {} : { displayName: event.payload.displayName }),
         status: "running",
         text: event.payload.displayText,
       });
@@ -207,6 +174,7 @@ function buildTurns(events: AgentEvent[]): TurnView[] {
       const index = toolIndexes.get(event.turnId)?.get(event.payload.toolCallId);
       const tool = index === undefined ? undefined : turn.tools[index];
       if (tool !== undefined) {
+        if (event.payload.displayName !== undefined) tool.displayName = event.payload.displayName;
         tool.status = "completed";
         tool.text = event.payload.summary;
       }
@@ -214,6 +182,7 @@ function buildTurns(events: AgentEvent[]): TurnView[] {
       const index = toolIndexes.get(event.turnId)?.get(event.payload.toolCallId);
       const tool = index === undefined ? undefined : turn.tools[index];
       if (tool !== undefined) {
+        if (event.payload.displayName !== undefined) tool.displayName = event.payload.displayName;
         tool.status = "failed";
         tool.text = event.payload.message;
         const permission = processPermissionView(event.payload.details);
@@ -832,7 +801,7 @@ export function App(): React.JSX.Element {
                                 <div className={`tool-line ${tool.status} ${permission !== undefined ? "permission-tool" : ""}`} key={tool.id}>
                                   <i />
                                   <div>
-                                    <b>{toolLabel(tool.name)}<span className="tool-state-label">{tool.status === "running" ? "进行中" : tool.status === "completed" ? "完成" : "未完成"}</span></b>
+                                    <b>{tool.displayName ?? tool.name}<span className="tool-state-label">{tool.status === "running" ? "进行中" : tool.status === "completed" ? "完成" : "未完成"}</span></b>
                                     {tool.text ? <details className="tool-details"><summary>查看详情</summary><p>{tool.text}</p></details> : null}
                                     {permission !== undefined ? (
                                       <div className="permission-box">

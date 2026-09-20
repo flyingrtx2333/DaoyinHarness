@@ -3,6 +3,8 @@ import { assertExecutionIdentity, ExecutionAccessError, type ExecutionIdentity }
 
 export interface ToolDescriptor {
   name: string;
+  /** Trusted user-facing label supplied by the capability owner, never by model arguments. */
+  displayName?: string;
   description: string;
   inputSchema: JsonValue;
   category: ToolCapabilityCategory;
@@ -82,7 +84,8 @@ function failure(code: string, message: string, retryable = false, details?: Jso
 
 function descriptor(tool: ToolDescriptor): ToolDescriptor {
   const { name, description, inputSchema, category, mutating } = tool;
-  return { name, description, inputSchema, category, mutating, ...(tool.repeatable === undefined ? {} : { repeatable: tool.repeatable }) };
+  return { name, ...(tool.displayName === undefined ? {} : { displayName: tool.displayName }), description, inputSchema, category, mutating,
+    ...(tool.repeatable === undefined ? {} : { repeatable: tool.repeatable }) };
 }
 
 export class ToolRegistry {
