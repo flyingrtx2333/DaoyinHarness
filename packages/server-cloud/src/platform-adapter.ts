@@ -9,16 +9,34 @@ import { createSaishiProfile, isSaishiIdentity } from "./saishi-profile.js";
 import { createStoryProfile, isStoryIdentity } from "./story-profile.js";
 import { createWorkbenchProfile, isWorkbenchIdentity } from "./workbench-profile.js";
 import { readModelStream } from "./model-stream.js";
+import { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
+import { RESOURCE_TOOL_NAMES } from "./resources/contracts.js";
 import { VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS } from "./video-interaction.js";
 import { isMemoryToolName } from "./memory-agent-policy.js";
 import { validateMemoryToolInput } from "./memory-tools.js";
 
+/**
+ * @fileoverview 道引主平台适配器与网关桥梁
+ * @description
+ * 负责通过 HTTPS 专用回环通信连接道引主平台内部 API 网关（`/api/internal/agent-*`）：
+ * 1. **身份自省（Introspect）**：验证客户端 Token 并获取 `ExecutionIdentity`。
+ * 2. **实时授权校验（Authorize）**：毫秒级向平台确认会话所属空间、租户及出资方账号依然有效。
+ * 3. **模型推理代理（Model Gateway）**：将 Agent 内部标准消息序列转换为平台计量协议，支持 NDJSON 流式输出。
+ * 4. **能力语义路由分析（Capability Semantic）**：调用主平台的向量检索与语义 Rerank 服务筛选工具。
+ * 5. **业务工具中继（Tool Bridge）**：转发短剧、赛事、工作台私有插件的操作请求与细粒度鉴权。
+ */
+
 export interface PlatformAdapterOptions {
-  /** Fixed trusted origin, HTTPS except explicit loopback development. */
+  /** 可信的主平台基准 URL（生产环境必须为 HTTPS，本地回环开发支持 127.0.0.1） */
   platformUrl: string;
+  /** 公共业务服务密钥（用于访问公共知识库等） */
   serviceToken: string;
-  /** Optional and separate from the public sponsor key. No fallback between them. */
+  /**
+   * 私有业务应用专属服务密钥（用于访问赛事、剧情等高权限业务系统）
+   * 注意：私有密钥与公共密钥物理隔离，不可相同
+   */
   appServiceToken?: string;
+  /** 可选的自定义 fetch 函数（用于单测或特定网络拦截） */
   fetch?: typeof fetch;
 }
 
@@ -27,6 +45,27 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 type CallPolicy = (name: string, input: Record<string, unknown>) => boolean;
+const RESOURCE_TOOLS = new Set<string>(RESOURCE_TOOL_NAMES);
+
+/**
+ * 校验大模型产生的工具调用（Tool Call）是否符合安全策略与参数模式
+ *
+ * @param name 工具名称
+ * @param input 模型传入的实参字典
+ * @param requestTools 本轮提供给模型的工具候选列表
+ * @param bindings 绑定的业务工具执行器与校验器集合
+ * @returns 是否允许调用该工具
+ *
+ * @example
+ * ```ts
+ * const allowed = privateModelCallAllowed(
+ *   "story_create_video",
+ *   { storyId: "st_123", prompt: "日落黄昏" },
+ *   requestTools,
+ *   bindings,
+ * );
+ * ```
+ */
 export function privateModelCallAllowed(name: string, input: Record<string, unknown>,
   requestTools: ReadonlyArray<{ name: string }>, bindings: ReadonlyArray<{ definition: { name: string }; validateInput(input: Record<string, unknown>): boolean }>): boolean {
   if (!requestTools.some((tool) => tool.name === name)) return false;
@@ -34,6 +73,7 @@ export function privateModelCallAllowed(name: string, input: Record<string, unkn
     typeof input.query === "string" && input.query.trim().length > 0 && input.query.length <= 500;
   if (isProjectTool(name)) return validateProjectInput(name, input);
   if (isMemoryToolName(name)) return validateMemoryToolInput(name, input);
+  if (RESOURCE_TOOLS.has(name) || isCloudOrchestrationToolName(name)) return true;
   const direct = bindings.find((binding) => binding.definition.name === name);
   if (direct !== undefined) return direct.validateInput(input);
   if (name !== VIDEO_CONFIRMATION_TOOL || typeof input.operation !== "string" || !VIDEO_GENERATION_OPERATIONS.has(input.operation) ||
@@ -41,6 +81,29 @@ export function privateModelCallAllowed(name: string, input: Record<string, unkn
   const generation = bindings.find((binding) => binding.definition.name === input.operation);
   return generation !== undefined && generation.validateInput(input.input);
 }
+
+/**
+ * 校验并解析主平台模型网关的原始 JSON 响应
+ *
+ * @param value 平台返回的原始报文
+ * @param appPolicy 业务工具安全策略校验器
+ * @returns 规范化的 ModelReply 结果
+ *
+ * @example 纯文本响应示例
+ * ```json
+ * { "kind": "assistant", "content": "我已经为您梳理了大纲。" }
+ * ```
+ * @example 工具调用响应示例
+ * ```json
+ * {
+ *   "kind": "tool_calls",
+ *   "content": "正在检索相关素材",
+ *   "calls": [
+ *     { "id": "call_abc123", "name": "story_call", "input": { "storyId": "st_001" } }
+ *   ]
+ * }
+ * ```
+ */
 function reply(value: unknown, appPolicy?: CallPolicy): ModelReply {
   if (!record(value) || value.schemaVersion !== 1 || !record(value.output)) throw new Error("Invalid model response.");
   const output = value.output;
@@ -65,7 +128,27 @@ function reply(value: unknown, appPolicy?: CallPolicy): ModelReply {
 type BridgePath = "introspect" | "authorize" | "model" | "search" | "profile" | "call" |
   "authorize-tool" | "capability-semantic" | "health";
 
-/** No credentials are attached to identities, run records, tool results or errors. */
+
+/**
+ * 创建与道引主平台互联的一组适配器实现
+ *
+ * 核心安全机制：
+ * 1. 凭据绝不持久化在本地身份、Run 记录、事件流或工具执行回执中。
+ * 2. 身份解析通过 `introspect` 端点，严禁接受客户端请求体中伪造的身份信息。
+ * 3. 私有业务应用（短剧/赛事/工作台）与公共应用（企业公共知识库）在不同通道隔离交互。
+ *
+ * @param options 平台连接配置
+ * @returns 适配器对象，可直接注入 `CloudServerOptions`
+ *
+ * @example
+ * ```ts
+ * const adapters = createPlatformAdapters({
+ *   platformUrl: "https://api.daoyin.internal",
+ *   serviceToken: process.env.DAOYIN_SERVICE_TOKEN!,
+ *   appServiceToken: process.env.DAOYIN_APP_SERVICE_TOKEN!,
+ * });
+ * ```
+ */
 export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<CloudServerOptions, "authenticate" | "isAuthorizationActive" | "resolveProfile" | "createModel" | "createCapabilitySemantic" | "checkPlatform"> {
   const base = new URL(options.platformUrl);
   if (base.username || base.password || base.search || base.hash || base.pathname !== "/" ||
@@ -74,6 +157,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   if (options.appServiceToken !== undefined && (!/^[\x21-\x7e]{32,256}$/u.test(options.appServiceToken) || options.appServiceToken === options.serviceToken)) throw new Error("Invalid private application service key.");
   const transport = options.fetch ?? fetch;
 
+  /** 封装对平台内部网关的安全 POST 请求 */
   async function post(path: BridgePath, input: unknown, parent: AbortSignal, privateApp = false, onTextDelta?: (delta: string) => Promise<void>): Promise<unknown> {
     parent.throwIfAborted();
     const secret = privateApp ? options.appServiceToken : options.serviceToken;
@@ -123,6 +207,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       authorizationId: context.identity.authorizationId, runId: context.runId, operationId: context.operationId, input,
     }, signal),
   });
+
   async function privateProfile(identity: ExecutionIdentity, signal: AbortSignal) {
     if (isProjectAccountIdentity(identity)) return {id:"daoyin-workbench",version:"1",instructions:"使用当前账号的独立云端项目工具开发与发布应用。所有代码执行均通过隔离执行服务。",tools:[]};
     const catalog = await post("profile", { authorizationId: identity.authorizationId }, signal, true);
@@ -138,6 +223,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       }, childSignal, true),
     });
   }
+
   return {
     checkPlatform: async (signal) => {
       for (const privateApp of options.appServiceToken ? [false, true] : [false]) {
@@ -257,3 +343,4 @@ export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick
     ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
   });
 }
+
