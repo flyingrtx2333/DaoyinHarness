@@ -284,7 +284,7 @@ async function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, 
     "--env", "PYTHONUSERBASE=/workspace/.harness/python-user", "--env", "PIP_CACHE_DIR=/workspace/.harness/cache/pip",
     "--env", "NPM_CONFIG_CACHE=/workspace/.harness/cache/npm", "--env", "NPM_CONFIG_PREFIX=/workspace/.harness/npm-global",
     "--env", "CARGO_HOME=/workspace/.harness/cargo", "--env", "GOPATH=/workspace/.harness/go", "--env", "GOMODCACHE=/workspace/.harness/go/pkg/mod",
-    "--env", "PATH=/workspace/.harness/python-user/bin:/workspace/.harness/npm-global/bin:/workspace/.harness/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "--env", "PATH=/workspace/.harness/python-user/bin:/workspace/.harness/npm-global/bin:/workspace/.harness/cargo/bin:/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "--env", "CI=1", "--env", "NO_COLOR=1",
     ...(spec.network === "public" ? await egressArguments(workspaceId, runId, spec.limits.timeoutSeconds) : []),
     ...safeEnvironment(spec.environment)];
