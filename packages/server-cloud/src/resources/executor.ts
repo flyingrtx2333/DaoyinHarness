@@ -213,6 +213,13 @@ function assertProcessInput(executable: string, args: readonly string[]): void {
   }
 }
 
+function assertProcessCwd(value: string | undefined): string {
+  const cwd = value ?? ".";
+  try { assertWorkspacePath(cwd === "." ? "workspace" : cwd); }
+  catch { throw new ResourceError("PROCESS_CWD_INVALID", "Process cwd must be a workspace-relative path; omit it or use . for the workspace root.", 422); }
+  return cwd;
+}
+
 async function egressArguments(workspaceId: string, runId: string, timeoutSeconds: number): Promise<string[]> {
   if (!EGRESS_PROXY || EGRESS_SECRET.length < 32) throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not configured.", 503);
   let url: URL;
@@ -449,7 +456,7 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
 
 async function foreground(workspaceId: string, spec: RuntimeSpec, executable: string, args: string[], cwd = ".", stdin?: string, timeoutMs?: number, environment?: Record<string, string>, runId = "system", secretValues?: ResolvedSecret[]): Promise<Record<string, unknown> & { exitCode: number; stdout: string; stderr: string }> {
   assertProcessInput(executable, args);
-  assertWorkspacePath(cwd === "." ? "workspace" : cwd);
+  cwd = assertProcessCwd(cwd);
   const name = `hr-run-${workspaceId.slice(4, 16)}-${randomBytes(4).toString("hex")}`;
   const secrets = await secretArguments(name, spec.secretRefs, secretValues);
   try {
@@ -484,6 +491,7 @@ async function processOperation(request: ExecutorProcessRequest): Promise<Record
   if (operation === "start") {
     if (request.mode !== "background" && request.mode !== "pty") throw new ResourceError("PROCESS_MODE_INVALID", "Background or PTY mode is required.");
     assertProcessInput(request.executable ?? "", request.args ?? []);
+    const cwd = assertProcessCwd(request.cwd);
     const processId = `prc_${randomBytes(12).toString("hex")}`; const name = `hr-${processId}`;
     const startedAt = new Date().toISOString();
     const timeoutAt = Date.now() + Math.min(request.timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000);
@@ -492,7 +500,7 @@ async function processOperation(request: ExecutorProcessRequest): Promise<Record
       "--label", `daoyin.harness.mode=${request.mode}`, "--label", `daoyin.harness.started_at=${startedAt}`,
       "--label", `daoyin.harness.timeout_at=${String(timeoutAt)}`,
       ...(request.mode === "pty" ? ["-i", "-t"] : []), ...secrets, ...safeEnvironment(request.environment),
-      "--workdir", `/workspace/${request.cwd && request.cwd !== "." ? request.cwd : ""}`, image(spec), request.executable ?? "", ...(request.args ?? [])];
+      "--workdir", `/workspace/${cwd !== "." ? cwd : ""}`, image(spec), request.executable ?? "", ...(request.args ?? [])];
     const result = await docker(args, 30_000); if (result.exitCode !== 0) { await cleanupSecrets(name); throw new ResourceError("PROCESS_START_FAILED", result.stderr.slice(-2000), 422); }
     processes.set(processId, { workspaceId, name, mode: request.mode, startedAt, timeoutAt });
     return { processId, status: "running", mode: request.mode, timeoutAt: new Date(timeoutAt).toISOString() };

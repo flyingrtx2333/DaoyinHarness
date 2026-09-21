@@ -10,6 +10,7 @@ const object = (properties: Record<string, unknown>, required: string[] = []): R
 const id = { type: "string", pattern: "^(?:res|wsp|snp|art|dep|prc)_[a-f0-9]{24}$" };
 const workspaceId = { type: "string", pattern: "^wsp_[a-f0-9]{24}$" };
 const path = { type: "string", minLength: 1, maxLength: 512 };
+const cwd = { type: "string", pattern: "^(?:\\.|(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).{1,512})$" };
 const processMode = { type: "string", enum: ["foreground", "background", "pty"] };
 const workspaceSource = { oneOf: [
   object({ kind: { type: "string", const: "empty" } }, ["kind"]),
@@ -19,7 +20,7 @@ const workspaceSource = { oneOf: [
 ] };
 const deploymentSpec = object({
   version: { type: "integer", const: 1 }, kind: { type: "string", const: "web-service" },
-  command: object({ executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd: path }, ["executable", "args", "cwd"]),
+  command: object({ executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd }, ["executable", "args", "cwd"]),
   transport: { oneOf: [object({ kind: { type: "string", const: "tcp" }, port: { type: "integer", minimum: 1024, maximum: 65535 } }, ["kind", "port"]),
     object({ kind: { type: "string", const: "unix" }, path: { type: "string", const: "/run/app/app.sock" } }, ["kind", "path"])] },
   health: object({ path: { type: "string", pattern: "^/", maxLength: 256 }, timeoutSeconds: { type: "integer", minimum: 1, maximum: 120 } }, ["path", "timeoutSeconds"]),
@@ -51,8 +52,8 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   git_checkout: { description: "Checkout an existing revision in an attached workspace without accessing the host repository.", mutating: true, inputSchema: object({ workspaceId, revision: { type: "string", minLength: 1, maxLength: 200 } }, ["workspaceId", "revision"]) },
   git_commit: { description: "Create a local workspace commit. It does not push to a remote.", mutating: true, inputSchema: object({ workspaceId, message: { type: "string", minLength: 1, maxLength: 500 } }, ["workspaceId", "message"]) },
   git_export_patch: { description: "Export the current Git changes as an immutable patch artifact.", mutating: true, inputSchema: object({ workspaceId }, ["workspaceId"]) },
-  process_run: { description: "Run a bounded foreground executable with an argument array inside the workspace gVisor sandbox.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd: path, stdin: { type: "string", maxLength: 1000000 }, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args"]) },
-  process_start: { description: "Start a background or PTY process inside the workspace gVisor sandbox.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd: path, processMode, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args", "processMode"]) },
+  process_run: { description: "Run a bounded foreground executable with an argument array inside the workspace gVisor sandbox. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, stdin: { type: "string", maxLength: 1000000 }, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args"]) },
+  process_start: { description: "Start a background or PTY process inside the workspace gVisor sandbox. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, processMode, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args", "processMode"]) },
   process_read: { description: "Read incremental output from a workspace process by cursor.", mutating: false, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, cursor: { type: "integer", minimum: 0 } }, ["workspaceId", "processId"]) },
   process_write: { description: "Write bounded stdin to a running PTY process.", mutating: true, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, stdin: { type: "string", maxLength: 1000000 } }, ["workspaceId", "processId", "stdin"]) },
   process_stop: { description: "Stop a running workspace process and its process group.", mutating: true, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, signal: { type: "string", enum: ["TERM", "KILL", "INT"] } }, ["workspaceId", "processId"]) },
