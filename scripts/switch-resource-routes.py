@@ -48,7 +48,7 @@ def main() -> None:
         raise RuntimeError("Run as root with --apply during the approved maintenance window.")
     config = pathlib.Path(args.nginx_config).resolve()
     original = config.read_text(encoding="utf-8")
-    managed_marker = "# Managed exclusively independent Harness project executor."
+    managed_marker = "# Managed exclusively by the independent Harness project executor."
     has_demo_route = ".demo.daoyintech.com" in original
     if managed_marker not in original or not has_demo_route or original.count("proxy_pass http://127.0.0.1:4715;") != 1:
         raise RuntimeError("The supplied file is not the exact managed legacy deployment route.")
