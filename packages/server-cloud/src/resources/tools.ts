@@ -11,6 +11,12 @@ const id = { type: "string", pattern: "^(?:res|wsp|snp|art|dep|prc)_[a-f0-9]{24}
 const workspaceId = { type: "string", pattern: "^wsp_[a-f0-9]{24}$" };
 const path = { type: "string", minLength: 1, maxLength: 512 };
 const processMode = { type: "string", enum: ["foreground", "background", "pty"] };
+const workspaceSource = { oneOf: [
+  object({ kind: { type: "string", const: "empty" } }, ["kind"]),
+  object({ kind: { type: "string", const: "git" }, url: { type: "string", pattern: "^https://", maxLength: 2000 }, revision: { type: "string", minLength: 1, maxLength: 200 } }, ["kind", "url", "revision"]),
+  object({ kind: { type: "string", const: "upload" }, artifactId: { type: "string", pattern: "^art_[a-f0-9]{24}$" } }, ["kind", "artifactId"]),
+  object({ kind: { type: "string", const: "snapshot" }, snapshotId: { type: "string", pattern: "^snp_[a-f0-9]{24}$" } }, ["kind", "snapshotId"]),
+] };
 const deploymentSpec = object({
   version: { type: "integer", const: 1 }, kind: { type: "string", const: "web-service" },
   command: object({ executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd: path }, ["executable", "args", "cwd"]),
@@ -25,7 +31,7 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   resource_list: { description: "List resources available to the account and resources attached to this session.", mutating: false, inputSchema: object({ sessionId: { type: "string", maxLength: 160 } }) },
   resource_attach: { description: "Attach an owned resource to the current session.", mutating: true, inputSchema: object({ resourceId: id }, ["resourceId"]) },
   resource_detach: { description: "Detach a resource from the current session without deleting it.", mutating: true, inputSchema: object({ resourceId: id }, ["resourceId"]) },
-  workspace_create: { description: "Create a language- and task-neutral cloud workspace from an empty tree, Git source, upload or snapshot. runtimeId is required: choose node22, python313, go125 or rust190; use node22 only when no language was requested.", mutating: true, inputSchema: object({ title: { type: "string", minLength: 1, maxLength: 120 }, source: { type: "object" }, runtimeId: { type: "string", enum: ["node22", "python313", "go125", "rust190"] } }, ["title", "runtimeId"]) },
+  workspace_create: { description: "Create a language- and task-neutral cloud workspace from an empty tree, credential-free HTTPS Git source at an explicit revision, upload artifact or existing snapshot. runtimeId is required: choose node22, python313, go125 or rust190; use node22 only when no language was requested.", mutating: true, inputSchema: object({ title: { type: "string", minLength: 1, maxLength: 120 }, source: workspaceSource, runtimeId: { type: "string", enum: ["node22", "python313", "go125", "rust190"] } }, ["title", "source", "runtimeId"]) },
   workspace_inspect: { description: "Inspect one attached workspace, runtime, limits and snapshots.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   workspace_snapshot: { description: "Create an immutable content-addressed snapshot of the current workspace.", mutating: true, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   workspace_restore: { description: "Restore an attached workspace to one of its immutable snapshots.", mutating: true, inputSchema: object({ workspaceId, snapshotId: { type: "string", pattern: "^snp_[a-f0-9]{24}$" } }, ["workspaceId", "snapshotId"]) },

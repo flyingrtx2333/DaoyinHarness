@@ -11,6 +11,7 @@ interface Deployment { id: string; status: string; endpoint: string | null; crea
 interface NetworkRow { id: number; hostname: string; port: number; method: string | null; decision: string; bytesReceived: string }
 interface ResourceEvent { sequence: number; eventType: string; occurredAt: string; runId: string | null; payload: unknown }
 interface Inspection { workspace: Resource; snapshots: Snapshot[]; processes: Process[]; artifacts: Artifact[]; deployments: Deployment[]; network: NetworkRow[]; events: ResourceEvent[] }
+type RuntimeId = "node22" | "python313" | "go125" | "rust190";
 const labels: Record<string, string> = { workspace: "工作区", artifact: "制品", deployment: "部署", database: "数据库", browser: "浏览器", business: "业务资源" };
 
 export function ResourceWorkspace({ client, ready, sessionId, onDevelop }: {
@@ -20,7 +21,7 @@ export function ResourceWorkspace({ client, ready, sessionId, onDevelop }: {
   const [selected, setSelected] = useState(""), [inspection, setInspection] = useState<Inspection>();
   const [entries, setEntries] = useState<Entry[]>([]), [file, setFile] = useState(""), [content, setContent] = useState("");
   const [tab, setTab] = useState<"files" | "processes" | "snapshots" | "artifacts" | "network" | "deployments" | "events">("files");
-  const [title, setTitle] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [title, setTitle] = useState(""), [runtimeId, setRuntimeId] = useState<RuntimeId>("node22"), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const workspace = useMemo(() => attached.find((item) => item.id === selected && item.kind === "workspace"), [attached, selected]);
   const call = useCallback(<T,>(action: string, input: Record<string, unknown> = {}): Promise<T> => {
     if (!sessionId) return Promise.reject(new Error("请先选择一个会话，再管理其挂载资源。"));
@@ -49,8 +50,12 @@ export function ResourceWorkspace({ client, ready, sessionId, onDevelop }: {
     <header className="project-heading"><h1>资源</h1><button disabled={!ready || busy || !sessionId} onClick={() => void perform(refresh)}>刷新</button></header>
     {error && <p className="project-error" role="alert">{error}</p>}
     {!ready ? <p>请先登录道引账号。</p> : !sessionId ? <p>选择一个会话后查看挂载资源。</p> : <>
-      <form className="project-create" onSubmit={(event) => { event.preventDefault(); void perform(async () => { const result = await call<{ workspace: Resource }>("workspace_create", { title, source: { kind: "empty" } }); setTitle(""); await refresh(); setSelected(result.workspace.id); }); }}>
-        <input aria-label="新工作区名称" placeholder="新工作区名称" value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} required /><button disabled={busy || !title.trim()}>创建工作区</button>
+      <form className="project-create" onSubmit={(event) => { event.preventDefault(); void perform(async () => { const result = await call<{ workspace: Resource }>("workspace_create", { title, source: { kind: "empty" }, runtimeId }); setTitle(""); await refresh(); setSelected(result.workspace.id); }); }}>
+        <input aria-label="新工作区名称" placeholder="新工作区名称" value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} required />
+        <select aria-label="运行时" value={runtimeId} onChange={(event) => setRuntimeId(event.target.value as RuntimeId)}>
+          <option value="node22">Node.js 22</option><option value="python313">Python 3.13</option><option value="go125">Go 1.25</option><option value="rust190">Rust 1.90</option>
+        </select>
+        <button disabled={busy || !title.trim()}>创建工作区</button>
       </form>
       <div className="project-layout"><aside className="project-list" aria-label="资源列表">
         {attached.length === 0 && <p>本会话尚未挂载资源。</p>}

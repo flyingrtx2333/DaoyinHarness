@@ -75,7 +75,7 @@ function managedEndpoint(value: string): string {
 
 function requestedAudit(request: ResourceControlRequest): JsonValue {
   const value: Record<string, JsonValue> = { action: request.action };
-  for (const key of ["workspaceId", "resourceId", "snapshotId", "artifactId", "deploymentId", "processId", "path", "from", "to",
+  for (const key of ["workspaceId", "resourceId", "snapshotId", "artifactId", "deploymentId", "processId", "runtimeId", "path", "from", "to",
     "searchMode", "glob", "executable", "cwd", "revision", "endpoint"] as const) {
     const item = request[key]; if (typeof item === "string") value[key] = item;
   }
