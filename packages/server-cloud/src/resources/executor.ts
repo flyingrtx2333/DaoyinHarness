@@ -285,7 +285,10 @@ async function materialize(workspaceId: string, entries: readonly WorkspaceEntry
       assertWorkspacePath(entry.path);
       if (/^(?:\.harness(?:\/|$)|\.harness-restore-|lost\+found(?:\/|$))/u.test(entry.path)) throw new ResourceError("WORKSPACE_PATH_RESERVED", "Snapshot contains a reserved workspace path.");
       const target = path.join(temporary, entry.path); await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-      if (entry.kind === "file") await writeFile(target, await content.read(entry.blobHash), { mode: entry.mode, flag: "wx" });
+      if (entry.kind === "file") {
+        await writeFile(target, await content.read(entry.blobHash), { mode: entry.mode, flag: "wx" });
+        await chmod(target, entry.mode);
+      }
       else { if (path.isAbsolute(entry.target) || path.normalize(path.join(path.dirname(entry.path), entry.target)).startsWith("..")) throw new ResourceError("WORKSPACE_SYMLINK_ESCAPE", "Snapshot contains an escaping symbolic link."); await symlink(entry.target, target); }
     }
     for (const name of await readdir(root)) if (path.join(root, name) !== temporary) await rm(path.join(root, name), { recursive: true, force: true });
