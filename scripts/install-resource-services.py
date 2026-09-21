@@ -123,7 +123,8 @@ def prepare(release: pathlib.Path) -> dict[str, object]:
     grp.getgrnam("daoyin-projects")
     account = ensure_user("daoyin-resources", "daoyin-resources", str(STATE))
     builder = ensure_user("daoyin-resource-builder", "daoyin-resource-builder", str(STATE / "builds"))
-    command(["usermod", "-a", "-G", "daoyin-agent,daoyin-resource-executor,daoyin-projects", "daoyin-resources"])
+    command(["usermod", "-a", "-G", "daoyin-agent,daoyin-resource-executor,daoyin-resource-builder,daoyin-projects", "daoyin-resources"])
+    command(["usermod", "-a", "-G", "daoyin-resources", "daoyin-agent"])
     runtimes = json.loads(command(["docker", "info", "--format", "{{json .Runtimes}}"] ).stdout)
     detected_gvisor = next((name for name in ("harness-runsc", "runsc") if name in runtimes), "")
 
@@ -269,7 +270,7 @@ Requires=daoyin-resource-executor.service daoyin-resource-builder.service daoyin
 Type=simple
 User=daoyin-resources
 Group=daoyin-resources
-SupplementaryGroups=daoyin-agent daoyin-resource-executor daoyin-projects
+SupplementaryGroups=daoyin-agent daoyin-resource-executor daoyin-resource-builder daoyin-projects
 EnvironmentFile={CONFIG / 'service.env'}
 RuntimeDirectory=daoyin-resources
 RuntimeDirectoryMode=0750
