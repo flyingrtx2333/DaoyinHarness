@@ -2,7 +2,7 @@ import { assertExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness
 import type { JsonValue } from "@daoyin/harness-protocol";
 import type { CloudProfile, CloudToolBinding } from "./app.js";
 import { orchestrationPolicyBindings, parseSaishiResult, validateSaishiInput, type SaishiClient } from "./saishi-profile.js";
-import { createStoryListProjectsBinding, validateStoryInput } from "./story-profile.js";
+import { validateStoryInput } from "./story-profile.js";
 
 const SAISHI = new Set(["saishi_list_events", "saishi_get_event", "saishi_list_cameras", "saishi_list_materials",
   "saishi_list_images", "saishi_get_map", "saishi_find_participants", "saishi_get_timeline", "saishi_get_job",
@@ -53,7 +53,8 @@ export function createWorkbenchProfile(catalog: unknown, identity: ExecutionIden
       validateInput: validate,
       authorizeResource: async (request, current, signal) => isWorkbenchIdentity(current) && current.authorizationId === identity.authorizationId &&
         validate(request.input) && await client.authorize(name, request.input, current, request.id, signal),
-      definition: { name, description: raw.description, category: "extension", mutating: STORY_MUTATING.has(name), inputSchema: schema,
+      definition: { name, description: name === "story_call" ? `${raw.description} 查询短剧项目时直接调用 operation=list_projects；不要先调用 story_capabilities。` : raw.description,
+        category: "extension", mutating: STORY_MUTATING.has(name), inputSchema: schema,
         auditInput: input => ({ target: input.target, video_id: input.video_id, event_id: input.event_id, queryLength: typeof input.query === "string" ? input.query.length : 0 }),
         execute: async (input, signal, context) => {
           const current = context.executionIdentity;
@@ -67,6 +68,5 @@ export function createWorkbenchProfile(catalog: unknown, identity: ExecutionIden
         } } };
   });
   if (seen.size !== SAISHI.size + STORY.size + 1) throw new Error("Incomplete workbench catalog.");
-  return { id: "daoyin-workbench", version: "1", instructions: catalog.instructions,
-    tools: [...tools, createStoryListProjectsBinding(identity, client, isWorkbenchIdentity), ...orchestrationPolicyBindings()] };
+  return { id: "daoyin-workbench", version: "1", instructions: catalog.instructions, tools: [...tools, ...orchestrationPolicyBindings()] };
 }
