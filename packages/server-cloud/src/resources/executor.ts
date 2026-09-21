@@ -107,9 +107,18 @@ async function safePath(workspaceId: string, relative: string, forCreation = fal
 
 async function saveRuntime(workspaceId: string, spec: RuntimeSpec): Promise<void> {
   const directory = path.join(workspaceRoot(workspaceId), ".harness");
-  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await mkdir(directory, { recursive: true, mode: 0o711 });
+  await chmod(directory, 0o711);
   await writeFile(path.join(directory, "runtime.json"), JSON.stringify(spec), { mode: 0o600 });
   await chown(directory, 0, 0); await chown(path.join(directory, "runtime.json"), 0, 0);
+}
+
+async function ensureWorkspaceRuntimeDirectories(workspaceId: string): Promise<void> {
+  const directory = path.join(workspaceRoot(workspaceId), ".harness");
+  await mkdir(directory, { recursive: true, mode: 0o711 }); await chmod(directory, 0o711); await chown(directory, 0, 0);
+  for (const name of ["home", "cache", "python-user", "npm-global", "cargo", "go"]) {
+    const target = path.join(directory, name); await mkdir(target, { recursive: true, mode: 0o700 }); await chmod(target, 0o700); await chown(target, 1000, 1000);
+  }
 }
 
 async function ensureWorkspaceStorage(workspaceId: string, diskMiB: number): Promise<void> {
@@ -258,12 +267,18 @@ async function redactSecretOutput(name: string, value: string): Promise<string> 
 
 async function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, runId = "system"): Promise<string[]> {
   const root = workspaceRoot(workspaceId); const network = spec.network === "public" ? EGRESS_NETWORK : "none";
+  await ensureWorkspaceRuntimeDirectories(workspaceId);
   return ["run", "--runtime", RUNTIME, "--name", name, "--label", "daoyin.harness.resource=1", "--label", `daoyin.harness.workspace=${workspaceId}`,
     "--network", network, "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
     "--memory", `${spec.limits.memoryMiB}m`, "--memory-swap", `${spec.limits.memoryMiB}m`, "--cpus", String(spec.limits.cpu), "--pids-limit", String(spec.limits.pids),
     "--ulimit", "nofile=2048:2048", "--log-driver", "local", "--log-opt", "max-size=4m", "--log-opt", "max-file=3",
     "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777", "--mount", `type=bind,src=${root},dst=/workspace`, "--workdir", "/workspace",
-    "--env", "HOME=/tmp", "--env", "CI=1", "--env", "NO_COLOR=1",
+    "--env", "HOME=/workspace/.harness/home", "--env", "XDG_CACHE_HOME=/workspace/.harness/cache",
+    "--env", "PYTHONUSERBASE=/workspace/.harness/python-user", "--env", "PIP_CACHE_DIR=/workspace/.harness/cache/pip",
+    "--env", "NPM_CONFIG_CACHE=/workspace/.harness/cache/npm", "--env", "NPM_CONFIG_PREFIX=/workspace/.harness/npm-global",
+    "--env", "CARGO_HOME=/workspace/.harness/cargo", "--env", "GOPATH=/workspace/.harness/go", "--env", "GOMODCACHE=/workspace/.harness/go/pkg/mod",
+    "--env", "PATH=/workspace/.harness/python-user/bin:/workspace/.harness/npm-global/bin:/workspace/.harness/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "--env", "CI=1", "--env", "NO_COLOR=1",
     ...(spec.network === "public" ? await egressArguments(workspaceId, runId, spec.limits.timeoutSeconds) : []),
     ...safeEnvironment(spec.environment)];
 }
