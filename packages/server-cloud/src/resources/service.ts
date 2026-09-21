@@ -2,7 +2,7 @@ import http from "node:http";
 import { createHash } from "node:crypto";
 import { chmod, chown, mkdir, unlink } from "node:fs/promises";
 import { Pool, type PoolConfig } from "pg";
-import { assertExecutionIdentity, type DeploymentSpec, type ExecutionIdentity, type WorkspaceEntry } from "@daoyin/harness-contracts";
+import { assertExecutionIdentity, defaultRuntimeSpec, type DeploymentSpec, type ExecutionIdentity, type WorkspaceEntry } from "@daoyin/harness-contracts";
 import type { JsonValue } from "@daoyin/harness-protocol";
 import { FileContentStore } from "./content-store.js";
 import { ResourceError, ResourceRepository } from "./repository.js";
@@ -18,6 +18,7 @@ const database = process.env.HARNESS_RESOURCES_DATABASE_URL ?? "";
 const contentRoot = process.env.HARNESS_CONTENT_STORE_ROOT ?? "";
 const allowed = new Set((process.env.HARNESS_RESOURCES_ALLOWED_USERS ?? "").split(",").filter(Boolean));
 const allEnabled = process.env.HARNESS_RESOURCES_ENABLED === "1";
+const runtimeImages = JSON.parse(process.env.HARNESS_RUNTIME_IMAGES ?? "{}") as Record<string, { digest?: unknown }>;
 const defaultRuntime = process.env.HARNESS_DEFAULT_RUNTIME ? JSON.parse(process.env.HARNESS_DEFAULT_RUNTIME) as import("@daoyin/harness-contracts").RuntimeSpec : undefined;
 const bootstrapRuntime = process.env.HARNESS_BUILDER_BOOTSTRAP_RUNTIME ? JSON.parse(process.env.HARNESS_BUILDER_BOOTSTRAP_RUNTIME) as import("@daoyin/harness-contracts").RuntimeSpec : undefined;
 if (!database || !contentRoot) throw new Error("Resource database and content store configuration are required.");
@@ -174,7 +175,13 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
     return { summary: "Resource detached." };
   }
   if (request.action === "workspace_create") {
-    const selectedRuntime = request.runtime ?? defaultRuntime;
+    if (request.runtime !== undefined && request.runtimeId !== undefined) throw new ResourceError("WORKSPACE_INPUT_INVALID", "Choose runtimeId or runtime, not both.");
+    const selectedImage = request.runtimeId === undefined ? undefined : runtimeImages[request.runtimeId];
+    if (request.runtimeId !== undefined && (selectedImage === undefined || typeof selectedImage.digest !== "string")) {
+      throw new ResourceError("WORKSPACE_INPUT_INVALID", "The selected signed runtime is unavailable.");
+    }
+    const selectedRuntime = request.runtime ?? (request.runtimeId === undefined ? defaultRuntime :
+      defaultRuntimeSpec({ kind: "builtin", id: request.runtimeId, digest: selectedImage!.digest as string }));
     if (!selectedRuntime) throw new ResourceError("WORKSPACE_INPUT_INVALID", "A signed workspace runtime is required.");
     assertRuntimeSpec(selectedRuntime);
     if (request.runtime?.image.kind === "dockerfile" && request.runtime.image.imageDigest) {

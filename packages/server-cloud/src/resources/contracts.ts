@@ -28,6 +28,7 @@ export interface ResourceControlRequest {
   processId?: string;
   title?: string;
   source?: WorkspaceSource;
+  runtimeId?: "node22" | "python313" | "go125" | "rust190";
   runtime?: RuntimeSpec;
   entries?: WorkspaceEntry[];
   path?: string;
