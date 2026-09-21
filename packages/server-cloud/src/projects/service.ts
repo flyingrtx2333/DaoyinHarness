@@ -23,6 +23,7 @@ const dbConfig:PoolConfig={host:dbUrl.searchParams.get("host")??dbUrl.hostname,p
 const pool=new Pool(dbConfig),repository=new ProjectRepository(pool),brokers=new ProjectBrokers(pool,dbConfig,brokerKey);
 const allowed=new Set((process.env.HARNESS_PROJECTS_ALLOWED_USERS??"").split(",").filter(Boolean));
 const allEnabled=process.env.HARNESS_PROJECTS_ENABLED==="1";
+const brokerOnly=process.env.HARNESS_PROJECTS_BROKER_ONLY==="1";
 let workerBusy=false;
 const touches=new Map<string,number>();
 const exec=(body:ExecutorRequest):Promise<Record<string,unknown>>=>unixJson(executor,"/execute",body,undefined,650000);
@@ -285,16 +286,17 @@ if(!acquired.rows[0]?.locked)throw new Error("Another project service owns execu
 lease.on("error",()=>process.exit(1));
 const interrupted=(await pool.query<{project_id:string;kind:string;result:{versionId?:string}}>("UPDATE harness_project_operations SET status='interrupted',error='服务重启中断了操作；请检查状态后重新执行，原网站保留。',updated_at=now() WHERE status='running' RETURNING project_id,kind,result")).rows;
 for(const op of interrupted){
- const versionId=op.result?.versionId;if(versionId)await stopCandidate(op.project_id,versionId,op.kind==="publish"||op.kind==="rollback"?"production":"development").catch(()=>undefined);
+ const versionId=op.result?.versionId;if(!brokerOnly&&versionId)await stopCandidate(op.project_id,versionId,op.kind==="publish"||op.kind==="rollback"?"production":"development").catch(()=>undefined);
 }
 const existingProjects=(await pool.query<{id:string;active_version:string|null}>("SELECT id,active_version FROM harness_projects")).rows;
 for(const project of existingProjects){
- if(project.active_version){await brokers.ensure(project.id,"production");await exec({action:"reconcile",projectId:project.id,versionId:project.active_version,mode:"production"}).catch(()=>undefined);}
+  if(project.active_version){await brokers.ensure(project.id,"production");if(!brokerOnly)await exec({action:"reconcile",projectId:project.id,versionId:project.active_version,mode:"production"}).catch(()=>undefined);}
  const preview=(await pool.query("SELECT id FROM harness_project_operations WHERE project_id=$1 AND kind='preview' AND status='completed' LIMIT 1",[project.id])).rowCount;
- if(preview){await brokers.ensure(project.id,"development");touches.set(project.id,Date.now());}
+ if(!brokerOnly&&preview){await brokers.ensure(project.id,"development");touches.set(project.id,Date.now());}
 }
 await mkdir("/run/daoyin-projects",{recursive:true,mode:0o750});await unlink(socket).catch(()=>undefined);
 http.createServer((req,res)=>{
+  if(brokerOnly){res.writeHead(410,{"Content-Type":"application/json"}).end(JSON.stringify({error:{code:"PROJECT_RUNTIME_RETIRED",message:"Legacy project execution has moved to generic resources."}}));return;}
   if(req.method!=="POST"||req.url!=="/control"){res.writeHead(404).end();return;}
   let body="";req.on("data",(b:Buffer)=>{body+=b.toString();if(Buffer.byteLength(body)>1048576)req.destroy();});
   const controller=new AbortController();
@@ -306,7 +308,7 @@ http.createServer((req,res)=>{
   });});
 }).listen(socket,()=>{void chown(socket,process.getuid!(),Number(process.env.HARNESS_PROJECT_CONTROL_GID)).then(()=>chmod(socket,0o660));});
 gateway.listen(4715,"127.0.0.1");
-setInterval(()=>{void worker();},2000).unref();
+if(!brokerOnly)setInterval(()=>{void worker();},2000).unref();
 setInterval(()=>{void(async()=>{
   for(const[id,at]of touches)if(Date.now()-at>900000){await exec({action:"stop",projectId:id,mode:"development"}).catch(()=>undefined);touches.delete(id);}
   await pool.query("DELETE FROM harness_project_preview_tickets WHERE expires_at<now()");

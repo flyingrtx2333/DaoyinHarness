@@ -5,6 +5,8 @@ import type {
   SessionCompaction,
 } from "@daoyin/harness-protocol";
 
+export * from "./resources.js";
+
 /** Implementations must be bound to an authorized namespace, never a global ID lookup. */
 export interface SessionEventStore {
   append<TType extends AgentEventType>(event: PendingAgentEvent<TType>): Promise<AgentEvent>;

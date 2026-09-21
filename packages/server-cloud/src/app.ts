@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { registerProjectAuthorization } from "./projects/authorization.js";
 import { createProjectTools, PROJECT_INSTRUCTIONS, cancelProjectRun } from "./projects/tools.js";
 import { registerProjectRoutes } from "./projects/routes.js";
+import { cancelResourceRun, createResourceTools, RESOURCE_INSTRUCTIONS } from "./resources/tools.js";
+import { registerResourceRoutes } from "./resources/routes.js";
 import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createCloudOrchestrationTools, validateCloudOrchestrationInput } from "./cloud-orchestration.js";
 export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
@@ -59,6 +61,8 @@ export interface CloudServerOptions {
   runTimeoutMs?: number;
   eventStream?: EventStreamLimits;
   capabilityRouterMode?: "off" | "shadow" | "enforce";
+  generalResourcesMode?: "off" | "shadow" | "enforce";
+  /** 语义能力提供方工厂 */
   createCapabilitySemantic?(identity: ExecutionIdentity, run: CloudRun): CapabilitySemanticProvider;
   telemetry?: Telemetry;
   /** Trusted platform check; absence disables cross-application memory sharing. */
@@ -141,6 +145,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   const maxConcurrentRuns = options.maxConcurrentRuns ?? 4;
   const runTimeoutMs = options.runTimeoutMs ?? 120_000;
   const capabilityRouterMode = options.capabilityRouterMode ?? "off";
+  const generalResourcesMode = options.generalResourcesMode ?? "off";
   if (!Number.isSafeInteger(maxConcurrentRuns) || maxConcurrentRuns < 1 || maxConcurrentRuns > 32 ||
       !Number.isSafeInteger(runTimeoutMs) || runTimeoutMs < 100 || runTimeoutMs > 600_000) throw new Error("Invalid cloud runtime limits.");
   const app = Fastify({ logger: false, forceCloseConnections: true, bodyLimit: 64_000,
@@ -280,7 +285,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   });
 
   registerProjectAuthorization(app, { repository: options.repository, ensureActive });
-  registerProjectRoutes(app, { repository: options.repository, identityFor, ensureActive });
+  if (generalResourcesMode !== "enforce") registerProjectRoutes(app, { repository: options.repository, identityFor, ensureActive });
+  if (generalResourcesMode === "enforce") registerResourceRoutes(app, { repository: options.repository, identityFor, ensureActive });
   registerCloudEventStream(app, { repository: options.repository, identityFor, ensureActive: ensureTransportActive,
     ...(options.eventStream === undefined ? {} : { limits: options.eventStream }) });
 
@@ -380,7 +386,10 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const stores: BoundRunStores = { ...bound, events: {
           read: (sessionId, after) => bound.events.read(sessionId, after),
           append: (pending) => measurements.measure(run.id, "event_persist", async () => {
-            if (pending.type === "turn.cancelled") await cancelProjectRun(identity, run.id).catch(() => undefined);
+            if (pending.type === "turn.cancelled") {
+              await cancelProjectRun(identity, run.id).catch(() => undefined);
+              if (generalResourcesMode === "enforce") await cancelResourceRun(identity, run.id).catch(() => undefined);
+            }
             if (["turn.completed", "turn.failed", "turn.cancelled"].includes(pending.type)) {
               const children = await options.repository.listChildRuns?.(identity, run.id) ?? [];
               if (children.some((child) => child.run.status === "running")) throw new CloudError(409, "CHILDREN_NOT_SETTLED", "子任务尚未全部收尾，父任务不能报告完成。");
@@ -398,8 +407,9 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           toolCalls++;
         };
         const orchestrationAvailable = identity.space.kind !== "public" && options.repository.acceptChildRun !== undefined && options.repository.listChildRuns !== undefined;
-        const projectBindings = createProjectTools(identity, run, ensureActive);
-        const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? []), ...episodicBindings, ...projectBindings];
+        const projectBindings = generalResourcesMode === "enforce" ? [] : createProjectTools(identity, run, ensureActive);
+        const resourceBindings = generalResourcesMode === "enforce" ? createResourceTools(identity, run, ensureActive) : [];
+        const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? []), ...episodicBindings, ...projectBindings, ...resourceBindings];
         const bindings = new Map(runBindings.map((binding) => [binding.definition.name, binding]));
         const videoConfirmationTool = identity.space.kind === "public" ? undefined
           : videoInteractions.createTool(run, identity, stores.events, bindings, { suspendRunDeadline, resumeRunDeadline });
@@ -597,7 +607,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const childTools = new ToolRegistry(wrappedDefinitions.filter((definition) => definition.mutating === false &&
           !isMemoryToolName(definition.name) && !isEpisodicMemoryToolName(definition.name)), { authorize });
         const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
-          tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}`, signal: controller.signal,
+          tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}`, signal: controller.signal,
           remainingModelCalls: () => maxModelCalls - modelCalls, chargeTool, createModel: createMeteredModel, ensureActive });
         const tools = new ToolRegistry([...wrappedDefinitions,
           ...(capabilitySearchTool === undefined ? [] : [capabilitySearchTool]),
@@ -634,7 +644,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const engine = new AgentEngine({
           model, tools, events: engineEvents, compactionStore: stores.compactions,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
-          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
+          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: maxModelCalls, maxToolCalls: 24,
         });
         await engine.runTurn({

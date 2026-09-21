@@ -6,6 +6,26 @@ interface Group {
   match(name: string): boolean;
 }
 const groups: readonly Group[] = [
+  { id: "resource.catalog", title: "资源与工作区", summary: "列出、挂载和创建通用资源或工作区。", risk: "write",
+    intents: ["查看资源", "挂载工作区", "创建工作区", "导入代码仓库"], examples: ["列出当前资源", "从这个 Git 仓库创建工作区"],
+    match: (name) => ["resource_list", "resource_attach", "resource_detach", "workspace_create", "workspace_inspect"].includes(name) },
+  { id: "resource.files", title: "工作区文件", summary: "读取、搜索和修改任意语言工作区中的文件。", risk: "write",
+    intents: ["读取文件", "搜索代码", "修改代码", "整理文件"], examples: ["搜索这个符号并修改实现", "读取配置文件"],
+    match: (name) => name.startsWith("file_") },
+  { id: "resource.vcs", title: "版本控制", summary: "在隔离工作区中检查 Git、提交修改和导出补丁。", risk: "write",
+    intents: ["检查 Git", "提交代码", "导出补丁", "切换分支"], examples: ["查看当前 diff", "提交并导出补丁"],
+    match: (name) => name.startsWith("git_") },
+  { id: "resource.runtime", title: "隔离进程", summary: "在 gVisor 工作区中运行前台、后台或交互式进程。", risk: "write",
+    intents: ["运行命令", "安装依赖", "启动服务", "运行测试", "读取日志"], examples: ["运行 pytest", "启动服务并查看日志"],
+    match: (name) => name.startsWith("process_") },
+  { id: "resource.snapshot", title: "快照与制品", summary: "创建或恢复内容寻址快照，并保存不可变制品。", risk: "write",
+    intents: ["保存快照", "恢复版本", "生成制品"], examples: ["保存当前工作区快照", "把构建结果保存为制品"],
+    match: (name) => ["workspace_snapshot", "workspace_restore", "artifact_create", "artifact_read", "artifact_list"].includes(name) },
+  { id: "resource.deployment-status", title: "部署状态", summary: "查询不可变部署的健康状态和访问地址。", risk: "read",
+    intents: ["查询部署", "查看线上状态"], examples: ["查看当前部署状态"], match: (name) => name === "deployment_status" },
+  { id: "resource.deployment", title: "通用部署", summary: "部署不可变制品或回滚到之前的健康部署。", risk: "high",
+    intents: ["部署制品", "回滚部署"], examples: ["部署当前制品", "回滚到上一次健康部署"],
+    match: (name) => ["deployment_create", "deployment_rollback"].includes(name) },
   { id: "story.projects", title: "短剧项目", summary: "查询短剧能力目录或直接执行短剧项目操作。", risk: "write",
     intents: ["查询短剧项目", "查看我做过的短剧", "查找短剧项目"], examples: ["我做过哪些短剧项目", "列出我的短剧项目"],
     match: (name) => ["story_capabilities", "story_call"].includes(name) },
@@ -51,7 +71,8 @@ export function capabilityPacksFor(tools: readonly ToolDescriptor[]): Capability
     packs.push({
       id: group.id, version: "1", title: group.title, summary: group.summary,
       intents: group.intents, examples: group.examples, negativeExamples: negatives(group.risk),
-      toolNames: names, dependencies: [], resourceKinds: group.id.startsWith("project.") ? ["project"] : [],
+      toolNames: names, dependencies: [], resourceKinds: group.id.startsWith("project.") ? ["project"]
+        : group.id.startsWith("resource.") ? ["workspace", "artifact", "deployment"] : [],
       requiredContext: [], risk: group.risk,
     });
   }

@@ -8,3 +8,7 @@ export {
 } from "./company-profile.js";
 // The optional SQLite adapter lives at /sqlite so importing the API does not load node:sqlite.
 export { createPlatformAdapters, createPlatformCloudServer, type PlatformAdapterOptions } from "./platform-adapter.js";
+export { cancelResourceRun, createResourceTools, resourceCall, RESOURCE_INSTRUCTIONS } from "./resources/tools.js";
+export { ResourceRepository, ResourceError } from "./resources/repository.js";
+export { FileContentStore, type ContentStore } from "./resources/content-store.js";
+export { RESOURCE_TOOL_NAMES, type ResourceControlRequest, type ResourceToolName } from "./resources/contracts.js";

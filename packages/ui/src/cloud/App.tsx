@@ -1,4 +1,4 @@
-import { ProjectWorkspace } from "./ProjectWorkspace.js";
+import { ResourceWorkspace } from "./ResourceWorkspace.js";
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import { MarkdownMessage } from "../MarkdownMessage.js";
@@ -17,8 +17,7 @@ import { hasCreatedStoryVideo, StoryVideos } from "./StoryVideos.js";
 import { StoryProductions, storyProductionIds } from "./StoryProductions.js";
 import { AssetLibrary } from "./AssetLibrary.js";
 import { MemoryWorkspace } from "./MemoryWorkspace.js";
-import { ConversationConcepts } from "./ConversationConcepts.js";
-import { ConversationProjectPreview } from "./ConversationProjectPreview.js";
+import { ConversationResourcePreview } from "./ConversationResourcePreview.js";
 import { StoryUpload, type StoryReference } from "./StoryUpload.js";
 import { ImageGallery } from "./ImageGallery.js";
 import { DEFAULT_PREFERENCES, PREFERENCES_KEY, isSendShortcut, readPreferences, type WorkbenchPreferences } from "./preferences.js";
@@ -353,7 +352,7 @@ export function App(): React.JSX.Element {
     <aside className={`sidebar ${sidebar ? "is-open" : ""}`} aria-label="会话导航" onKeyDown={(event) => { if (event.key === "Escape" && sidebar) { event.preventDefault(); closeSidebar(); } }}>
       <button type="button" className="sidebar-close" aria-label="关闭会话导航" onClick={closeSidebar}>×</button>
       <a className="brand" href="/"><span className="brand-mark" aria-hidden="true"><HarnessLogo /></span><span>道引 Harness</span></a>
-      <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "projects" ? "page" : undefined} onClick={() => { setView("projects"); setSidebar(false); window.history.replaceState(null,"","#projects"); }}>项目</button><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); window.history.replaceState(null,"",window.location.pathname); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "assets" ? "page" : undefined} onClick={() => { setView("assets"); setSidebar(false); window.history.replaceState(null,"","#assets"); }}><WorkbenchIcon name="image" />资产</button><button aria-current={view === "memory" ? "page" : undefined} onClick={() => { setView("memory"); setSidebar(false); window.history.replaceState(null,"","#memory"); }}><WorkbenchIcon name="book" />记忆</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button>{canShowAdmin(adminScope) && <button aria-current={view === "admin" ? "page" : undefined} onClick={() => { setView("admin"); setSidebar(false); window.history.replaceState(null,"","#admin"); }}><WorkbenchIcon name="settings" />后台</button>}</nav>
+      <nav className="workspace-tabs" aria-label="工作台导航"><button aria-current={view === "projects" ? "page" : undefined} onClick={() => { setView("projects"); setSidebar(false); window.history.replaceState(null,"","#projects"); }}>资源</button><button aria-current={view === "chat" ? "page" : undefined} onClick={() => { setView("chat"); setSidebar(false); window.history.replaceState(null,"",window.location.pathname); }}><WorkbenchIcon name="chat" />会话</button><button aria-current={view === "assets" ? "page" : undefined} onClick={() => { setView("assets"); setSidebar(false); window.history.replaceState(null,"","#assets"); }}><WorkbenchIcon name="image" />资产</button><button aria-current={view === "memory" ? "page" : undefined} onClick={() => { setView("memory"); setSidebar(false); window.history.replaceState(null,"","#memory"); }}><WorkbenchIcon name="book" />记忆</button><button aria-current={view === "plugins" ? "page" : undefined} onClick={browsePlugins}><WorkbenchIcon name="plugin" />插件</button>{canShowAdmin(adminScope) && <button aria-current={view === "admin" ? "page" : undefined} onClick={() => { setView("admin"); setSidebar(false); window.history.replaceState(null,"","#admin"); }}><WorkbenchIcon name="settings" />后台</button>}</nav>
       <SessionHistory key={`${APPLICATION}:${client.accountScope}:${accountEpoch.current}:${phase}`} sessions={sessions} selected={selected} chatActive={view === "chat"}
         disabled={phase !== "ready" || submitting || !!managing} isProtected={isSessionProtected} onChoose={choose} onManage={manageSession} />
       {phase === "ready" && account && <footer className="sidebar-footer"><AccountIdentity key={client.accountScope} account={account} onSettings={() => setSettingsOpen(true)} onLogout={logout} /></footer>}
@@ -361,7 +360,7 @@ export function App(): React.JSX.Element {
     <main id="conversation" className="main" tabIndex={-1}>
       <button className="mobile-menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
       {view === "plugins" && <div className="transcript plugin-transcript"><PluginWorkspace key={`${APPLICATION}:${client.accountScope}`} selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /></div>}
-      {view === "projects" && <ProjectWorkspace key={client.accountScope+":"+phase} client={client} ready={phase === "ready"} onDevelop={async (id) => { setSessions(await client.sessions()); choose(id); }} />}
+      {view === "projects" && <ResourceWorkspace key={client.accountScope+":"+phase} client={client} ready={phase === "ready"} sessionId={selected} onDevelop={async (id) => { setSessions(await client.sessions()); choose(id); }} />}
       {view === "assets" && <div className="transcript plugin-transcript"><AssetLibrary key={`${client.accountScope}:${phase}`} client={client} ready={phase === "ready"} onConnect={() => { if (loginUrl) window.location.assign(loginUrl); else void connect(); }} /></div>}
       {view === "memory" && <div className="transcript plugin-transcript"><MemoryWorkspace key={`${client.accountScope}:${phase}`} client={client} ready={phase === "ready"} onConnect={() => { if (loginUrl) window.location.assign(loginUrl); else void connect(); }} /></div>}
       {view === "admin" && canShowAdmin(adminScope) && <div className="transcript plugin-transcript"><AdminWorkspace key={adminScope} client={adminClient} workbenchClient={client} onDenied={() => { adminClient.reset(); setAdminScope(""); setView("chat"); }} /></div>}
@@ -383,11 +382,7 @@ export function App(): React.JSX.Element {
               {turn.run.cancelRequested && turn.run.status === "running" && <p role="status" className="muted">正在停止，已完成的记录会保留。</p>}
             </div>
           </article>)}
-          {view === "chat" && phase === "ready" && selected && <ConversationConcepts client={client} sessionId={selected}
-            refreshKey={`${revision}:${events.length}`} busy={pluginBusy}
-            onChoose={(direction) => { void send(`选择 ${direction} 方案，请按这个方案继续实现页面。`); }} />}
-          {view === "chat" && phase === "ready" && selected && <ConversationProjectPreview client={client} sessionId={selected}
-            refreshKey={`${revision}:${events.length}`} />}
+          {view === "chat" && phase === "ready" && selected && <ConversationResourcePreview client={client} sessionId={selected} />}
           {sendingMessage && <article className="turn" aria-label="正在发送的问题"><div className="user-message"><span className="message-label">你</span><p>{sendingMessage}</p></div><p className="thinking" role="status"><span className="spinner" />正在发送…</p></article>}
           <div ref={bottom} />
         </div>

@@ -230,12 +230,30 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   };
 }
 
-export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick<CloudServerOptions, "repository" | "maxConcurrentRuns" | "runTimeoutMs" | "buildInfo" | "capabilityRouterMode" | "telemetry">): ReturnType<typeof createCloudServer> {
+/**
+ * 快速创建具备平台鉴权、模型网关与业务 Profile 绑定的完整 Fastify 云端服务
+ *
+ * @param options 平台连接配置与基础服务配置
+ * @returns Fastify 服务实例
+ *
+ * @example
+ * ```ts
+ * const app = createPlatformCloudServer({
+ *   platformUrl: "https://api.daoyin.com",
+ *   serviceToken: "sec_platform_pub_xxx",
+ *   appServiceToken: "sec_platform_app_xxx",
+ *   repository: new PostgresCloudRepository({ connectionString: "..." }),
+ * });
+ * await app.listen({ host: "127.0.0.1", port: 4677 });
+ * ```
+ */
+export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick<CloudServerOptions, "repository" | "maxConcurrentRuns" | "runTimeoutMs" | "buildInfo" | "capabilityRouterMode" | "generalResourcesMode" | "telemetry">): ReturnType<typeof createCloudServer> {
   return createCloudServer({ ...createPlatformAdapters(options), repository: options.repository,
     ...(options.buildInfo === undefined ? {} : { buildInfo: options.buildInfo }),
     ...(options.maxConcurrentRuns === undefined ? {} : { maxConcurrentRuns: options.maxConcurrentRuns }),
     ...(options.runTimeoutMs === undefined ? {} : { runTimeoutMs: options.runTimeoutMs }),
     ...(options.capabilityRouterMode === undefined ? {} : { capabilityRouterMode: options.capabilityRouterMode }),
+    ...(options.generalResourcesMode === undefined ? {} : { generalResourcesMode: options.generalResourcesMode }),
     ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
   });
 }

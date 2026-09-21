@@ -280,6 +280,7 @@ export class WorkbenchClient {
     return result.run;
   }
   public async project<T=Record<string,unknown>>(input: Record<string,unknown>): Promise<T> { return this.#request<T>("/projects/control",input); }
+  public async resource<T=Record<string,unknown>>(input: Record<string,unknown>): Promise<T> { return this.#request<T>("/resources/control",input); }
   public projectConceptImage(projectId:string,conceptId:string):string{
     if(!/^prj_[a-f0-9]{24}$/u.test(projectId)||!/^uic_[a-f0-9]{24}$/u.test(conceptId)||!/^[a-f0-9]{64}$/u.test(this.#accountScope))
       throw new WorkbenchError("界面方案地址无效。");

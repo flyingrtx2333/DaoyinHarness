@@ -10,6 +10,7 @@ const platformUrl = process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "";
 const appServiceToken = process.env.DAOYIN_CLOUD_APP_SERVICE_TOKEN;
 const vectorMinScoreRaw = process.env.DAOYIN_MEMORY_VECTOR_MIN_SCORE;
 const capabilityRouterMode = process.env.DAOYIN_CAPABILITY_ROUTER_MODE ?? "off";
+const generalResourcesMode = process.env.HARNESS_GENERAL_RESOURCES_MODE ?? process.env.DAOYIN_GENERAL_RESOURCES_MODE ?? "off";
 const vectorMinScore = vectorMinScoreRaw === undefined ? undefined : Number(vectorMinScoreRaw);
 try {
   const url = new URL(databaseUrl);
@@ -26,6 +27,11 @@ if (vectorMinScore !== undefined && (!Number.isFinite(vectorMinScore) || vectorM
 if (!["off", "shadow", "enforce"].includes(capabilityRouterMode)) {
   throw new Error("DAOYIN_CAPABILITY_ROUTER_MODE must be off, shadow or enforce.");
 }
+if (!["off", "shadow", "enforce"].includes(generalResourcesMode)) {
+  throw new Error("HARNESS_GENERAL_RESOURCES_MODE must be off, shadow or enforce.");
+}
+
+// 2. 初始化 PostgreSQL 仓储与检索器工厂
 const repository = await PostgresCloudRepository.open(databaseUrl, {
   memoryRetrieverFactory: (pool) => createConfiguredMemoryRetriever(pool, {
     platformUrl, ...(appServiceToken === undefined ? {} : { appServiceToken }),
@@ -70,6 +76,7 @@ try {
     platformUrl,
     serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
     capabilityRouterMode: capabilityRouterMode as "off" | "shadow" | "enforce",
+    generalResourcesMode: generalResourcesMode as "off" | "shadow" | "enforce",
     ...(appServiceToken ? { appServiceToken } : {}),
   });
   // Startup never creates or changes production schema. Run postgres-migrate first.
