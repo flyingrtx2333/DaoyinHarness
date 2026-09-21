@@ -36,11 +36,15 @@ function listProjectsCall(input: Record<string, unknown>): Record<string, unknow
   return { operation: "list_projects", ...(Object.keys(query).length ? { query_json: JSON.stringify(query) } : {}) };
 }
 
-function listProjectsBinding(identity: ExecutionIdentity, client: SaishiClient): CloudToolBinding {
+export function createStoryListProjectsBinding(
+  identity: ExecutionIdentity,
+  client: SaishiClient,
+  acceptsIdentity: (candidate: ExecutionIdentity) => boolean = isStoryIdentity,
+): CloudToolBinding {
   return {
     requiredPermissions: ["story.read"],
     validateInput: listProjectsInput,
-    authorizeResource: async (request, current, signal) => isStoryIdentity(current) &&
+    authorizeResource: async (request, current, signal) => acceptsIdentity(current) &&
       current.authorizationId === identity.authorizationId && current.appInstallationId === identity.appInstallationId &&
       await client.authorize("story_call", listProjectsCall(request.input), current, request.id, signal),
     definition: {
@@ -53,7 +57,7 @@ function listProjectsBinding(identity: ExecutionIdentity, client: SaishiClient):
       auditInput: (input) => ({ keyword: input.keyword, navigationOnly: input.navigationOnly }),
       execute: async (input, signal, context) => {
         const current = context.executionIdentity;
-        if (!current || !isStoryIdentity(current) || current.authorizationId !== identity.authorizationId ||
+        if (!current || !acceptsIdentity(current) || current.authorizationId !== identity.authorizationId ||
             !context.toolCallId || !listProjectsInput(input)) throw new Error("Story scope or input invalid.");
         try {
           const result = await client.call("story_call", listProjectsCall(input), current, context.turnId, context.toolCallId, signal);
@@ -146,5 +150,5 @@ export function createStoryProfile(catalog: unknown, identity: ExecutionIdentity
       },
     };
   }) };
-  return { ...profile, tools: [...profile.tools, listProjectsBinding(identity, client), ...orchestrationPolicyBindings()] };
+  return { ...profile, tools: [...profile.tools, createStoryListProjectsBinding(identity, client), ...orchestrationPolicyBindings()] };
 }

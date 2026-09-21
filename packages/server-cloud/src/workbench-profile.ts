@@ -2,7 +2,7 @@ import { assertExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness
 import type { JsonValue } from "@daoyin/harness-protocol";
 import type { CloudProfile, CloudToolBinding } from "./app.js";
 import { orchestrationPolicyBindings, parseSaishiResult, validateSaishiInput, type SaishiClient } from "./saishi-profile.js";
-import { validateStoryInput } from "./story-profile.js";
+import { createStoryListProjectsBinding, validateStoryInput } from "./story-profile.js";
 
 const SAISHI = new Set(["saishi_list_events", "saishi_get_event", "saishi_list_cameras", "saishi_list_materials",
   "saishi_list_images", "saishi_get_map", "saishi_find_participants", "saishi_get_timeline", "saishi_get_job",
@@ -67,5 +67,6 @@ export function createWorkbenchProfile(catalog: unknown, identity: ExecutionIden
         } } };
   });
   if (seen.size !== SAISHI.size + STORY.size + 1) throw new Error("Incomplete workbench catalog.");
-  return { id: "daoyin-workbench", version: "1", instructions: catalog.instructions, tools: [...tools, ...orchestrationPolicyBindings()] };
+  return { id: "daoyin-workbench", version: "1", instructions: catalog.instructions,
+    tools: [...tools, createStoryListProjectsBinding(identity, client, isWorkbenchIdentity), ...orchestrationPolicyBindings()] };
 }
