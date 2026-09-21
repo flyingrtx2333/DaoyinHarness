@@ -41,15 +41,17 @@ def replace_env(path: pathlib.Path, replacements: dict[str, str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("nginx_config", help="Exact managed *.demo.daoyintech.com server configuration")
+    parser.add_argument("nginx_config", help="Exact managed demo deployment server configuration")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     if not args.apply or os.geteuid() != 0:
         raise RuntimeError("Run as root with --apply during the approved maintenance window.")
     config = pathlib.Path(args.nginx_config).resolve()
     original = config.read_text(encoding="utf-8")
-    if "*.demo.daoyintech.com" not in original or original.count("proxy_pass http://127.0.0.1:4715;") != 1:
-        raise RuntimeError("The supplied file is not the exact legacy wildcard deployment route.")
+    managed_marker = "# Managed exclusively independent Harness project executor."
+    has_demo_route = ".demo.daoyintech.com" in original
+    if managed_marker not in original or not has_demo_route or original.count("proxy_pass http://127.0.0.1:4715;") != 1:
+        raise RuntimeError("The supplied file is not the exact managed legacy deployment route.")
     backup = BACKUP_ROOT / ("resources-cutover-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))
     backup.mkdir(parents=True, mode=0o700)
     shutil.copy2(config, backup / "nginx.conf")
