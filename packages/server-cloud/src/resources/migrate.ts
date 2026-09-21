@@ -107,7 +107,8 @@ async function applyProject(project: LegacyProject, spec: RuntimeSpec): Promise<
       VALUES($1,$2,'workspace',$3,'["file","git","process","artifact"]',$4,$5) ON CONFLICT(id) DO NOTHING`,
       [workspaceId, project.owner_key, project.title, project.created_at, project.updated_at]);
     await client.query(`INSERT INTO harness_workspaces(resource_id,source,runtime,state)
-      VALUES($1,$2,$3,'ready') ON CONFLICT(resource_id) DO NOTHING`, [workspaceId, JSON.stringify({ kind: "snapshot", snapshotId: currentSnapshotId }), JSON.stringify(spec)]);
+      VALUES($1,$2,$3,'ready') ON CONFLICT(resource_id) DO UPDATE SET runtime=EXCLUDED.runtime`,
+      [workspaceId, JSON.stringify({ kind: "snapshot", snapshotId: currentSnapshotId }), JSON.stringify(spec)]);
     await client.query(`INSERT INTO harness_resources(id,owner_key,kind,title,capabilities,created_at,updated_at)
       VALUES($1,$2,'business',$3,'["bind"]',$4,$5) ON CONFLICT(id) DO NOTHING`,
     [dataResourceId, project.owner_key, `${project.title} data`, project.created_at, project.updated_at]);
