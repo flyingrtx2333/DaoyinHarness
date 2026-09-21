@@ -174,6 +174,12 @@ async function removeSandboxContainer(name: string): Promise<boolean> {
   return inspected?.exitCode !== 0;
 }
 
+function assertSandboxStarted(result: { exitCode: number; stderr: string }): void {
+  if (result.exitCode !== 125) return;
+  throw new ResourceError("PROCESS_START_FAILED",
+    "Sandbox process could not start. The selected runtime image or its memory and PID limits may be unusable.", 422);
+}
+
 const workspaceQueues = new Map<string, Promise<void>>();
 
 async function withPausedWorkspaceProcesses<T>(workspaceId: string, operation: () => Promise<T>): Promise<T> {
@@ -467,6 +473,7 @@ async function foreground(workspaceId: string, spec: RuntimeSpec, executable: st
     const command = [...await commonArgs(workspaceId, spec, name, runId), "--rm", ...secrets, ...safeEnvironment(environment), "--workdir", `/workspace/${cwd === "." ? "" : cwd}`, "-i", image(spec), executable, ...args];
     const result = await docker(command, Math.min(timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000), stdin, spec.limits.maxOutputBytes);
     if (result.timedOut) throw new ResourceError("PROCESS_TIMEOUT", "Process exceeded its execution timeout and was terminated.", 408);
+    assertSandboxStarted(result);
     return { ...result, stdout: await redactSecretOutput(name, result.stdout), stderr: await redactSecretOutput(name, result.stderr),
       sandbox: "gVisor", network: spec.network === "public" ? "controlled-public" : "none" };
   } finally {
