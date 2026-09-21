@@ -505,7 +505,7 @@ async function readiness(): Promise<Record<string, unknown>> {
   const probeImage = IMAGE_CATALOG[SANDBOX_PROBE.imageId];
   if (!probeImage || !probeImage.image.includes("@sha256:")) throw new ResourceError("SANDBOX_PROBE_INVALID", "The gVisor startup probe image is not signed.", 503);
   const probe = await docker(["run", "--rm", "--runtime", RUNTIME, "--network", "none", "--read-only", "--cap-drop", "ALL",
-    "--security-opt", "no-new-privileges", "--pids-limit", "16", "--memory", "64m", probeImage.image,
+    "--security-opt", "no-new-privileges", "--pids-limit", "48", "--memory", "64m", probeImage.image,
     SANDBOX_PROBE.executable, ...SANDBOX_PROBE.args], 30_000, undefined, 20_000);
   if (probe.exitCode !== 0) throw new ResourceError("SANDBOX_PROBE_FAILED", "The gVisor startup probe failed.", 503);
   return { ready: true, runtime: RUNTIME, publicNetwork: "controlled", images: Object.keys(IMAGE_CATALOG) };

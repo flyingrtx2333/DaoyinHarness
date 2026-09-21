@@ -180,7 +180,7 @@ Description=Daoyin isolated OCI BuildKit
 After=network-online.target
 [Service]
 Type=simple
-ExecStart=/usr/bin/buildkitd --addr unix:///run/daoyin-buildkit/buildkitd.sock --group daoyin-resource-builder --root {STATE / 'buildkit'} --oci-worker=true --containerd-worker=false --oci-worker-net=none
+ExecStart=/usr/bin/buildkitd --addr unix:///run/daoyin-buildkit/buildkitd.sock --group daoyin-resource-builder --root {STATE / 'buildkit'} --oci-worker=true --containerd-worker=false --oci-worker-net=bridge
 Restart=on-failure
 RestartSec=5
 TasksMax=512
@@ -221,6 +221,8 @@ Group=daoyin-resource-builder
 SupplementaryGroups=daoyin-agent
 EnvironmentFile={CONFIG / 'service.env'}
 Environment=HARNESS_BUILDKIT_ADDRESS=unix:///run/daoyin-buildkit/buildkitd.sock
+RuntimeDirectory=daoyin-resource-builder
+RuntimeDirectoryMode=0750
 ExecStartPre=+/usr/bin/install -d -m 0750 -o daoyin-resource-builder -g daoyin-agent /run/daoyin-resource-builder
 ExecStart={NODE} {current / 'builder.mjs'}
 Restart=on-failure
@@ -265,6 +267,8 @@ User=daoyin-resources
 Group=daoyin-resources
 SupplementaryGroups=daoyin-agent daoyin-resource-executor
 EnvironmentFile={CONFIG / 'service.env'}
+RuntimeDirectory=daoyin-resources
+RuntimeDirectoryMode=0750
 ExecStartPre=+/usr/bin/install -d -m 0750 -o daoyin-resources -g daoyin-agent /run/daoyin-resources
 ExecStart={NODE} {current / 'service.mjs'}
 Restart=on-failure
