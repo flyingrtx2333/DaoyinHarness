@@ -108,7 +108,7 @@ def require_activation(values: dict[str, str]) -> None:
     command(["docker", "image", "inspect", values["HARNESS_EGRESS_NODE_IMAGE"]])
     buildkit_files = [pathlib.Path("/usr/bin/buildctl"), pathlib.Path("/usr/bin/buildkitd"),
                       *(pathlib.Path("/opt/cni/bin") / name for name in
-                        ["buildkit-cni-bridge", "buildkit-cni-firewall", "buildkit-cni-host-local", "buildkit-cni-loopback"])]
+                        ["bridge", "firewall", "host-local", "loopback"])]
     if any(not item.is_file() for item in buildkit_files):
         raise RuntimeError("BuildKit binaries and isolated bridge CNI plugins are required.")
 
