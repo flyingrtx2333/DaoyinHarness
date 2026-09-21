@@ -423,8 +423,8 @@ const server = http.createServer((request, response) => {
   })(); });
 });
 server.listen(SOCKET, () => {
-  const gid = Number(process.env.HARNESS_RESOURCE_GID);
-  if (Number.isSafeInteger(gid) && gid > 0) void chown(SOCKET, 0, gid).then(() => chmod(SOCKET, 0o660));
+  const gid = Number(process.env.HARNESS_RESOURCE_GID); const uid = process.getuid?.();
+  if (typeof uid === "number" && Number.isSafeInteger(uid) && Number.isSafeInteger(gid) && gid > 0) void chown(SOCKET, uid, gid).then(() => chmod(SOCKET, 0o660));
 });
 
 async function close(): Promise<void> { await new Promise<void>(resolve => server.close(() => resolve())); await pool.end(); }
