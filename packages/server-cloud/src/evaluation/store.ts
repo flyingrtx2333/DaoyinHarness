@@ -74,7 +74,7 @@ export class EvaluationStore {
       for (const event of events) accepted += Number(insert.run(event.id,event.sessionId,event.turnId,event.accountId,event.scopeId,event.eventSeq,event.type,event.occurredAt,JSON.stringify(event),ingestedAt).changes);
     }); return accepted;
   }
-  public auditRuns(hours: number, offset = 0): AuditRunSummary[] {
+  public auditRuns(hours: number, offset = 0): Array<Omit<AuditRunSummary, "traceId">> {
     const since = new Date(Date.now() - hours * 3_600_000).toISOString();
     const rows = this.#db.prepare(`SELECT s.body,s.session_id,s.turn_id,s.account_id,s.scope_id,s.occurred_at,
       (SELECT COUNT(*) FROM audit_events e WHERE e.turn_id=s.turn_id) event_count,
@@ -88,6 +88,22 @@ export class EvaluationStore {
       userMessage:event.type === "turn.started" ? event.payload.userMessage : "",eventCount:Number(row.event_count),modelCalls:Number(row.model_calls),toolCalls:Number(row.tool_calls) }; });
   }
   public auditRun(runId: string): AgentEvent[] { return this.#db.prepare("SELECT body FROM audit_events WHERE turn_id=? ORDER BY event_seq,event_id").all(runId).map(row => JSON.parse(String(row.body)) as AgentEvent); }
+  public auditRunsForTraces(hours: number, offset = 0): AuditRunSummary[] {
+    const byRun = new Map(this.auditRuns(hours, 0).map(run => [run.runId, run]));
+    return this.telemetryTraces(hours, offset).flatMap(trace => {
+      const root = this.telemetryTrace(trace.traceId).find(span => !span.parentSpanId);
+      const runId = typeof root?.attributes["daoyin.run.id"] === "string" ? root.attributes["daoyin.run.id"] : "";
+      const audit = byRun.get(runId);
+      return audit === undefined ? [] : [{ traceId: trace.traceId, ...audit }];
+    });
+  }
+  public auditRunForTrace(traceId: string): { runId: string; events: AgentEvent[] } | null {
+    const root = this.telemetryTrace(traceId).find(span => !span.parentSpanId);
+    const runId = typeof root?.attributes["daoyin.run.id"] === "string" ? root.attributes["daoyin.run.id"] : "";
+    if (!runId) return null;
+    const events = this.auditRun(runId);
+    return events.length ? { runId, events } : null;
+  }
   public renew(): void { this.#transaction(() => { this.#db.prepare("UPDATE evaluation_lease SET expires=? WHERE id=1 AND owner=?").run(Date.now() + 30_000, this.#owner); }); }
   public close(): void {
     try { this.#db.prepare("UPDATE evaluation_lease SET expires=0 WHERE id=1 AND owner=?").run(this.#owner); }

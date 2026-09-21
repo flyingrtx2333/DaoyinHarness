@@ -70,10 +70,12 @@ export class EvaluationClient {
     return this.request(`/observability/traces/${encodeURIComponent(traceId)}`, undefined, signal);
   }
   public auditRuns(hours: number, signal?: AbortSignal): Promise<{ runs: AuditRunSummary[] }> {
-    return this.request(`/audit/runs?hours=${String(hours)}`, undefined, signal);
+    return this.request<{ auditRuns: AuditRunSummary[] }>(`/observability/traces?hours=${String(hours)}`, undefined, signal)
+      .then(value => ({ runs: value.auditRuns }));
   }
-  public auditRun(runId: string, signal?: AbortSignal): Promise<{ runId: string; events: AgentEvent[] }> {
-    return this.request(`/audit/runs/${encodeURIComponent(runId)}`, undefined, signal);
+  public auditRun(traceId: string, signal?: AbortSignal): Promise<{ runId: string; events: AgentEvent[] }> {
+    return this.request<{ audit: { runId: string; events: AgentEvent[] } | null }>(`/observability/traces/${encodeURIComponent(traceId)}`, undefined, signal)
+      .then(value => value.audit ?? { runId: "", events: [] });
   }
   public async prepare(lines: string): Promise<EvaluationCase[]> { return (await this.request<{ cases: EvaluationCase[] }>("/prepare", { lines })).cases; }
   public history(offset: number, signal?: AbortSignal): Promise<{ runs: HistoryItem[] }> { return this.request(`/runs?offset=${offset}`, undefined, signal); }

@@ -2,6 +2,7 @@
 export const EVALUATOR_VERSION = "harness-evaluation-v2-live-runtime";
 
 export interface AuditRunSummary {
+  traceId: string;
   runId: string;
   sessionId: string;
   accountId: string;

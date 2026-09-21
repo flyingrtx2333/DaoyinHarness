@@ -52,7 +52,7 @@ export function ObservabilityView({ client }: { client: EvaluationClient }): Rea
     const controller = new AbortController(); setState("loading");
     void Promise.all([client.observabilitySummary(hours, controller.signal), client.auditRuns(hours, controller.signal)])
       .then(([nextMetrics, audit]) => { if (controller.signal.aborted) return; setMetrics(nextMetrics); setRuns(audit.runs); setState("ready");
-        setSelected(current => current && audit.runs.some(item => item.runId === current) ? current : audit.runs[0]?.runId); })
+        setSelected(current => current && audit.runs.some(item => item.traceId === current) ? current : audit.runs[0]?.traceId); })
       .catch(() => { if (!controller.signal.aborted) setState("failed"); });
     return () => controller.abort();
   }, [client, hours, revision]);
@@ -70,7 +70,7 @@ export function ObservabilityView({ client }: { client: EvaluationClient }): Rea
     return () => window.clearInterval(timer);
   }, []);
 
-  const selectedRun = runs.find(run => run.runId === selected);
+  const selectedRun = runs.find(run => run.traceId === selected);
   const ordered = useMemo(() => [...events].sort((left, right) => left.eventSeq - right.eventSeq), [events]);
   return <section className="observability-view" aria-label="任务审计记录">
     <header className="observability-header"><div className="observability-actions" role="group" aria-label="查看时间范围">
@@ -82,7 +82,7 @@ export function ObservabilityView({ client }: { client: EvaluationClient }): Rea
     {state === "loading" && runs.length === 0 && <p className="observability-state" role="status">正在读取审计记录…</p>}
     {state === "ready" && runs.length === 0 && <p className="observability-state">当前时间范围内还没有新的完整审计记录。</p>}
     {runs.length > 0 && <div className="observability-layout audit-layout">
-      <section className="observability-panel"><h2>最近任务</h2><div className="trace-list">{runs.map(run => <button type="button" className="trace-row audit-run-row" aria-current={selected === run.runId ? "true" : undefined} onClick={() => setSelected(run.runId)} key={run.runId}>
+      <section className="observability-panel"><h2>最近任务</h2><div className="trace-list">{runs.map(run => <button type="button" className="trace-row audit-run-row" aria-current={selected === run.traceId ? "true" : undefined} onClick={() => setSelected(run.traceId)} key={run.traceId}>
         <span data-status={run.status === "completed" ? "ok" : run.status === "running" ? "running" : "error"}>{statusLabel[run.status]}</span><strong>{clip(run.userMessage, 56)}</strong><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString("zh-CN")}</time><small>{run.modelCalls} 次模型 · {run.toolCalls} 次工具 · {run.eventCount} 条事件</small>
       </button>)}</div></section>
       <section className="observability-panel audit-detail"><header><h2>逐轮审计</h2>{selectedRun && <small>Run {selectedRun.runId} · 用户 {selectedRun.accountId}</small>}</header>

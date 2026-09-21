@@ -127,11 +127,15 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
     schema: { querystring: { type: "object", additionalProperties: false, properties: {
       hours: { type: "string", enum: ["1", "6", "24"] }, offset: { type: "string", pattern: "^[0-9]{1,5}$" },
     } } },
-  }, async request => ({ traces: options.store.telemetryTraces(Number(request.query.hours ?? "1"), Number(request.query.offset ?? "0")) }));
+  }, async request => {
+    const hours = Number(request.query.hours ?? "1"); const offset = Number(request.query.offset ?? "0");
+    return { traces: options.store.telemetryTraces(hours, offset), auditRuns: options.store.auditRunsForTraces(hours, offset) };
+  });
   app.get<{ Params: { traceId: string } }>("/observability/traces/:traceId", {
     schema: { params: { type: "object", required: ["traceId"], additionalProperties: false,
       properties: { traceId: { type: "string", pattern: "^[a-f0-9]{32}$" } } } },
-  }, async request => ({ traceId: request.params.traceId, spans: options.store.telemetryTrace(request.params.traceId) }));
+  }, async request => ({ traceId: request.params.traceId, spans: options.store.telemetryTrace(request.params.traceId),
+    audit: options.store.auditRunForTrace(request.params.traceId) }));
   app.get<{ Querystring: { hours?: string; offset?: string } }>("/audit/runs", { schema: { querystring: { type: "object", additionalProperties: false, properties: {
     hours: { type: "string", enum: ["1", "6", "24"] }, offset: { type: "string", pattern: "^[0-9]{1,5}$" },
   } } } }, async request => ({ runs: options.store.auditRuns(Number(request.query.hours ?? "1"), Number(request.query.offset ?? "0")) }));
