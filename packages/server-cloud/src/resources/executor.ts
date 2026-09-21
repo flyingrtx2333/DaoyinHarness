@@ -65,8 +65,9 @@ async function reconcileProcessSecrets(): Promise<void> {
 async function enforceProcessTimeouts(): Promise<void> {
   const now = Date.now();
   for (const [processId, session] of processes) if (session.timeoutAt > 0 && now >= session.timeoutAt) {
-    await docker(["rm", "-f", session.name], 30_000).catch(() => undefined); processes.delete(processId);
-    await cleanupSecrets(session.name);
+    if (await removeSandboxContainer(session.name)) {
+      processes.delete(processId); await cleanupSecrets(session.name);
+    } else console.error(`Timed out sandbox could not be removed: ${processId}`);
   }
 }
 
@@ -164,6 +165,13 @@ async function run(executable: string, args: string[], timeoutMs: number, input?
 
 async function docker(args: string[], timeoutMs = 30_000, input?: string, maximumBytes?: number): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
   return run("/usr/bin/docker", args, timeoutMs, input, maximumBytes);
+}
+
+async function removeSandboxContainer(name: string): Promise<boolean> {
+  const removed = await docker(["rm", "-f", name], 30_000, undefined, 20_000).catch(() => null);
+  if (removed?.exitCode === 0) return true;
+  const inspected = await docker(["inspect", name], 10_000, undefined, 20_000).catch(() => null);
+  return inspected?.exitCode !== 0;
 }
 
 const workspaceQueues = new Map<string, Promise<void>>();
@@ -458,9 +466,13 @@ async function foreground(workspaceId: string, spec: RuntimeSpec, executable: st
   try {
     const command = [...await commonArgs(workspaceId, spec, name, runId), "--rm", ...secrets, ...safeEnvironment(environment), "--workdir", `/workspace/${cwd === "." ? "" : cwd}`, "-i", image(spec), executable, ...args];
     const result = await docker(command, Math.min(timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000), stdin, spec.limits.maxOutputBytes);
+    if (result.timedOut) throw new ResourceError("PROCESS_TIMEOUT", "Process exceeded its execution timeout and was terminated.", 408);
     return { ...result, stdout: await redactSecretOutput(name, result.stdout), stderr: await redactSecretOutput(name, result.stderr),
       sandbox: "gVisor", network: spec.network === "public" ? "controlled-public" : "none" };
-  } finally { await cleanupSecrets(name); }
+  } finally {
+    if (!(await removeSandboxContainer(name))) throw new ResourceError("PROCESS_CLEANUP_FAILED", "Process container could not be terminated.", 503);
+    await cleanupSecrets(name);
+  }
 }
 
 async function gitOperation(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
@@ -504,8 +516,9 @@ async function processOperation(request: ExecutorProcessRequest): Promise<Record
   if (operation === "read") {
     const processId = request.processId ?? ""; const session = await processSession(workspaceId, processId);
     if (session.timeoutAt > 0 && Date.now() >= session.timeoutAt) {
-    await docker(["rm", "-f", session.name], 30_000); processes.delete(processId);
-    await cleanupSecrets(session.name);
+      if (!(await removeSandboxContainer(session.name))) throw new ResourceError("PROCESS_CLEANUP_FAILED", "Timed out process container could not be terminated.", 503);
+      processes.delete(processId);
+      await cleanupSecrets(session.name);
       return { processId, output: "", cursor: request.cursor ?? 0, truncated: false, state: "timed_out", exitCode: null };
     }
     const result = await docker(["logs", session.name], 20_000, undefined, 16_000_000);
@@ -525,7 +538,8 @@ async function processOperation(request: ExecutorProcessRequest): Promise<Record
   }
   if (operation === "stop") {
     const processId = request.processId ?? ""; const session = await processSession(workspaceId, processId);
-    await docker(["rm", "-f", session.name], 30_000); processes.delete(processId); await cleanupSecrets(session.name); return { processId, status: "cancelled" };
+    if (!(await removeSandboxContainer(session.name))) throw new ResourceError("PROCESS_STOP_FAILED", "Process container could not be terminated.", 503);
+    processes.delete(processId); await cleanupSecrets(session.name); return { processId, status: "cancelled" };
   }
   if (operation === "list") return { processes: [...processes.entries()].filter(([, value]) => value.workspaceId === workspaceId).map(([processId, value]) => ({ processId, mode: value.mode, startedAt: value.startedAt, timeoutAt: new Date(value.timeoutAt).toISOString() })) };
   throw new ResourceError("PROCESS_OPERATION_DENIED", "Process operation is not allowed.", 403);

@@ -158,11 +158,14 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
     ...(process.env.HARNESS_DEPLOYMENT_EXECUTOR_ENABLED === "1" ? { deployer: await deployer({ action: "readiness" }, signal) } : {}) };
   const auth = identity(request);
   if (request.action === "cancel_run") {
-    const runId = required(request.sourceRun, "sourceRun"); const stopped: string[] = [];
+    const runId = required(request.sourceRun, "sourceRun"); const stopped: string[] = []; const failed: string[] = [];
     for (const process of await repository.runningProcessesForRun(auth, runId)) {
-      await executor({ action: "process", operation: "stop", workspaceId: process.workspaceId, processId: process.id }).catch(() => undefined);
-      await repository.updateProcess(auth, process.workspaceId, process.id, { status: "cancelled" }); stopped.push(process.id);
+      try {
+        await executor({ action: "process", operation: "stop", workspaceId: process.workspaceId, processId: process.id });
+        await repository.updateProcess(auth, process.workspaceId, process.id, { status: "cancelled" }); stopped.push(process.id);
+      } catch { failed.push(process.id); }
     }
+    if (failed.length) throw new ResourceError("PROCESS_CANCEL_FAILED", `${failed.length} process container(s) could not be terminated.`, 503);
     return { summary: "Run processes cancelled.", stopped };
   }
   if (request.action === "resource_list") return { summary: "Resources listed.", resources: await repository.list(auth), attached: await repository.attached(auth, required(request.sessionId, "sessionId")) };
