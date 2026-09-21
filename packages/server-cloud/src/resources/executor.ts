@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { isIP } from "node:net";
 import { chmod, chown, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertResourceId, assertWorkspacePath, type RuntimeSpec, type WorkspaceEntry } from "@daoyin/harness-contracts";
@@ -203,12 +204,24 @@ function assertProcessInput(executable: string, args: readonly string[]): void {
   }
 }
 
-function egressEnvironment(workspaceId: string, runId: string, timeoutSeconds: number): string[] {
+async function egressArguments(workspaceId: string, runId: string, timeoutSeconds: number): Promise<string[]> {
   if (!EGRESS_PROXY || EGRESS_SECRET.length < 32) throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not configured.", 503);
+  let url: URL;
+  try { url = new URL(EGRESS_PROXY); } catch { throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not configured.", 503); }
+  if (url.protocol !== "http:" || url.username || url.password || !/^[a-z0-9][a-z0-9.-]{0,252}$/u.test(url.hostname)) {
+    throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not configured.", 503);
+  }
+  const inspected = await docker(["inspect", "--format", "{{json .NetworkSettings.Networks}}", url.hostname], 10_000, undefined, 100_000);
+  if (inspected.exitCode !== 0) throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is unavailable.", 503);
+  let networks: Record<string, { IPAddress?: unknown }>;
+  try { networks = JSON.parse(inspected.stdout) as Record<string, { IPAddress?: unknown }>; }
+  catch { throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress state is invalid.", 503); }
+  const address = networks[EGRESS_NETWORK]?.IPAddress;
+  if (typeof address !== "string" || isIP(address) !== 4) throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not attached to the sandbox network.", 503);
   const payload = Buffer.from(JSON.stringify({ workspaceId, runId: runId.slice(0, 160), expiresAt: Date.now() + timeoutSeconds * 1000 + 300_000 })).toString("base64url");
   const signature = createHmac("sha256", EGRESS_SECRET).update(payload).digest("base64url");
-  const url = new URL(EGRESS_PROXY); url.username = payload; url.password = signature;
-  return ["--env", `HTTP_PROXY=${url.href}`, "--env", `HTTPS_PROXY=${url.href}`, "--env", `ALL_PROXY=${url.href}`,
+  url.username = payload; url.password = signature;
+  return ["--add-host", `${url.hostname}:${address}`, "--env", `HTTP_PROXY=${url.href}`, "--env", `HTTPS_PROXY=${url.href}`, "--env", `ALL_PROXY=${url.href}`,
     "--env", "NO_PROXY=localhost,127.0.0.1,::1"];
 }
 
@@ -243,7 +256,7 @@ async function redactSecretOutput(name: string, value: string): Promise<string> 
   return result;
 }
 
-function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, runId = "system"): string[] {
+async function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, runId = "system"): Promise<string[]> {
   const root = workspaceRoot(workspaceId); const network = spec.network === "public" ? EGRESS_NETWORK : "none";
   return ["run", "--runtime", RUNTIME, "--name", name, "--label", "daoyin.harness.resource=1", "--label", `daoyin.harness.workspace=${workspaceId}`,
     "--network", network, "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
@@ -251,7 +264,7 @@ function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, runId 
     "--ulimit", "nofile=2048:2048", "--log-driver", "local", "--log-opt", "max-size=4m", "--log-opt", "max-file=3",
     "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777", "--mount", `type=bind,src=${root},dst=/workspace`, "--workdir", "/workspace",
     "--env", "HOME=/tmp", "--env", "CI=1", "--env", "NO_COLOR=1",
-    ...(spec.network === "public" ? egressEnvironment(workspaceId, runId, spec.limits.timeoutSeconds) : []),
+    ...(spec.network === "public" ? await egressArguments(workspaceId, runId, spec.limits.timeoutSeconds) : []),
     ...safeEnvironment(spec.environment)];
 }
 
@@ -334,10 +347,10 @@ async function prepare(request: ExecutorProcessRequest): Promise<Record<string, 
   if (source.kind !== "git") throw new ResourceError("WORKSPACE_SOURCE_PENDING", "This workspace source requires an uploaded artifact materialization step.", 501);
   const container = `hr-import-${workspaceId.slice(4)}`;
   const importPath = path.join(root, ".harness-import-repo");
-  const args = [...commonArgs(workspaceId, spec, container, request.runId), "--rm", image(spec), "git", "clone", "--no-checkout", "--", source.url, "/workspace/.harness-import-repo"];
+  const args = [...await commonArgs(workspaceId, spec, container, request.runId), "--rm", image(spec), "git", "clone", "--no-checkout", "--", source.url, "/workspace/.harness-import-repo"];
   const clone = await docker(args, Math.min(spec.limits.timeoutSeconds * 1000, 600_000), undefined, spec.limits.maxOutputBytes);
   if (clone.exitCode !== 0) throw new ResourceError("WORKSPACE_GIT_CLONE_FAILED", `Git import failed: ${clone.stderr.slice(-2000)}`, 422);
-  const checkout = await docker([...commonArgs(workspaceId, spec, `${container}-checkout`, request.runId), "--rm", image(spec), "git", "-C", "/workspace/.harness-import-repo", "checkout", "--detach", source.revision], 120_000);
+  const checkout = await docker([...await commonArgs(workspaceId, spec, `${container}-checkout`, request.runId), "--rm", image(spec), "git", "-C", "/workspace/.harness-import-repo", "checkout", "--detach", source.revision], 120_000);
   if (checkout.exitCode !== 0) throw new ResourceError("WORKSPACE_GIT_REVISION_FAILED", `Git revision could not be checked out: ${checkout.stderr.slice(-2000)}`, 422);
   for (const name of await readdir(importPath)) await rename(path.join(importPath, name), path.join(root, name));
   await rm(importPath, { recursive: true, force: true });
@@ -425,7 +438,7 @@ async function foreground(workspaceId: string, spec: RuntimeSpec, executable: st
   const name = `hr-run-${workspaceId.slice(4, 16)}-${randomBytes(4).toString("hex")}`;
   const secrets = await secretArguments(name, spec.secretRefs, secretValues);
   try {
-    const command = [...commonArgs(workspaceId, spec, name, runId), "--rm", ...secrets, ...safeEnvironment(environment), "--workdir", `/workspace/${cwd === "." ? "" : cwd}`, "-i", image(spec), executable, ...args];
+    const command = [...await commonArgs(workspaceId, spec, name, runId), "--rm", ...secrets, ...safeEnvironment(environment), "--workdir", `/workspace/${cwd === "." ? "" : cwd}`, "-i", image(spec), executable, ...args];
     const result = await docker(command, Math.min(timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000), stdin, spec.limits.maxOutputBytes);
     return { ...result, stdout: await redactSecretOutput(name, result.stdout), stderr: await redactSecretOutput(name, result.stderr),
       sandbox: "gVisor", network: spec.network === "public" ? "controlled-public" : "none" };
@@ -460,7 +473,7 @@ async function processOperation(request: ExecutorProcessRequest): Promise<Record
     const startedAt = new Date().toISOString();
     const timeoutAt = Date.now() + Math.min(request.timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000);
     const secrets = await secretArguments(name, spec.secretRefs, request.secretValues);
-    const args = [...commonArgs(workspaceId, spec, name, request.runId), "-d", "--label", `daoyin.harness.process=${processId}`,
+    const args = [...await commonArgs(workspaceId, spec, name, request.runId), "-d", "--label", `daoyin.harness.process=${processId}`,
       "--label", `daoyin.harness.mode=${request.mode}`, "--label", `daoyin.harness.started_at=${startedAt}`,
       "--label", `daoyin.harness.timeout_at=${String(timeoutAt)}`,
       ...(request.mode === "pty" ? ["-i", "-t"] : []), ...secrets, ...safeEnvironment(request.environment),
@@ -511,6 +524,14 @@ async function readiness(): Promise<Record<string, unknown>> {
     "--security-opt", "no-new-privileges", "--pids-limit", "48", "--memory", "64m", probeImage.image,
     SANDBOX_PROBE.executable, ...SANDBOX_PROBE.args], 30_000, undefined, 20_000);
   if (probe.exitCode !== 0) throw new ResourceError("SANDBOX_PROBE_FAILED", "The gVisor startup probe failed.", 503);
+  const egress = await egressArguments("readiness", "readiness", 30);
+  const proxy = new URL(EGRESS_PROXY);
+  const egressProbe = await docker(["run", "--rm", "--runtime", RUNTIME, "--network", EGRESS_NETWORK, "--read-only", "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges", "--pids-limit", "48", "--memory", "64m",
+    ...egress, probeImage.image, "node", "-e",
+    `const net=require('node:net');const s=net.createConnection({host:${JSON.stringify(proxy.hostname)},port:${Number(proxy.port || 80)}});s.setTimeout(5000);s.once('connect',()=>{s.end();process.exit(0)});s.once('timeout',()=>process.exit(2));s.once('error',()=>process.exit(3))`],
+    30_000, undefined, 20_000);
+  if (egressProbe.exitCode !== 0) throw new ResourceError("EGRESS_PROBE_FAILED", "The gVisor egress proxy probe failed.", 503);
   return { ready: true, runtime: RUNTIME, publicNetwork: "controlled", images: Object.keys(IMAGE_CATALOG) };
 }
 
