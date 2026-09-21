@@ -154,6 +154,7 @@ def prepare(release: pathlib.Path) -> dict[str, object]:
             "HARNESS_DEPLOYMENT_EXECUTOR_ENABLED": "0",
             "HARNESS_GENERAL_RESOURCES_MODE": "off",
             "HARNESS_RESOURCE_GID": str(agent_gid),
+            "HARNESS_CONTENT_STORE_GID": str(resource_gid),
             "HARNESS_GVISOR_RUNTIME": detected_gvisor,
             "HARNESS_EGRESS_NETWORK": "harness-public-egress",
             "HARNESS_EGRESS_PROXY": "http://daoyin-resource-egress:3128",
@@ -173,6 +174,7 @@ def prepare(release: pathlib.Path) -> dict[str, object]:
             "HARNESS_SECRET_RESOLVER_TOKEN": legacy.get("HARNESS_PROJECTS_AI_TOKEN", ""),
         }
     values["HARNESS_RESOURCE_GID"] = str(agent_gid)
+    values["HARNESS_CONTENT_STORE_GID"] = str(resource_gid)
     write_env(CONFIG / "service.env", values, 0, resource_gid)
 
     dependencies = release / "node_modules"

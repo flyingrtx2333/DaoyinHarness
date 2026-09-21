@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { chmod, chown, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { assertSha256Digest } from "@daoyin/harness-contracts";
 
@@ -19,13 +19,23 @@ function blobPath(root: string, digest: string): string {
 
 export class FileContentStore implements ContentStore {
   readonly #root: string;
+  readonly #sharedGid: number | undefined;
 
-  private constructor(root: string) { this.#root = root; }
+  private constructor(root: string, sharedGid: number | undefined) { this.#root = root; this.#sharedGid = sharedGid; }
 
   public static async open(root: string): Promise<FileContentStore> {
     if (!path.isAbsolute(root)) throw Object.assign(new Error("Content store root must be absolute."), { code: "CONTENT_ROOT_INVALID" });
-    await mkdir(root, { recursive: true, mode: 0o700 });
-    return new FileContentStore(path.resolve(root));
+    const parsed = Number(process.env.HARNESS_CONTENT_STORE_GID ?? "");
+    const sharedGid = Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+    await mkdir(root, { recursive: true, mode: sharedGid === undefined ? 0o700 : 0o2770 });
+    if (sharedGid !== undefined) { await chown(root, -1, sharedGid); await chmod(root, 0o2770); }
+    return new FileContentStore(path.resolve(root), sharedGid);
+  }
+
+  async #ensureDirectory(directory: string): Promise<void> {
+    try { await mkdir(directory, { mode: this.#sharedGid === undefined ? 0o700 : 0o2770 }); }
+    catch (error) { if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error; }
+    if (this.#sharedGid !== undefined) { await chown(directory, -1, this.#sharedGid); await chmod(directory, 0o2770); }
   }
 
   public async put(content: Uint8Array): Promise<{ digest: string; size: number }> {
@@ -39,10 +49,13 @@ export class FileContentStore implements ContentStore {
     } catch (error) {
       if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
     }
-    await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+    const relative = path.relative(this.#root, path.dirname(target)).split(path.sep);
+    let directory = this.#root;
+    for (const segment of relative) { directory = path.join(directory, segment); await this.#ensureDirectory(directory); }
     const temporary = `${target}.${randomUUID()}.tmp`;
-    const handle = await open(temporary, "wx", 0o600);
+    const handle = await open(temporary, "wx", this.#sharedGid === undefined ? 0o600 : 0o660);
     try { await handle.writeFile(content); await handle.sync(); } finally { await handle.close(); }
+    if (this.#sharedGid !== undefined) { await chown(temporary, -1, this.#sharedGid); await chmod(temporary, 0o660); }
     try { await rename(temporary, target); }
     catch (error) {
       await rm(temporary, { force: true });
