@@ -137,12 +137,15 @@ async function materialize(deploymentId: string, entries: readonly WorkspaceEntr
   assertResourceId(deploymentId, "dep");
   if (entries.length > 100_000) throw new ResourceError("DEPLOYMENT_MANIFEST_LIMIT", "Snapshot contains too many entries.", 413);
   const destination = path.join(ROOT, deploymentId, "app"); const staging = `${destination}.next`;
-  await rm(staging, { recursive: true, force: true }); await mkdir(staging, { recursive: true, mode: 0o755 });
+  await rm(staging, { recursive: true, force: true }); await mkdir(staging, { recursive: true, mode: 0o755 }); await chmod(staging, 0o755);
   try {
     for (const entry of [...entries].sort((a, b) => a.path.localeCompare(b.path))) {
       assertWorkspacePath(entry.path); const target = path.resolve(staging, ...entry.path.split("/"));
       if (!target.startsWith(`${path.resolve(staging)}${path.sep}`)) throw new ResourceError("DEPLOYMENT_PATH_ESCAPE", "Snapshot entry escapes the deployment root.", 403);
-      await mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
+      let directory = staging;
+      for (const segment of entry.path.split("/").slice(0, -1)) {
+        directory = path.join(directory, segment); await mkdir(directory, { recursive: true, mode: 0o755 }); await chmod(directory, 0o755);
+      }
       if (entry.kind === "symlink") { safeSymlink(entry.path, entry.target); await symlink(entry.target, target); continue; }
       const source = blobPath(entry.blobHash); await verifyDigest(source, entry.blobHash); await copyFile(source, target);
       await chmod(target, entry.mode & 0o555); await chown(target, 1000, 1000);
