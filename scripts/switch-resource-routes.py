@@ -13,6 +13,7 @@ import time
 BACKUP_ROOT = pathlib.Path("/var/backups/daoyin-agent")
 PROJECT_ENV = pathlib.Path("/etc/daoyin-projects/service.env")
 DROP_IN = pathlib.Path("/etc/systemd/system/daoyin-projects.service.d/20-broker-only.conf")
+PROJECT_UNIT = pathlib.Path("/etc/systemd/system/daoyin-projects.service")
 NGINX = pathlib.Path("/www/server/nginx/sbin/nginx")
 
 
@@ -56,13 +57,22 @@ def main() -> None:
     backup.mkdir(parents=True, mode=0o700)
     shutil.copy2(config, backup / "nginx.conf")
     shutil.copy2(PROJECT_ENV, backup / "project-service.env")
+    shutil.copy2(PROJECT_UNIT, backup / "project.service")
     (backup / "state.json").write_text(json.dumps({"nginx": str(config), "oldUpstream": 4715, "newUpstream": 4712}, indent=2), encoding="utf-8")
+    project_unit = PROJECT_UNIT.read_text(encoding="utf-8")
+    legacy_after = "After=daoyin-project-executor.service docker.service"
+    legacy_requires = "Requires=daoyin-project-executor.service"
+    if project_unit.count(legacy_after) != 1 or project_unit.count(legacy_requires) != 1:
+        raise RuntimeError("The legacy project service dependency is not in the expected state.")
     try:
         replace_env(PROJECT_ENV, {"HARNESS_PROJECTS_ENABLED": "0", "HARNESS_PROJECTS_BROKER_ONLY": "1"})
-        DROP_IN.parent.mkdir(parents=True, exist_ok=True)
-        DROP_IN.write_text("[Unit]\nRequires=\nAfter=\nAfter=docker.service\n", encoding="utf-8")
+        PROJECT_UNIT.write_text(project_unit.replace(legacy_after, "After=docker.service").replace(legacy_requires + "\n", ""), encoding="utf-8")
+        DROP_IN.unlink(missing_ok=True)
         command(["systemctl", "daemon-reload"])
         command(["systemctl", "restart", "daoyin-projects.service"])
+        dependencies = subprocess.run(["systemctl", "show", "daoyin-projects.service", "--property=Requires", "--value"], check=True, capture_output=True, text=True).stdout.split()
+        if "daoyin-project-executor.service" in dependencies:
+            raise RuntimeError("Legacy executor dependency is still active after broker-only conversion.")
         config.write_text(original.replace("proxy_pass http://127.0.0.1:4715;", "proxy_pass http://127.0.0.1:4712;"), encoding="utf-8")
         command([str(NGINX), "-t"])
         command([str(NGINX), "-s", "reload"])
@@ -70,6 +80,7 @@ def main() -> None:
     except Exception:
         shutil.copy2(backup / "nginx.conf", config)
         shutil.copy2(backup / "project-service.env", PROJECT_ENV)
+        shutil.copy2(backup / "project.service", PROJECT_UNIT)
         DROP_IN.unlink(missing_ok=True)
         command(["systemctl", "daemon-reload"])
         command(["systemctl", "enable", "--now", "daoyin-project-executor.service"])

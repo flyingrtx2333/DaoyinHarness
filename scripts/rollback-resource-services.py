@@ -64,6 +64,9 @@ def main() -> None:
         nginx = pathlib.Path(state["nginx"]).resolve()
         shutil.copy2(backup / "nginx.conf", nginx)
         shutil.copy2(backup / "project-service.env", pathlib.Path("/etc/daoyin-projects/service.env"))
+        project_unit = backup / "project.service"
+        if project_unit.is_file():
+            shutil.copy2(project_unit, pathlib.Path("/etc/systemd/system/daoyin-projects.service"))
         pathlib.Path("/etc/systemd/system/daoyin-projects.service.d/20-broker-only.conf").unlink(missing_ok=True)
         command(["systemctl", "daemon-reload"])
         command(["systemctl", "enable", "--now", "daoyin-project-executor.service"])
