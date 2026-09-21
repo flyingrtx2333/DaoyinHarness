@@ -1,15 +1,20 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { existsSync } from "node:fs";
 import http from "node:http";
 import net, { isIP } from "node:net";
-import { Pool } from "pg";
+import { Pool, type PoolConfig } from "pg";
 
 const secret = process.env.HARNESS_EGRESS_HMAC_SECRET ?? "";
 const databaseUrl = process.env.HARNESS_RESOURCES_DATABASE_URL ?? "";
 const port = Number(process.env.HARNESS_EGRESS_PORT ?? 3128);
 const deniedNames = (process.env.HARNESS_EGRESS_DENIED_HOSTS ?? "").toLowerCase().split(",").map((item) => item.trim()).filter(Boolean);
 if (secret.length < 32 || !databaseUrl || !Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Egress proxy configuration is invalid.");
-const pool = new Pool({ connectionString: databaseUrl, max: 4 });
+const parsedDatabase = new URL(databaseUrl); const mountedSocket = "/run/daoyin-projects-db";
+const poolConfig: PoolConfig = { host: existsSync(`${mountedSocket}/.s.PGSQL.5432`) ? mountedSocket : parsedDatabase.hostname,
+  port: Number(parsedDatabase.port || 5432), user: decodeURIComponent(parsedDatabase.username), password: decodeURIComponent(parsedDatabase.password),
+  database: decodeURIComponent(parsedDatabase.pathname.slice(1)), max: 4 };
+const pool = new Pool(poolConfig);
 
 interface Grant { workspaceId: string; runId: string; expiresAt: number }
 function grant(request: http.IncomingMessage): Grant {
