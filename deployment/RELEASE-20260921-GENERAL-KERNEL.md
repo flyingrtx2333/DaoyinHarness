@@ -1,7 +1,7 @@
 # General execution kernel cloud acceptance record
 
 - Date: 2026-09-21 (Asia/Shanghai)
-- Resource-service source and active release: `20dba95ff396f6398108666324b107c017cace26`
+- Resource-service source and active release: `05342aacc268d81c2bad6116f3b3864e8ef09fa5`
 - Authoritative checkout: `/root/DaoyinHarness` on `main`
 - Runtime: `harness-runsc`; public network: controlled egress
 - Validation policy: small real-model and real-tool samples only; no mock model, Vitest or replay suite was run.
@@ -16,6 +16,10 @@
 - Every workspace now receives an internal network shared only with the trusted egress proxy. Three existing deployments were migrated and restarted one at a time. The legacy shared network now contains only the proxy.
 - A real npm Registry query returned TypeScript `7.0.2`. The audit row records `registry.npmjs.org:443`, `CONNECT`, `allowed` and byte counts.
 - Requests to `169.254.169.254:443` and `10.0.0.1:443` returned proxy `403` and produced `denied` audit rows. A direct TCP attempt between two deployment workspaces was refused.
+- A foreground process exceeding its one-second deadline returned `PROCESS_TIMEOUT` with HTTP 408. A process exceeding its 1,024-byte output budget returned `PROCESS_OUTPUT_LIMIT` with HTTP 422. Both paths left no container carrying the temporary workspace label.
+- A real background Node process appeared as a running gVisor container, then `process_stop` returned `cancelled` and removed it. A 128 MiB memory limit terminated a 512 MiB allocation with exit code 137, and a 128 MiB workspace volume rejected further writes with `ENOSPC` after 112 MiB of test data.
+- A CPU-bound process configured for 0.1 CPU reported `NanoCpus=100000000` and an observed 9.79% CPU sample. Its container also reported the configured 256 MiB memory and 128 PID limits.
+- A Node runtime configured with only 16 PIDs could not start under gVisor. The executor now returns `PROCESS_START_FAILED` with an actionable runtime/limit message and removes the failed container instead of exposing a raw Docker 125 result.
 - The three existing managed domains returned HTTP 200 before and after migration. All four resource services were active and the resource readiness control returned success.
 
 ## Release recovery exercised
@@ -26,7 +30,7 @@ The first rollout exposed that the executor rejected global process reconciliati
 
 - Cross-account and cross-space denial with a second authenticated platform session.
 - DNS rebinding and platform-specific internal hostname cases beyond direct private/link-local addresses.
-- Full CPU, memory, disk, PID, output and timeout boundary matrix.
+- A runtime-independent PID-limit acceptance signal. Very low PID limits are enforced, but current gVisor failures do not distinguish PID exhaustion from other startup-resource failures; the usable minimum also differs by runtime image.
 - Independent operator cryptographic verification for signed runtime images.
 - Accurate final HTTP method visibility inside encrypted CONNECT tunnels; audit currently records `CONNECT`.
 - A Rust sample in addition to the completed Go sample.
