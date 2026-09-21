@@ -1,36 +1,97 @@
 import { createHash } from "node:crypto";
 import type { ToolDescriptor } from "@daoyin/harness-tools/registry";
 
+/** 能力包风险等级：只读查询、普通写入、高危/付费/破坏性操作 */
 export type CapabilityRisk = "read" | "write" | "high";
+
+/**
+ * 能力包元数据清单 (Capability Pack Manifest)
+ */
 export interface CapabilityPackManifest {
-  id: string; version: string; title: string; summary: string;
-  intents: readonly string[]; examples: readonly string[]; negativeExamples: readonly string[];
-  toolNames: readonly string[]; dependencies: readonly string[]; resourceKinds: readonly string[];
-  requiredContext: readonly string[]; risk: CapabilityRisk;
+  /** 能力包唯一标识符 */
+  id: string;
+  /** 版本号 */
+  version: string;
+  /** 显示标题 */
+  title: string;
+  /** 功能概述 */
+  summary: string;
+  /** 适用的意图关键词/标签 */
+  intents: readonly string[];
+  /** 典型触发正例输入 */
+  examples: readonly string[];
+  /** 负向/不应触发的反例输入 */
+  negativeExamples: readonly string[];
+  /** 该能力包所打包暴露的工具名称列表 */
+  toolNames: readonly string[];
+  /** 强依赖的前置能力包 ID 列表（自动并入选择） */
+  dependencies: readonly string[];
+  /** 关联的操作资源类型 */
+  resourceKinds: readonly string[];
+  /** 激活该能力包所必须具备的上下文环境标识 */
+  requiredContext: readonly string[];
+  /** 风险等级 */
+  risk: CapabilityRisk;
 }
+
+/** 语义意图分类结果项 */
 export interface CapabilitySemanticIntent {
   label: string; objective: string; confidence: number; packIds: readonly string[];
 }
+
+/** 语义分析服务打分结果 */
 export interface CapabilitySemanticResult {
   rerankScores: Readonly<Record<string, number>>; intents: readonly CapabilitySemanticIntent[];
 }
+
+/** 语义向量检索与意图分析提供方接口 */
 export interface CapabilitySemanticProvider {
   retrieve?(input: { query: string; clauses: readonly string[]; candidates: readonly CapabilityPackManifest[];
     signal: AbortSignal }): Promise<Readonly<Record<string, number>>>;
   analyze(input: { query: string; clauses: readonly string[]; candidates: readonly CapabilityPackManifest[];
     signal: AbortSignal }): Promise<CapabilitySemanticResult>;
 }
+
+/**
+ * 动态能力路由决策回执
+ */
 export interface CapabilityRouteDecision {
-  algorithmVersion: "hybrid-v1"; catalogDigest: string; eligiblePackCount: number; selectedPackIds: string[];
-  exposedToolCount: number; schemaCharacters: number;
+  /** 路由算法版本标识 */
+  algorithmVersion: "hybrid-v1";
+  /** 当前全量能力包目录的 SHA256 摘要 */
+  catalogDigest: string;
+  /** 符合上下文与风险准入的候选包数量 */
+  eligiblePackCount: number;
+  /** 最终命中的能力包 ID 列表 */
+  selectedPackIds: string[];
+  /** 暴露给大模型的动态工具总数（上限 48） */
+  exposedToolCount: number;
+  /** 注入 Prompt 的 Tool Schema 字符总数（上限 48,000） */
+  schemaCharacters: number;
+  /** 识别出的用户意图标签与置信度 */
   intents: Array<{ label: string; confidence: number; packIds: string[] }>;
-  fallback: "none" | "lexical" | "safe-readonly"; blockedHighRiskPackIds: string[];
+  /** 降级机制说明：none 无降级、lexical 纯倒排词法匹配、safe-readonly 保守只读兜底 */
+  fallback: "none" | "lexical" | "safe-readonly";
+  /** 因未显式授权而被阻断的高危包 ID 列表 */
+  blockedHighRiskPackIds: string[];
+  /** 各阶段路由耗时毫秒数 */
   latencyMs: { eligibility: number; retrieval: number; rerank: number; classify: number };
 }
+
+/**
+ * 能力路由最终返回结果
+ */
 export interface CapabilityRouteResult {
-  decision: CapabilityRouteDecision; commentary?: string; selectedToolNames: ReadonlySet<string>;
+  /** 路由决策详情 */
+  decision: CapabilityRouteDecision;
+  /** 路由模型生成的公开操作说明，仅用于用户界面，不写入路由诊断事件 */
+  commentary?: string;
+  /** 最终选定暴露给 Agent 运行时的工具名称集合 */
+  selectedToolNames: ReadonlySet<string>;
+  /** 运行态动态按需追加只读能力包 */
   expandReadonly(query: string): { addedPackIds: string[]; selectedToolNames: ReadonlySet<string> };
 }
+
 interface RouteInput {
   message: string; continuity?: string; packs: readonly CapabilityPackManifest[]; tools: readonly ToolDescriptor[];
   availableContext?: readonly string[]; explicitHighRiskPackIds?: readonly string[]; pinnedPackIds?: readonly string[];
@@ -42,6 +103,7 @@ const elapsed = (start: number): number => Math.round((performance.now() - start
 const list = (value: readonly string[], max: number, length: number): boolean =>
   Array.isArray(value) && value.length <= max &&
   value.every((item) => typeof item === "string" && item.trim().length > 0 && item.length <= length);
+
 
 export function validateCapabilityCatalog(packs: readonly CapabilityPackManifest[], tools: readonly ToolDescriptor[]): void {
   if (packs.length < 1 || packs.length > 256 || tools.length > 2_000) {
@@ -103,6 +165,14 @@ function tokens(value: string): string[] {
 function packText(pack: CapabilityPackManifest): string {
   return [pack.title, pack.summary, ...pack.intents, ...pack.examples,
     ...pack.negativeExamples, ...pack.resourceKinds].join("\n");
+}
+function explicitPackIds(message: string, packs: readonly CapabilityPackManifest[]): Set<string> {
+  const normalized = message.normalize("NFKC").toLowerCase();
+  return new Set(packs.filter((pack) => [pack.id, pack.title, ...pack.intents, ...pack.examples, ...pack.toolNames]
+    .some((value) => {
+      const trigger = value.normalize("NFKC").toLowerCase().trim();
+      return [...trigger].length >= 4 && normalized.includes(trigger);
+    })).map((pack) => pack.id));
 }
 function bm25(query: string, packs: readonly CapabilityPackManifest[]): CapabilityPackManifest[] {
   const documents = packs.map((pack) => tokens(packText(pack)));
@@ -172,6 +242,42 @@ function bound(candidates: readonly { pack: CapabilityPackManifest; score: numbe
   }
   return selected;
 }
+/**
+ * 执行动态能力路由决策（核心算法流程）
+ *
+ * 步骤：
+ * 1. 准入过滤：基于上下文标识 (availableContext) 与高危授权 (explicitHighRiskPackIds) 筛选合法包；
+ * 2. 依赖解析拓扑排序：确保选定包的前置依赖完整闭包；
+ * 3. 混合召回：拆分复合意图子句，结合 BM25 词法与向量嵌入进行 RRF（Reciprocal Rank Fusion）倒数融合排序；
+ * 4. 语义意图分类与重排：融合置信度打分与会话连续性权重；
+ * 5. 安全预算裁剪：严格限制不超过 6 个能力包、48 个工具总数与 48,000 字符 Tool Schema 上限；
+ * 6. 保守降级：若全流程未匹配到明确意图，回退至 safe-readonly 安全只读能力包集合。
+ *
+ * @param input 路由入参（包含用户消息、上下文、能力包列表与工具池）
+ * @returns 路由决策详情与最终暴露的工具名集合
+ *
+ * @example
+ * ```json
+ * // 路由决策返回结构示例：
+ * {
+ *   "decision": {
+ *     "algorithmVersion": "hybrid-v1",
+ *     "catalogDigest": "4f9b8a...",
+ *     "eligiblePackCount": 12,
+ *     "selectedPackIds": ["workbench_core", "file_operations"],
+ *     "exposedToolCount": 8,
+ *     "schemaCharacters": 14200,
+ *     "intents": [
+ *       { "label": "file_inspection", "confidence": 0.89, "packIds": ["file_operations"] }
+ *     ],
+ *     "fallback": "none",
+ *     "blockedHighRiskPackIds": [],
+ *     "latencyMs": { "eligibility": 0.4, "retrieval": 1.2, "rerank": 8.5, "classify": 8.5 }
+ *   },
+ *   "selectedToolNames": ["view_file", "list_dir", "grep_search"]
+ * }
+ * ```
+ */
 export async function routeCapabilities(input: RouteInput): Promise<CapabilityRouteResult> {
   if (!input.message.trim() || input.message.length > 16_000) throw new Error("Invalid capability route query.");
   validateCapabilityCatalog(input.packs, input.tools); input.signal.throwIfAborted();
@@ -195,38 +301,38 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
   const semanticSignal = AbortSignal.any([input.signal, AbortSignal.timeout(1_500)]);
   let vectorScores: Readonly<Record<string, number>> = {};
   let fallback: CapabilityRouteDecision["fallback"] = "none";
-  if (input.semantic?.retrieve && eligible.length) {
-    try {
-      vectorScores = await input.semantic.retrieve({
-        query: input.message, clauses, candidates: eligible, signal: semanticSignal,
-      });
-      const allowed = new Set(eligible.map((pack) => pack.id));
-      if (Object.entries(vectorScores).some(([packId, score]) =>
-        !allowed.has(packId) || !Number.isFinite(score) || score < -1 || score > 1)) {
-        throw new Error("Invalid vector capability result.");
-      }
-    } catch { vectorScores = {}; fallback = "lexical"; }
-  }
-  const ranked = rank(input.message, clauses, eligible,
-    (input.continuity ?? "").slice(0, 1_500), vectorScores);
-  const retrievalMs = elapsed(retrievalStarted), semanticStarted = performance.now();
+  const lexicalRanked = rank(input.message, clauses, eligible, (input.continuity ?? "").slice(0, 1_500));
   let semantic: CapabilitySemanticResult | undefined;
-  if (input.semantic && ranked.length) {
-    try {
-      semantic = await input.semantic.analyze({
-        query: input.message, clauses, candidates: ranked.slice(0, 20).map((item) => item.pack), signal: semanticSignal,
-      });
-      const allowed = new Set(ranked.slice(0, 20).map((item) => item.pack.id));
-      if (semantic.intents.length > 6 || semantic.intents.some((intent) =>
+  const vectorTask = input.semantic?.retrieve && eligible.length ? input.semantic.retrieve({
+    query: input.message, clauses, candidates: eligible, signal: semanticSignal,
+  }).then((scores) => {
+    const allowed = new Set(eligible.map((pack) => pack.id));
+    if (Object.entries(scores).some(([packId, score]) =>
+      !allowed.has(packId) || !Number.isFinite(score) || score < -1 || score > 1)) {
+      throw new Error("Invalid vector capability result.");
+    }
+    return scores;
+  }).catch(() => { fallback = "lexical" as const; return {}; }) : Promise.resolve({});
+  const semanticStarted = performance.now();
+  const semanticTask = input.semantic && lexicalRanked.length ? input.semantic.analyze({
+    query: input.message, clauses, candidates: lexicalRanked.slice(0, 20).map((item) => item.pack), signal: semanticSignal,
+  }).then((value) => {
+      const allowed = new Set(lexicalRanked.slice(0, 20).map((item) => item.pack.id));
+      if (value.intents.length > 6 || value.intents.some((intent) =>
         !intent.label.trim() || intent.label.length > 120 || !intent.objective.trim() ||
         intent.objective.length > 500 || !Number.isFinite(intent.confidence) || intent.confidence < 0 ||
         intent.confidence > 1 || intent.packIds.some((packId) => !allowed.has(packId))) ||
-        Object.entries(semantic.rerankScores).some(([packId, score]) =>
+        Object.entries(value.rerankScores).some(([packId, score]) =>
           !allowed.has(packId) || !Number.isFinite(score) || score < 0 || score > 1)) {
         throw new Error("Invalid semantic capability result.");
       }
-    } catch { semantic = undefined; fallback = "lexical"; }
-  } else if (fallback === "none") fallback = "lexical";
+      return value;
+    }).catch(() => { fallback = "lexical" as const; return undefined; }) : Promise.resolve(undefined);
+  [vectorScores, semantic] = await Promise.all([vectorTask, semanticTask]);
+  if (!input.semantic && fallback === "none") fallback = "lexical";
+  const ranked = rank(input.message, clauses, eligible,
+    (input.continuity ?? "").slice(0, 1_500), vectorScores);
+  const retrievalMs = elapsed(retrievalStarted);
   const semanticMs = elapsed(semanticStarted), confidence = new Map<string, number>();
   for (const intent of semantic?.intents ?? []) {
     if (intent.confidence < 0.55) continue;
@@ -234,7 +340,7 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
       confidence.set(packId, Math.max(confidence.get(packId) ?? 0, intent.confidence));
     }
   }
-  const pinned = new Set(input.pinnedPackIds ?? []);
+  const pinned = new Set([...(input.pinnedPackIds ?? []), ...explicitPackIds(input.message, eligible)]);
   let scored = ranked.map((item) => {
     const rerank = semantic === undefined ? item.normalized : (semantic.rerankScores[item.pack.id] ?? 0);
     const classifier = confidence.get(item.pack.id) ?? 0;

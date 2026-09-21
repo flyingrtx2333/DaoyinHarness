@@ -10,7 +10,7 @@ const groups: readonly Group[] = [
     intents: ["查看资源", "挂载工作区", "创建工作区", "导入代码仓库"], examples: ["列出当前资源", "从这个 Git 仓库创建工作区"],
     match: (name) => ["resource_list", "resource_attach", "resource_detach", "workspace_create", "workspace_inspect"].includes(name) },
   { id: "resource.files", title: "工作区文件", summary: "读取、搜索和修改任意语言工作区中的文件。", risk: "write",
-    intents: ["读取文件", "搜索代码", "修改代码", "整理文件"], examples: ["搜索这个符号并修改实现", "读取配置文件"],
+    intents: ["读取文件", "写入文件", "搜索代码", "修改代码", "整理文件"], examples: ["搜索这个符号并修改实现", "读取配置文件"],
     match: (name) => name.startsWith("file_") },
   { id: "resource.vcs", title: "版本控制", summary: "在隔离工作区中检查 Git、提交修改和导出补丁。", risk: "write",
     intents: ["检查 Git", "提交代码", "导出补丁", "切换分支"], examples: ["查看当前 diff", "提交并导出补丁"],
@@ -19,7 +19,7 @@ const groups: readonly Group[] = [
     intents: ["运行命令", "安装依赖", "启动服务", "运行测试", "读取日志"], examples: ["运行 pytest", "启动服务并查看日志"],
     match: (name) => name.startsWith("process_") },
   { id: "resource.snapshot", title: "快照与制品", summary: "创建或恢复内容寻址快照，并保存不可变制品。", risk: "write",
-    intents: ["保存快照", "恢复版本", "生成制品"], examples: ["保存当前工作区快照", "把构建结果保存为制品"],
+    intents: ["创建快照", "保存快照", "恢复版本", "生成制品"], examples: ["保存当前工作区快照", "把构建结果保存为制品"],
     match: (name) => ["workspace_snapshot", "workspace_restore", "artifact_create", "artifact_read", "artifact_list"].includes(name) },
   { id: "resource.deployment-status", title: "部署状态", summary: "查询不可变部署的健康状态和访问地址。", risk: "read",
     intents: ["查询部署", "查看线上状态"], examples: ["查看当前部署状态"], match: (name) => name === "deployment_status" },
@@ -61,6 +61,33 @@ const negatives = (risk: CapabilityRisk): string[] =>
   risk === "high" ? ["只修改代码但不要发布", "查看线上状态"] :
   risk === "write" ? ["只读检查"] : ["修改或删除资源"];
 
+/**
+ * 根据给定的工具描述清单，自动聚合与生成对应的能力包清单 (CapabilityPackManifest[])
+ * 
+ * 聚合逻辑：
+ * 1. 优先匹配内置核心能力组（云端项目、项目源码、界面方案、检查预览、发布回滚、记忆检索与管理、子任务协作等）；
+ * 2. 剩余未分配工具按前缀（如 saishi_、video_、profile_）及风险等级 (read/write/high) 自动分桶打包装载；
+ * 3. 每个动态包严格限制最多打包 16 个工具，避免单包 Schema 膨胀。
+ * 
+ * @param tools 平台或 Profile 提供的全量工具描述符列表
+ * @returns 结构化的能力包清单数组
+ * 
+ * @example
+ * ```json
+ * // 生成能力包示例：
+ * [
+ *   {
+ *     "id": "memory.search",
+ *     "version": "1",
+ *     "title": "长期记忆查询",
+ *     "summary": "查询当前身份可访问的长期记忆。",
+ *     "intents": ["查找记忆", "回忆偏好"],
+ *     "toolNames": ["memory_search"],
+ *     "risk": "read"
+ *   }
+ * ]
+ * ```
+ */
 export function capabilityPacksFor(tools: readonly ToolDescriptor[]): CapabilityPackManifest[] {
   const assigned = new Set<string>();
   const packs: CapabilityPackManifest[] = [];
@@ -101,6 +128,7 @@ export function capabilityPacksFor(tools: readonly ToolDescriptor[]): Capability
   }
   return packs;
 }
+
 function explicitClause(message: string, action: RegExp): boolean {
   return message.split(/[。！？!?；;\n]|(?:然后|并且|同时|另外|再)/u).some((clause) => {
     if (!action.test(clause)) return false;
@@ -109,6 +137,28 @@ function explicitClause(message: string, action: RegExp): boolean {
     );
   });
 }
+
+/**
+ * 从用户自然语言输入中显式检测并授权高风险能力包
+ * 
+ * 安全准则：
+ * 1. 严格子句级断句：防止前句否定误判为肯定授权（例如“修改代码但不要发布”中，“不要发布”会被否定规则拦截）；
+ * 2. 仅当用户明确肯定提及高危动作（发布/上线/回滚/删除/支付/外发）时，才将对应的 high 风险包纳入授权清单；
+ * 3. 未被本函数识别的高危包会在路由阶段被严格阻断 (blockedHighRiskPackIds)。
+ * 
+ * @param message 用户输入的自然语言消息
+ * @param packs 候选能力包列表
+ * @returns 获得显式肯定授权的高危能力包 ID 数组
+ * 
+ * @example
+ * ```typescript
+ * explicitHighRiskPacks("代码已修改完成，请帮我发布上线", packs);
+ * // 返回: ["project.release"]
+ * 
+ * explicitHighRiskPacks("仅检查当前页面代码，先不要发布", packs);
+ * // 返回: [] （否定前缀成功阻止越权触发）
+ * ```
+ */
 export function explicitHighRiskPacks(
   message: string,
   packs: readonly CapabilityPackManifest[],
@@ -127,3 +177,4 @@ export function explicitHighRiskPacks(
   }
   return [...result];
 }
+
