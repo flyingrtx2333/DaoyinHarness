@@ -514,4 +514,25 @@ export class ResourceRepository {
       WHERE owner_key=$1 AND run_id=$2 AND status IN ('starting','running') ORDER BY started_at,id`,
       [ownerKey(identity), runId])).rows;
   }
+
+  public async reconcileStoppedProcesses(liveProcessIds: readonly string[]): Promise<number> {
+    for (const processId of liveProcessIds) assertResourceId(processId, "prc");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const stopped = (await client.query<{ id: string; owner_key: string; workspace_id: string; run_id: string; status: string }>(`UPDATE harness_process_sessions
+        SET status=CASE WHEN timeout_at IS NOT NULL AND timeout_at <= now() THEN 'timed_out' ELSE 'interrupted' END,
+          finished_at=COALESCE(finished_at,now())
+        WHERE status IN ('starting','running') AND NOT (id=ANY($1::text[]))
+        RETURNING id,owner_key,workspace_id,run_id,status`, [liveProcessIds])).rows;
+      for (const process of stopped) {
+        await client.query(`INSERT INTO harness_resource_events(owner_key,run_id,resource_id,event_type,payload)
+          VALUES($1,$2,$3,'process.reconciled',$4)`, [process.owner_key, process.run_id, process.workspace_id,
+          JSON.stringify({ processId: process.id, status: process.status })]);
+      }
+      await client.query("COMMIT");
+      return stopped.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
 }

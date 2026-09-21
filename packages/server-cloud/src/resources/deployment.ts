@@ -11,6 +11,7 @@ import {
 import { type DeploymentWorkerRequest, type ResolvedResourceBinding, type ResolvedSecret } from "./contracts.js";
 import { ResourceError } from "./repository.js";
 import { assertRuntimeSpec } from "./runtime-policy.js";
+import { ensureWorkspaceEgress, isolateExistingContainer } from "./workspace-network.js";
 
 const ROOT = process.env.HARNESS_DEPLOYMENT_ROOT ?? "/var/lib/daoyin-resources/deployments";
 const CONTENT = process.env.HARNESS_CONTENT_STORE_ROOT ?? "/var/lib/daoyin-resources/content";
@@ -28,7 +29,7 @@ const BINDING_ROOTS = (process.env.HARNESS_BINDING_ROOTS ?? "/run/daoyin-project
 const IMAGE_CATALOG = JSON.parse(process.env.HARNESS_RUNTIME_IMAGES ?? "{}") as Record<string, { image: string; digest: string }>;
 const STATE_PATH = path.join(ROOT, "routes.json");
 
-interface RouteTarget { deploymentId: string; hostname: string; port?: number; socketPath?: string; containerName: string }
+interface RouteTarget { deploymentId: string; workspaceId?: string; hostname: string; port?: number; socketPath?: string; containerName: string }
 interface PersistedState { routes: Record<string, string>; deployments: Record<string, RouteTarget> }
 
 let state: PersistedState = { routes: {}, deployments: {} };
@@ -155,11 +156,11 @@ async function materialize(deploymentId: string, entries: readonly WorkspaceEntr
   } catch (error) { await rm(staging, { recursive: true, force: true }); throw error; }
 }
 
-function proxyEnvironment(workspaceId: string, deploymentId: string): string[] {
+function proxyEnvironment(workspaceId: string, deploymentId: string, address: string): string[] {
   if (EGRESS_SECRET.length < 32) throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled deployment egress is not configured.", 503);
   const payload = Buffer.from(JSON.stringify({ workspaceId, runId: `deployment:${deploymentId}`, expiresAt: Date.now() + 24 * 60 * 60 * 1000 })).toString("base64url");
   const signature = createHmac("sha256", EGRESS_SECRET).update(payload).digest("base64url");
-  const proxy = new URL(EGRESS_PROXY); proxy.username = payload; proxy.password = signature;
+  const proxy = new URL(EGRESS_PROXY); proxy.hostname = address; proxy.username = payload; proxy.password = signature;
   return ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"].flatMap((name) => ["--env", `${name}=${proxy.href}`])
     .concat(["--env", "NO_PROXY=127.0.0.1,localhost,::1"]);
 }
@@ -244,16 +245,17 @@ async function deploy(request: DeploymentWorkerRequest): Promise<Record<string, 
   await capacity(host, limits.memoryMiB);
   const environment = { ...request.runtime.environment, ...spec.environment,
     ...(spec.transport.kind === "tcp" ? { PORT: String(spec.transport.port) } : {}) };
+  const egress = await ensureWorkspaceEgress(workspaceId, docker);
   const runRoot = path.join(ROOT, deploymentId, "run");
   if (spec.transport.kind === "unix") { await rm(runRoot, { recursive: true, force: true }); await mkdir(runRoot, { recursive: true, mode: 0o700 }); await chown(runRoot, 1000, 1000); }
-  const args = ["run", "-d", "--name", containerName, "--runtime", RUNTIME, "--network", EGRESS_NETWORK,
+  const args = ["run", "-d", "--name", containerName, "--runtime", RUNTIME, "--network", egress.networkName,
     "--label", `daoyin.harness.deployment=${deploymentId}`, "--label", `daoyin.harness.workspace=${workspaceId}`,
     "--user", "1000:1000", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", String(limits.pids),
     "--memory", `${limits.memoryMiB}m`, "--memory-swap", `${limits.memoryMiB}m`, "--cpus", String(limits.cpu),
     "--ulimit", "nofile=2048:2048", "--log-driver", "local", "--log-opt", "max-size=4m", "--log-opt", "max-file=3",
     "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m", "--mount", `type=bind,src=${root},dst=/app,readonly`,
     ...(spec.transport.kind === "tcp" ? ["--publish", `127.0.0.1::${spec.transport.port}`] : ["--mount", `type=bind,src=${runRoot},dst=/run/app`]),
-    ...proxyEnvironment(workspaceId, deploymentId), ...secrets, ...bindings,
+    ...proxyEnvironment(workspaceId, deploymentId, egress.proxyAddress), ...secrets, ...bindings,
     ...Object.entries(environment).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
     "--workdir", `/app/${spec.command.cwd === "." ? "" : spec.command.cwd}`, image(request.runtime), spec.command.executable, ...spec.command.args];
   const started = await docker(args, 60_000);
@@ -262,7 +264,7 @@ async function deploy(request: DeploymentWorkerRequest): Promise<Record<string, 
     const target = spec.transport.kind === "tcp" ? { port: await mappedPort(containerName, spec.transport.port) }
       : { socketPath: path.join(runRoot, path.basename(spec.transport.path)) };
     await health(target, host, spec);
-    state.deployments[deploymentId] = { deploymentId, hostname: host, containerName, ...target };
+    state.deployments[deploymentId] = { deploymentId, workspaceId, hostname: host, containerName, ...target };
     state.routes[host] = deploymentId;
     const keep = new Set([deploymentId, ...(request.previousDeploymentId ? [request.previousDeploymentId] : [])]);
     for (const [id, old] of Object.entries(state.deployments)) if (old.hostname === host && !keep.has(id)) {
@@ -325,11 +327,26 @@ function dispatchSerialized(request: DeploymentWorkerRequest): Promise<Record<st
   return pending;
 }
 
+async function reconcileDeploymentNetworks(): Promise<void> {
+  for (const target of Object.values(state.deployments)) {
+    if (!(await containerRunning(target.containerName))) continue;
+    let workspaceId = target.workspaceId;
+    if (!workspaceId) {
+      const inspected = await docker(["inspect", "--format", "{{index .Config.Labels \"daoyin.harness.workspace\"}}", target.containerName], 10_000);
+      workspaceId = inspected.exitCode === 0 ? inspected.stdout.trim() : "";
+    }
+    try { assertResourceId(workspaceId ?? "", "wsp"); }
+    catch { throw new ResourceError("DEPLOYMENT_NETWORK_RECONCILE_FAILED", "A running deployment has no valid workspace identity.", 503); }
+    await isolateExistingContainer(target.containerName, workspaceId!, EGRESS_NETWORK, docker);
+    target.workspaceId = workspaceId;
+  }
+}
+
 await mkdir(ROOT, { recursive: true, mode: 0o700 }); await mkdir(path.dirname(SOCKET), { recursive: true, mode: 0o750 });
 await mkdir(SECRET_ROOT, { recursive: true, mode: 0o700 });
 try { state = JSON.parse(await readFile(STATE_PATH, "utf8")) as PersistedState; } catch { state = { routes: {}, deployments: {} }; }
 for (const [host, id] of Object.entries(state.routes)) if (!state.deployments[id] || !(await containerRunning(state.deployments[id]!.containerName))) delete state.routes[host];
-await persist(); await readiness(); await unlink(SOCKET).catch(() => undefined);
+await readiness(); await reconcileDeploymentNetworks(); await persist(); await unlink(SOCKET).catch(() => undefined);
 
 const control = http.createServer((request, response) => {
   if (request.method !== "POST" || request.url !== "/deploy") { response.writeHead(404).end(); return; }

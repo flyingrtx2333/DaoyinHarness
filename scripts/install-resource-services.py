@@ -157,6 +157,7 @@ def prepare(release: pathlib.Path) -> dict[str, object]:
             "HARNESS_CONTENT_STORE_GID": str(resource_gid),
             "HARNESS_GVISOR_RUNTIME": detected_gvisor,
             "HARNESS_EGRESS_NETWORK": "harness-public-egress",
+            "HARNESS_WORKSPACE_NETWORK_PREFIX": "harness-ws-",
             "HARNESS_EGRESS_PROXY": "http://daoyin-resource-egress:3128",
             "HARNESS_EGRESS_PORT": "3128",
             "HARNESS_EGRESS_HMAC_SECRET": secrets.token_urlsafe(48),
@@ -175,6 +176,7 @@ def prepare(release: pathlib.Path) -> dict[str, object]:
         }
     values["HARNESS_RESOURCE_GID"] = str(agent_gid)
     values["HARNESS_CONTENT_STORE_GID"] = str(resource_gid)
+    values.setdefault("HARNESS_WORKSPACE_NETWORK_PREFIX", "harness-ws-")
     write_env(CONFIG / "service.env", values, 0, resource_gid)
 
     dependencies = release / "node_modules"
@@ -290,7 +292,7 @@ UMask=0027
 WantedBy=multi-user.target
 """)
 
-    # The trusted proxy is the only container with both the internal workspace network and an uplink.
+    # The trusted proxy is the only container with an uplink and membership in isolated workspace networks.
     dependency_source = (release / "node_modules").resolve()
     egress_image = values.get("HARNESS_EGRESS_NODE_IMAGE") or "REPLACE_WITH_VERIFIED_DIGEST"
     egress_script = CONFIG / "run-egress.sh"
@@ -307,6 +309,9 @@ pid=$!
 trap '/usr/bin/docker rm -f daoyin-resource-egress >/dev/null 2>&1 || true' EXIT INT TERM
 for i in $(seq 1 30); do /usr/bin/docker inspect daoyin-resource-egress >/dev/null 2>&1 && break; sleep 1; done
 /usr/bin/docker network connect --alias daoyin-resource-egress harness-public-egress daoyin-resource-egress
+for network in $(/usr/bin/docker network ls --filter label=daoyin.harness.egress=workspace-controlled --format '{{{{.Name}}}}'); do
+  /usr/bin/docker network connect --alias daoyin-resource-egress "$network" daoyin-resource-egress >/dev/null 2>&1 || true
+done
 wait "$pid"
 """, encoding="utf-8")
     os.chmod(egress_script, 0o750)

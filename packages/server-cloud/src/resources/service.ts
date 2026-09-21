@@ -393,6 +393,21 @@ if (process.env.HARNESS_DEPLOYMENT_EXECUTOR_ENABLED === "1") {
     await repository.failPendingDeployment(pending.id);
   }
 }
+let processReconcileRunning = false;
+const reconcilePersistedProcesses = async (): Promise<void> => {
+  if (processReconcileRunning) return;
+  processReconcileRunning = true;
+  try {
+    const result = await executor({ action: "reconcile" });
+    const live = Array.isArray(result.processes) ? result.processes.filter((item): item is string => typeof item === "string") : [];
+    await repository.reconcileStoppedProcesses(live);
+  } finally { processReconcileRunning = false; }
+};
+await reconcilePersistedProcesses();
+const processReconcileTimer = setInterval(() => { void reconcilePersistedProcesses().catch((error: unknown) => {
+  console.error("Resource process reconciliation failed:", error instanceof Error ? error.message : "unknown error");
+}); }, 5_000);
+processReconcileTimer.unref();
 await mkdir("/run/daoyin-resources", { recursive: true, mode: 0o750 });
 await unlink(SOCKET).catch(() => undefined);
 const server = http.createServer((request, response) => {
@@ -435,5 +450,5 @@ server.listen(SOCKET, () => {
   if (Number.isSafeInteger(gid) && gid > 0) void chown(SOCKET, -1, gid).then(() => chmod(SOCKET, 0o660));
 });
 
-async function close(): Promise<void> { await new Promise<void>(resolve => server.close(() => resolve())); await pool.end(); }
+async function close(): Promise<void> { clearInterval(processReconcileTimer); await new Promise<void>(resolve => server.close(() => resolve())); await pool.end(); }
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close(); });

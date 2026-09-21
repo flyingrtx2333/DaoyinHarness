@@ -1,13 +1,13 @@
 import http from "node:http";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { isIP } from "node:net";
 import { chmod, chown, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertResourceId, assertWorkspacePath, type RuntimeSpec, type WorkspaceEntry } from "@daoyin/harness-contracts";
 import { FileContentStore } from "./content-store.js";
 import { ResourceError } from "./repository.js";
 import { assertRuntimeSpec } from "./runtime-policy.js";
+import { ensureWorkspaceEgress, isolateExistingContainer } from "./workspace-network.js";
 import type { ExecutorProcessRequest, ResolvedSecret } from "./contracts.js";
 
 const ROOT = process.env.HARNESS_WORKSPACE_ROOT ?? "/var/lib/daoyin-resources/workspaces";
@@ -51,6 +51,7 @@ async function reconcileProcesses(): Promise<void> {
     if (inspected.exitCode !== 0) continue;
     const labels = JSON.parse(inspected.stdout) as Record<string, string>; const workspaceId = labels["daoyin.harness.workspace"] ?? "";
     if (!/^wsp_[a-f0-9]{24}$/u.test(workspaceId) || labels["daoyin.harness.process"] !== processId || !["background", "pty"].includes(labels["daoyin.harness.mode"] ?? "")) continue;
+    await isolateExistingContainer(name, workspaceId, EGRESS_NETWORK, (args, timeoutMs) => docker(args, timeoutMs, undefined, 100_000));
     processes.set(processId, { workspaceId, name, mode: labels["daoyin.harness.mode"] as "background" | "pty",
       startedAt: labels["daoyin.harness.started_at"] ?? new Date().toISOString(), timeoutAt: Number(labels["daoyin.harness.timeout_at"] ?? 0) });
   }
@@ -220,25 +221,20 @@ function assertProcessCwd(value: string | undefined): string {
   return cwd;
 }
 
-async function egressArguments(workspaceId: string, runId: string, timeoutSeconds: number): Promise<string[]> {
+async function egressArguments(workspaceId: string, runId: string, timeoutSeconds: number): Promise<{ networkName: string; args: string[] }> {
   if (!EGRESS_PROXY || EGRESS_SECRET.length < 32) throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not configured.", 503);
   let url: URL;
   try { url = new URL(EGRESS_PROXY); } catch { throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not configured.", 503); }
   if (url.protocol !== "http:" || url.username || url.password || !/^[a-z0-9][a-z0-9.-]{0,252}$/u.test(url.hostname)) {
     throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not configured.", 503);
   }
-  const inspected = await docker(["inspect", "--format", "{{json .NetworkSettings.Networks}}", url.hostname], 10_000, undefined, 100_000);
-  if (inspected.exitCode !== 0) throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is unavailable.", 503);
-  let networks: Record<string, { IPAddress?: unknown }>;
-  try { networks = JSON.parse(inspected.stdout) as Record<string, { IPAddress?: unknown }>; }
-  catch { throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress state is invalid.", 503); }
-  const address = networks[EGRESS_NETWORK]?.IPAddress;
-  if (typeof address !== "string" || isIP(address) !== 4) throw new ResourceError("EGRESS_UNAVAILABLE", "Controlled public egress is not attached to the sandbox network.", 503);
+  const isolated = await ensureWorkspaceEgress(workspaceId, (args, timeoutMs) => docker(args, timeoutMs, undefined, 100_000));
   const payload = Buffer.from(JSON.stringify({ workspaceId, runId: runId.slice(0, 160), expiresAt: Date.now() + timeoutSeconds * 1000 + 300_000 })).toString("base64url");
   const signature = createHmac("sha256", EGRESS_SECRET).update(payload).digest("base64url");
   url.username = payload; url.password = signature;
-  return ["--add-host", `${url.hostname}:${address}`, "--env", `HTTP_PROXY=${url.href}`, "--env", `HTTPS_PROXY=${url.href}`, "--env", `ALL_PROXY=${url.href}`,
-    "--env", "NO_PROXY=localhost,127.0.0.1,::1"];
+  return { networkName: isolated.networkName,
+    args: ["--add-host", `${url.hostname}:${isolated.proxyAddress}`, "--env", `HTTP_PROXY=${url.href}`, "--env", `HTTPS_PROXY=${url.href}`, "--env", `ALL_PROXY=${url.href}`,
+      "--env", "NO_PROXY=localhost,127.0.0.1,::1"] };
 }
 
 async function secretArguments(name: string, expectedRefs: readonly string[], values: readonly ResolvedSecret[] | undefined): Promise<string[]> {
@@ -273,10 +269,10 @@ async function redactSecretOutput(name: string, value: string): Promise<string> 
 }
 
 async function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, runId = "system"): Promise<string[]> {
-  const root = workspaceRoot(workspaceId); const network = spec.network === "public" ? EGRESS_NETWORK : "none";
+  const root = workspaceRoot(workspaceId); const egress = spec.network === "public" ? await egressArguments(workspaceId, runId, spec.limits.timeoutSeconds) : null;
   await ensureWorkspaceRuntimeDirectories(workspaceId);
   return ["run", "--runtime", RUNTIME, "--name", name, "--label", "daoyin.harness.resource=1", "--label", `daoyin.harness.workspace=${workspaceId}`,
-    "--network", network, "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
+    "--network", egress?.networkName ?? "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
     "--memory", `${spec.limits.memoryMiB}m`, "--memory-swap", `${spec.limits.memoryMiB}m`, "--cpus", String(spec.limits.cpu), "--pids-limit", String(spec.limits.pids),
     "--ulimit", "nofile=2048:2048", "--log-driver", "local", "--log-opt", "max-size=4m", "--log-opt", "max-file=3",
     "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777", "--mount", `type=bind,src=${root},dst=/workspace`, "--workdir", "/workspace",
@@ -286,7 +282,7 @@ async function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, 
     "--env", "CARGO_HOME=/workspace/.harness/cargo", "--env", "GOPATH=/workspace/.harness/go", "--env", "GOMODCACHE=/workspace/.harness/go/pkg/mod",
     "--env", "PATH=/workspace/.harness/python-user/bin:/workspace/.harness/npm-global/bin:/workspace/.harness/cargo/bin:/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "--env", "CI=1", "--env", "NO_COLOR=1",
-    ...(spec.network === "public" ? await egressArguments(workspaceId, runId, spec.limits.timeoutSeconds) : []),
+    ...(egress?.args ?? []),
     ...safeEnvironment(spec.environment)];
 }
 
@@ -547,11 +543,11 @@ async function readiness(): Promise<Record<string, unknown>> {
     "--security-opt", "no-new-privileges", "--pids-limit", "48", "--memory", "64m", probeImage.image,
     SANDBOX_PROBE.executable, ...SANDBOX_PROBE.args], 30_000, undefined, 20_000);
   if (probe.exitCode !== 0) throw new ResourceError("SANDBOX_PROBE_FAILED", "The gVisor startup probe failed.", 503);
-  const egress = await egressArguments("readiness", "readiness", 30);
+  const egress = await egressArguments("wsp_000000000000000000000000", "readiness", 30);
   const proxy = new URL(EGRESS_PROXY);
-  const egressProbe = await docker(["run", "--rm", "--runtime", RUNTIME, "--network", EGRESS_NETWORK, "--read-only", "--cap-drop", "ALL",
+  const egressProbe = await docker(["run", "--rm", "--runtime", RUNTIME, "--network", egress.networkName, "--read-only", "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges", "--pids-limit", "48", "--memory", "64m",
-    ...egress, probeImage.image, "node", "-e",
+    ...egress.args, probeImage.image, "node", "-e",
     `const net=require('node:net');const s=net.createConnection({host:${JSON.stringify(proxy.hostname)},port:${Number(proxy.port || 80)}});s.setTimeout(5000);s.once('connect',()=>{s.end();process.exit(0)});s.once('timeout',()=>process.exit(2));s.once('error',()=>process.exit(3))`],
     30_000, undefined, 20_000);
   if (egressProbe.exitCode !== 0) throw new ResourceError("EGRESS_PROBE_FAILED", "The gVisor egress proxy probe failed.", 503);
