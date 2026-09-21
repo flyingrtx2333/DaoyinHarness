@@ -390,7 +390,8 @@ await mkdir("/run/daoyin-resources", { recursive: true, mode: 0o750 });
 await unlink(SOCKET).catch(() => undefined);
 const server = http.createServer((request, response) => {
   if (request.method !== "POST" || request.url !== "/control") { response.writeHead(404).end(); return; }
-  const controller = new AbortController(); request.once("close", () => controller.abort()); let body = "";
+  const controller = new AbortController(); request.once("aborted", () => controller.abort());
+  response.once("close", () => { if (!response.writableEnded) controller.abort(); }); let body = "";
   request.on("data", chunk => { body += chunk.toString(); if (Buffer.byteLength(body) > 2_000_000) request.destroy(); });
   request.on("end", () => { void (async () => {
     let parsed: ResourceControlRequest | undefined;
