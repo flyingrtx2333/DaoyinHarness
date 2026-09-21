@@ -120,7 +120,7 @@ def prepare(release: pathlib.Path) -> dict[str, object]:
     executor_gid = ensure_group("daoyin-resource-executor")
     builder_gid = ensure_group("daoyin-resource-builder")
     agent_gid = grp.getgrnam("daoyin-agent").gr_gid
-    grp.getgrnam("daoyin-projects")
+    projects_gid = grp.getgrnam("daoyin-projects").gr_gid
     account = ensure_user("daoyin-resources", "daoyin-resources", str(STATE))
     builder = ensure_user("daoyin-resource-builder", "daoyin-resource-builder", str(STATE / "builds"))
     command(["usermod", "-a", "-G", "daoyin-agent,daoyin-resource-executor,daoyin-resource-builder,daoyin-projects", "daoyin-resources"])
@@ -300,7 +300,7 @@ WantedBy=multi-user.target
 set -eu
 /usr/bin/docker rm -f daoyin-resource-egress >/dev/null 2>&1 || true
 /usr/bin/docker run --rm --name daoyin-resource-egress --network bridge \\
-  --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 128 --memory 256m --cpus 0.5 \\
+  --read-only --cap-drop ALL --security-opt no-new-privileges --group-add {projects_gid} --pids-limit 128 --memory 256m --cpus 0.5 \\
   --env-file {CONFIG / 'service.env'} --mount type=bind,src={current},dst=/opt/service,readonly \\
   --mount type=bind,src={dependency_source},dst=/opt/service/node_modules,readonly \\
   --mount type=bind,src=/run/daoyin-projects-db,dst=/run/daoyin-projects-db \\
