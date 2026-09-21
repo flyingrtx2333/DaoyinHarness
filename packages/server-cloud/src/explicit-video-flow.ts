@@ -58,6 +58,34 @@ function call(id: string, name: string, input: Record<string, unknown>): ModelRe
   return { kind: "tool_calls", calls: [{ id, name, input }] };
 }
 
+export function isStoryProjectListRequest(message: string): boolean {
+  const text = message.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  return /(?:短剧|Story).{0,16}(?:项目|作品)/iu.test(text) &&
+    /(?:查询|查看|列出|有哪些|哪些|做过|找出)/u.test(text) &&
+    !/(?:创建|新建|修改|编辑|删除|发布|生成|制作)/u.test(text);
+}
+
+export function createExplicitStoryProjectListFlow(run: CloudRun, model: ModelClient): ModelClient | undefined {
+  if (!isStoryProjectListRequest(run.userMessage)) return undefined;
+  let requested = false;
+  return { complete: async (request) => {
+    request.signal.throwIfAborted();
+    if (!requested) {
+      if (!request.tools.some((tool) => tool.name === "story_call")) {
+        return { kind: "assistant", content: "当前短剧项目查询能力未接入，本轮未执行查询。" };
+      }
+      requested = true;
+      return { kind: "tool_calls", content: "我先读取当前账号的短剧项目列表。",
+        calls: [{ id: "story_list_projects", name: "story_call", input: { operation: "list_projects" } }] };
+    }
+    const result = toolResult(request, "story_call");
+    if (result?.ok !== true) {
+      return { kind: "assistant", content: text(result?.message) ?? "短剧项目查询未完成，请稍后重试。" };
+    }
+    return model.complete({ ...request, tools: [] });
+  } };
+}
+
 /** Deterministic paid-action preflight: explicit creation opens the existing modal instead of becoming prose. */
 export function createExplicitVideoFlow(run: CloudRun, model: ModelClient): ModelClient | undefined {
   if (!isExplicitNewVideoRequest(run.userMessage)) return undefined;

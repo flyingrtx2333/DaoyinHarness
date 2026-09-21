@@ -22,7 +22,7 @@ import { eventPage } from "./history-policy.js";
 import { ReadinessProbe, runtimeBuild, type RuntimeBuild } from "./runtime-health.js";
 import { describeRun, RunMeasurements } from "./run-diagnostics.js";
 import { VIDEO_CONFIRMATION_INSTRUCTIONS, VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS, VideoInteractionCoordinator } from "./video-interaction.js";
-import { createExplicitVideoFlow } from "./explicit-video-flow.js";
+import { createExplicitStoryProjectListFlow, createExplicitVideoFlow } from "./explicit-video-flow.js";
 import { disabledTelemetry, type Telemetry } from "./observability.js";
 
 export interface CloudToolBinding {
@@ -522,7 +522,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         await ensureActive(identity, controller.signal);
         // One gateway client and operation sequence for the complete tree: accounting stays on the root Run.
         const platformModel = await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
-        const baseModel = createExplicitVideoFlow(run, platformModel) ?? platformModel;
+        const baseModel = createExplicitStoryProjectListFlow(run, platformModel) ?? createExplicitVideoFlow(run, platformModel) ?? platformModel;
         let modelCalls = 0;
         const createMeteredModel = async (targetRun: CloudRun, parentSignal: AbortSignal): Promise<ModelClient> => {
           return {
