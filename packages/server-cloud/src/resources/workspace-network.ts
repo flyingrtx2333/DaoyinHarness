@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
+import path from "node:path";
 import { assertResourceId } from "@daoyin/harness-contracts";
 import { ResourceError } from "./repository.js";
 
@@ -81,7 +83,7 @@ export async function ensureWorkspaceEgress(workspaceId: string, docker: DockerC
 
 export async function isolateExistingContainer(containerName: string, workspaceId: string, legacyNetwork: string,
   docker: DockerCall): Promise<string> {
-  const isolated = await ensureWorkspaceEgress(workspaceId, docker);
+  const isolated = await ensureWorkspaceEgress(workspaceId, docker); const proxy = proxyContainer();
   const inspected = await docker(["inspect", "--format", "{{json .NetworkSettings.Networks}}", containerName], 10_000);
   if (inspected.exitCode !== 0) throw new ResourceError("EGRESS_UNAVAILABLE", "A running sandbox could not be inspected.", 503);
   let networks: Record<string, unknown>;
@@ -91,6 +93,23 @@ export async function isolateExistingContainer(containerName: string, workspaceI
     const connected = await docker(["network", "connect", isolated.networkName, containerName], 15_000);
     if (connected.exitCode !== 0) throw new ResourceError("EGRESS_UNAVAILABLE", "A running sandbox could not enter its isolated workspace network.", 503);
   }
+  const identity = await docker(["inspect", "--format", "{{.Id}}", containerName], 10_000);
+  const containerId = identity.stdout.trim();
+  if (identity.exitCode !== 0 || !/^[a-f0-9]{64}$/u.test(containerId)) {
+    throw new ResourceError("EGRESS_UNAVAILABLE", "A running sandbox has no valid container identity.", 503);
+  }
+  const rootState = await docker(["info", "--format", "{{.DockerRootDir}}"], 10_000);
+  const dockerRoot = path.resolve(rootState.stdout.trim());
+  if (rootState.exitCode !== 0 || !path.isAbsolute(dockerRoot) || dockerRoot === path.parse(dockerRoot).root) {
+    throw new ResourceError("EGRESS_UNAVAILABLE", "The container storage root is unavailable.", 503);
+  }
+  const hostsPath = path.join(dockerRoot, "containers", containerId, "hosts");
+  let hosts: string;
+  try { hosts = await readFile(hostsPath, "utf8"); }
+  catch { throw new ResourceError("EGRESS_UNAVAILABLE", "A running sandbox host map is unavailable.", 503); }
+  const retained = hosts.split(/\r?\n/u).filter((line) => !line.trim().split(/\s+/u).slice(1).includes(proxy.name));
+  retained.push(`${isolated.proxyAddress}\t${proxy.name}`, "");
+  await writeFile(hostsPath, retained.join("\n"), "utf8");
   if (legacyNetwork !== isolated.networkName && networks[legacyNetwork]) {
     const disconnected = await docker(["network", "disconnect", legacyNetwork, containerName], 15_000);
     if (disconnected.exitCode !== 0) throw new ResourceError("EGRESS_UNAVAILABLE", "A running sandbox could not leave the shared legacy network.", 503);
