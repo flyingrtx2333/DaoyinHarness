@@ -556,6 +556,7 @@ async function readiness(): Promise<Record<string, unknown>> {
 
 async function dispatch(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
   if (request.action === "readiness") return readiness();
+  if (request.action === "reconcile") { await reconcileProcesses(); return { processes: [...processes.keys()] }; }
   if (!request.workspaceId) throw new ResourceError("WORKSPACE_REQUIRED", "Workspace is required.");
   if (request.action === "workspace_prepare") return withPausedWorkspaceProcesses(request.workspaceId, () => prepare(request));
   if (request.action === "workspace_remove") {
@@ -567,7 +568,6 @@ async function dispatch(request: ExecutorProcessRequest): Promise<Record<string,
   if (request.action === "file") return withPausedWorkspaceProcesses(request.workspaceId, () => fileOperation(request));
   if (request.action === "git") return withPausedWorkspaceProcesses(request.workspaceId, () => gitOperation(request));
   if (request.action === "process") return processOperation(request);
-  if (request.action === "reconcile") { await reconcileProcesses(); return { processes: [...processes.keys()] }; }
   throw new ResourceError("EXECUTOR_ACTION_DENIED", "Executor operation is not allowed.", 403);
 }
 
