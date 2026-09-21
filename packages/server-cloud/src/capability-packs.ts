@@ -6,6 +6,9 @@ interface Group {
   match(name: string): boolean;
 }
 const groups: readonly Group[] = [
+  { id: "story.projects", title: "短剧项目", summary: "只读查询当前账号已有的短剧项目。", risk: "read",
+    intents: ["查询短剧项目", "查看我做过的短剧", "查找短剧项目"], examples: ["我做过哪些短剧项目", "列出我的短剧项目"],
+    match: (name) => name === "story_list_projects" },
   { id: "project.catalog", title: "云端项目", summary: "创建、查看和选择云端项目。", risk: "write",
     intents: ["创建项目", "查看项目", "选择项目"], examples: ["创建一个报名网站", "查看我的项目"],
     match: (name) => ["project_list", "project_create"].includes(name) },

@@ -1,6 +1,6 @@
 import { assertExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
 import type { JsonValue } from "@daoyin/harness-protocol";
-import type { CloudProfile } from "./app.js";
+import type { CloudProfile, CloudToolBinding } from "./app.js";
 import { orchestrationPolicyBindings, type SaishiClient } from "./saishi-profile.js";
 const scopes: Readonly<Record<string, string>> = Object.freeze({
   story_video_options: "story.read", story_recent_videos: "story.read", story_get_video: "story.read",
@@ -15,6 +15,63 @@ const mutating = new Set(["story_create_video", "story_call", "story_create_prod
   "story_prepare_media_upload", "story_commit_media_upload", "story_upload_media_from_url",
   "story_add_segment_video_frame_reference", "story_bind_segment_video_frame_reference"]);
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+export const STORY_LIST_PROJECTS_TOOL = "story_list_projects";
+const listProjectsSchema: JsonValue = {
+  type: "object", additionalProperties: false, properties: {
+    keyword: { type: "string", minLength: 1, maxLength: 80 },
+    navigationOnly: { type: "boolean" },
+  },
+};
+function listProjectsInput(input: Record<string, unknown>): boolean {
+  return Object.keys(input).every((key) => ["keyword", "navigationOnly"].includes(key)) &&
+    (input.keyword === undefined || (typeof input.keyword === "string" && input.keyword.trim().length > 0 && input.keyword.length <= 80)) &&
+    (input.navigationOnly === undefined || typeof input.navigationOnly === "boolean");
+}
+
+function listProjectsCall(input: Record<string, unknown>): Record<string, unknown> {
+  const query = {
+    ...(typeof input.keyword === "string" ? { keyword: input.keyword.trim() } : {}),
+    ...(typeof input.navigationOnly === "boolean" ? { navigation_only: input.navigationOnly } : {}),
+  };
+  return { operation: "list_projects", ...(Object.keys(query).length ? { query_json: JSON.stringify(query) } : {}) };
+}
+
+function listProjectsBinding(identity: ExecutionIdentity, client: SaishiClient): CloudToolBinding {
+  return {
+    requiredPermissions: ["story.read"],
+    validateInput: listProjectsInput,
+    authorizeResource: async (request, current, signal) => isStoryIdentity(current) &&
+      current.authorizationId === identity.authorizationId && current.appInstallationId === identity.appInstallationId &&
+      await client.authorize("story_call", listProjectsCall(request.input), current, request.id, signal),
+    definition: {
+      name: STORY_LIST_PROJECTS_TOOL,
+      displayName: "查询短剧项目",
+      description: "列出当前账号的短剧项目。用户询问做过哪些短剧项目、短剧项目列表或按名称查找项目时直接调用；不要先调用 story_capabilities。",
+      category: "extension",
+      mutating: false,
+      inputSchema: listProjectsSchema,
+      auditInput: (input) => ({ keyword: input.keyword, navigationOnly: input.navigationOnly }),
+      execute: async (input, signal, context) => {
+        const current = context.executionIdentity;
+        if (!current || !isStoryIdentity(current) || current.authorizationId !== identity.authorizationId ||
+            !context.toolCallId || !listProjectsInput(input)) throw new Error("Story scope or input invalid.");
+        try {
+          const result = await client.call("story_call", listProjectsCall(input), current, context.turnId, context.toolCallId, signal);
+          if (!record(result) || result.schemaVersion !== 1 || result.tool !== "story_call" || result.untrusted !== true ||
+              !record(result.data) || JSON.stringify(result).length > 90_000) throw new Error("Invalid Story result.");
+          const evidence = { ...result, tool: STORY_LIST_PROJECTS_TOOL, readOnly: true } as JsonValue;
+          return { ok: true, summary: "已查询短剧项目", evidence: { schemaVersion: 1,
+            toolName: STORY_LIST_PROJECTS_TOOL, result: evidence, artifacts: [], diagnostics: [] } };
+        } catch (error) {
+          signal.throwIfAborted();
+          return { ok: false, code: "STORY_OPERATION_FAILED", retryable: false,
+            message: error instanceof Error ? error.message : "短剧项目查询未完成，请重试。" };
+        }
+      },
+    },
+  };
+}
+
 export function isStoryIdentity(identity: ExecutionIdentity): boolean {
   assertExecutionIdentity(identity);
   return identity.space.kind === "organization" && /^[1-9][0-9]{0,15}$/u.test(identity.space.tenantId) &&
@@ -89,5 +146,5 @@ export function createStoryProfile(catalog: unknown, identity: ExecutionIdentity
       },
     };
   }) };
-  return { ...profile, tools: [...profile.tools, ...orchestrationPolicyBindings()] };
+  return { ...profile, tools: [...profile.tools, listProjectsBinding(identity, client), ...orchestrationPolicyBindings()] };
 }
