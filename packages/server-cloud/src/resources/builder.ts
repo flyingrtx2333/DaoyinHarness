@@ -81,6 +81,6 @@ const server = http.createServer((request, response) => {
     }
   })(); });
 });
-server.listen(SOCKET, () => { const gid = Number(process.env.HARNESS_RESOURCE_GID); const uid = process.getuid?.();
-  if (typeof uid === "number" && Number.isSafeInteger(uid) && Number.isSafeInteger(gid) && gid > 0) void chown(SOCKET, uid, gid).then(() => chmod(SOCKET, 0o660)); });
+server.listen(SOCKET, () => { const gid = Number(process.env.HARNESS_RESOURCE_GID);
+  if (Number.isSafeInteger(gid) && gid > 0) void chown(SOCKET, -1, gid).then(() => chmod(SOCKET, 0o660)); });
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => server.close());
