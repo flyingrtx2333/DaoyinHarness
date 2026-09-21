@@ -26,8 +26,8 @@ SYSTEMD = pathlib.Path("/etc/systemd/system")
 NODE = pathlib.Path("/opt/daoyin-harness/node/bin/node")
 
 
-def command(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, check=check, capture_output=True, text=True)
+def command(args: list[str], *, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, check=check, capture_output=True, text=True, env=env)
 
 
 def ensure_group(name: str) -> int:
@@ -106,8 +106,11 @@ def require_activation(values: dict[str, str]) -> None:
     for item in catalog.values():
         command(["docker", "image", "inspect", item["image"]])
     command(["docker", "image", "inspect", values["HARNESS_EGRESS_NODE_IMAGE"]])
-    if not pathlib.Path("/usr/bin/buildctl").is_file() or not pathlib.Path("/usr/bin/buildkitd").is_file():
-        raise RuntimeError("BuildKit binaries are required at /usr/bin.")
+    buildkit_files = [pathlib.Path("/usr/bin/buildctl"), pathlib.Path("/usr/bin/buildkitd"),
+                      *(pathlib.Path("/opt/cni/bin") / name for name in
+                        ["buildkit-cni-bridge", "buildkit-cni-firewall", "buildkit-cni-host-local", "buildkit-cni-loopback"])]
+    if any(not item.is_file() for item in buildkit_files):
+        raise RuntimeError("BuildKit binaries and isolated bridge CNI plugins are required.")
 
 
 def prepare(release: pathlib.Path) -> dict[str, object]:
@@ -341,7 +344,8 @@ def activate(values: dict[str, str]) -> dict[str, object]:
         raise RuntimeError("Pin the trusted Node egress image by verified sha256 digest before activation.")
     command(["systemctl", "enable", "--now", "daoyin-resource-buildkit.service", "daoyin-resource-egress.service",
              "daoyin-resource-executor.service", "daoyin-resource-builder.service", "daoyin-resource-deployer.service"])
-    command([str(NODE), str(BASE / "current" / "migrate.mjs"), "--schema"], check=True)
+    command([str(NODE), str(BASE / "current" / "migrate.mjs"), "--schema"], check=True,
+            env={**os.environ, **values})
     command(["systemctl", "enable", "--now", "daoyin-resources.service"])
     return {"activated": True, "admission": values.get("HARNESS_RESOURCES_ENABLED") == "1",
             "deployment": values.get("HARNESS_DEPLOYMENT_EXECUTOR_ENABLED") == "1"}
