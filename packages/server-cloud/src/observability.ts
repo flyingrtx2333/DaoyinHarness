@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { AgentEvent } from "@daoyin/harness-protocol";
 
 export type TelemetryAttribute = string | number | boolean;
 export interface TelemetrySpanContext { traceId: string; spanId: string }
@@ -16,6 +17,7 @@ export interface Telemetry {
     parent?: TelemetrySpanContext;
     attributes?: Readonly<Record<string, TelemetryAttribute | undefined>>;
   }): TelemetrySpan;
+  recordAudit(event: AgentEvent): void;
   flush(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -32,6 +34,15 @@ const safeAttributes = (values: Readonly<Record<string, TelemetryAttribute | und
   Object.fromEntries(Object.entries(values).filter(([key, value]) => /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/u.test(key) &&
     (typeof value === "string" && value.length <= 240 || typeof value === "number" && Number.isFinite(value) || typeof value === "boolean"))
     .map(([key, value]) => [key, value!]));
+
+const auditSecretKey = /(?:authorization|cookie|credential|password|passwd|secret|token|api[-_]?key|access[-_]?key|reasoning(?:_content)?)/iu;
+const auditSecretText = /(?:bearer\s+[a-z0-9._~+/-]{8,}|\bsk-[a-z0-9_-]{8,}\b)/giu;
+function safeAuditEvent(event: AgentEvent): AgentEvent {
+  return JSON.parse(JSON.stringify(event, (key, value: unknown) => {
+    if (auditSecretKey.test(key)) return "[REDACTED]";
+    return typeof value === "string" ? value.replace(auditSecretText, "[REDACTED]") : value;
+  })) as AgentEvent;
+}
 function otlpValue(value: TelemetryAttribute): Record<string, string | number | boolean> {
   if (typeof value === "boolean") return { boolValue: value };
   if (typeof value === "number") return Number.isSafeInteger(value) ? { intValue: String(value) } : { doubleValue: value };
@@ -42,6 +53,7 @@ class DisabledTelemetry implements Telemetry {
   public startSpan(): TelemetrySpan {
     return { context: { traceId: "", spanId: "" }, setAttribute: () => undefined, end: () => undefined };
   }
+  public recordAudit(): void { /* disabled */ }
   public async flush(): Promise<void> { /* disabled */ }
   public async shutdown(): Promise<void> { /* disabled */ }
 }
@@ -49,6 +61,7 @@ export const disabledTelemetry: Telemetry = new DisabledTelemetry();
 
 export class OtlpHttpTelemetry implements Telemetry {
   readonly #queue: FinishedSpan[] = [];
+  readonly #auditQueue: AgentEvent[] = [];
   readonly #timer: ReturnType<typeof setInterval>;
   #sending: Promise<void> | undefined;
   #closed = false;
@@ -85,14 +98,23 @@ export class OtlpHttpTelemetry implements Telemetry {
       },
     };
   }
+  public recordAudit(event: AgentEvent): void {
+    if (this.#closed || this.#auditQueue.length >= 5_000) { this.#dropped++; return; }
+    this.#auditQueue.push(safeAuditEvent(event));
+    if (this.#auditQueue.length >= 64) void this.flush();
+  }
+
   public async flush(): Promise<void> {
     if (this.#sending) return this.#sending;
-    if (!this.#queue.length) return;
+    if (!this.#queue.length && !this.#auditQueue.length) return;
     const batch = this.#queue.splice(0, 128);
-    this.#sending = this.#export(batch).finally(() => { this.#sending = undefined; });
+    const auditBatch = this.#auditQueue.splice(0, 128);
+    this.#sending = Promise.all([this.#export(batch), this.#exportAudit(auditBatch)]).then(() => undefined)
+      .finally(() => { this.#sending = undefined; });
     return this.#sending;
   }
   async #export(spans: FinishedSpan[]): Promise<void> {
+    if (!spans.length) return;
     const attributes = [
       { key: "service.name", value: { stringValue: this.config.serviceName } },
       { key: "service.version", value: { stringValue: this.config.serviceVersion } },
@@ -119,6 +141,22 @@ export class OtlpHttpTelemetry implements Telemetry {
       if (this.#dropped > 0) process.stderr.write(JSON.stringify({ event: "telemetry.dropped", count: this.#dropped }) + "\n");
     }
   }
+  async #exportAudit(events: AgentEvent[]): Promise<void> {
+    if (!events.length) return;
+    const endpoint = new URL(this.config.endpoint);
+    endpoint.pathname = endpoint.pathname.replace(/\/v1\/traces\/?$/u, "/v1/audit");
+    try {
+      const response = await fetch(endpoint, { method: "POST", redirect: "error", signal: AbortSignal.timeout(3_000),
+        headers: { "Content-Type": "application/json", "x-otlp-token": this.config.token }, body: JSON.stringify({ events }) });
+      if (!response.ok) throw new Error(`Audit status ${String(response.status)}`);
+      await response.body?.cancel();
+    } catch {
+      const available = Math.max(0, 5_000 - this.#auditQueue.length);
+      this.#auditQueue.unshift(...events.slice(-available));
+      this.#dropped += Math.max(0, events.length - available);
+    }
+  }
+
   public async shutdown(): Promise<void> {
     if (this.#closed) return;
     clearInterval(this.#timer);

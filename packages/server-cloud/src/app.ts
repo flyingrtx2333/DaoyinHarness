@@ -24,6 +24,7 @@ import { describeRun, RunMeasurements } from "./run-diagnostics.js";
 import { VIDEO_CONFIRMATION_INSTRUCTIONS, VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS, VideoInteractionCoordinator } from "./video-interaction.js";
 import { createExplicitStoryProjectListFlow, createExplicitVideoFlow } from "./explicit-video-flow.js";
 import { disabledTelemetry, type Telemetry } from "./observability.js";
+import { failedAudit, requestedAudit, respondedAudit } from "./model-audit.js";
 
 export interface CloudToolBinding {
   definition: ToolDefinition;
@@ -132,7 +133,8 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
 
 /** Creates the isolated API; does not bind a port, mount local tools, or choose a default identity. */
 export function createCloudServer(options: CloudServerOptions): FastifyInstance {
-  options = { ...options, repository: withCommittedSessionEvents(options.repository) };
+  const telemetry = options.telemetry ?? disabledTelemetry;
+  options = { ...options, repository: withCommittedSessionEvents(options.repository, event => telemetry.recordAudit(event)) };
   for (const callback of [options.authenticate, options.isAuthorizationActive, options.resolveProfile, options.createModel]) {
     if (typeof callback !== "function") throw new Error("Cloud authentication, authorization, profile and metered model adapters are required.");
   }
@@ -150,7 +152,6 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   let closing = false;
   let storageFault = false;
   const measurements = new RunMeasurements();
-  const telemetry = options.telemetry ?? disabledTelemetry;
   const videoInteractions = new VideoInteractionCoordinator();
   const buildInfo = runtimeBuild(options.buildInfo);
   const readiness = new ReadinessProbe(async (signal) => {
@@ -524,17 +525,33 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const platformModel = await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
         const baseModel = createExplicitStoryProjectListFlow(run, platformModel) ?? createExplicitVideoFlow(run, platformModel) ?? platformModel;
         let modelCalls = 0;
+        const auditStores = new Map<string, Promise<BoundRunStores>>([[run.id, Promise.resolve(stores)]]);
+        const auditStoreFor = (targetRun: CloudRun): Promise<BoundRunStores> => {
+          const existing = auditStores.get(targetRun.id);
+          if (existing !== undefined) return existing;
+          const created = Promise.resolve(options.repository.bindRun(identity, targetRun.sessionId, targetRun.id));
+          auditStores.set(targetRun.id, created);
+          return created;
+        };
         const createMeteredModel = async (targetRun: CloudRun, parentSignal: AbortSignal): Promise<ModelClient> => {
           return {
             complete: (request) => measurements.measure(run.id, "model_inclusive", async () => {
               const span = telemetry.startSpan("gen_ai.model.request", { parent: runSpan.context,
                 attributes: { "gen_ai.operation.name": "chat", "daoyin.child_run": targetRun.id !== run.id } });
               const modelSignal = AbortSignal.any([request.signal, parentSignal, controller.signal]);
+              const startedAt = Date.now();
+              const modelCallId = `model_${randomUUID()}`;
+              let callIndex = modelCalls + 1;
+              let auditStore: BoundRunStores | undefined;
               try {
                 await ensureActive(identity, modelSignal);
                 const limit = targetRun.id === run.id ? maxModelCalls : maxModelCalls - 1;
                 if (modelCalls >= limit) throw new CloudError(409, "MODEL_CALL_LIMIT", "本轮共享模型预算已达上限；子任务不能消耗父 Agent 的最后汇总额度。");
                 modelCalls++;
+                callIndex = modelCalls;
+                auditStore = await auditStoreFor(targetRun);
+                await auditStore.events.append({ type: "model.requested", accountId: auditStore.accountId, scopeId: auditStore.scopeId,
+                  sessionId: targetRun.sessionId, turnId: targetRun.id, payload: requestedAudit(request, modelCallId, callIndex, targetRun.id) });
                 let validatedAt = Date.now();
                 const reply = await abortable(() => baseModel.complete({ ...request, signal: modelSignal,
                   ...(request.onTextDelta ? { onTextDelta: async (delta: string) => {
@@ -545,9 +562,13 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                 }), modelSignal);
                 await ensureActive(identity, modelSignal);
                 if (Buffer.byteLength(JSON.stringify(reply), "utf8") > 96_000) throw new Error("Model output exceeds limit.");
+                await auditStore.events.append({ type: "model.responded", accountId: auditStore.accountId, scopeId: auditStore.scopeId,
+                  sessionId: targetRun.sessionId, turnId: targetRun.id, payload: respondedAudit(reply, modelCallId, callIndex, targetRun.id, Date.now() - startedAt) });
                 span.end({ attributes: { "gen_ai.request.index": modelCalls } });
                 return reply;
               } catch (error) {
+                if (auditStore !== undefined) await auditStore.events.append({ type: "model.responded", accountId: auditStore.accountId, scopeId: auditStore.scopeId,
+                  sessionId: targetRun.sessionId, turnId: targetRun.id, payload: failedAudit(error, modelCallId, callIndex, targetRun.id, Date.now() - startedAt) }).catch(() => undefined);
                 span.end({ error, attributes: { "gen_ai.request.index": modelCalls } });
                 const diagnostic = error instanceof Error ? error.message : "non-error rejection";
                 process.stderr.write(`Model request failed: ${diagnostic.slice(0, 300)}\n`);

@@ -1,4 +1,5 @@
-import type { EvaluationCase, EvaluationSpec, Experiment, Trial, TEMPLATES, metrics } from "../../../server-cloud/src/evaluation/contracts.js";
+import type { EvaluationCase, EvaluationSpec, Experiment, Trial, TEMPLATES, metrics, AuditRunSummary } from "../../../server-cloud/src/evaluation/contracts.js";
+import type { AgentEvent } from "@daoyin/harness-protocol";
 export type { EvaluationCase, EvaluationSpec, Experiment, Trial };
 export interface Catalog { version: string; revision: string | null; templates: typeof TEMPLATES; liveAvailable: boolean; model: string | null; judgeModel: string | null }
 export interface EvaluationView extends Experiment {
@@ -18,6 +19,7 @@ export interface TelemetrySpanView {
   traceId: string; spanId: string; parentSpanId: string; name: string; serviceName: string; serviceVersion: string;
   startedAt: string; durationMs: number; status: "ok" | "error"; attributes: Record<string, string | number | boolean>;
 }
+export type { AuditRunSummary };
 export class EvaluationApiError extends Error {
   public constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
 }
@@ -66,6 +68,12 @@ export class EvaluationClient {
   }
   public observabilityTrace(traceId: string, signal?: AbortSignal): Promise<{ traceId: string; spans: TelemetrySpanView[] }> {
     return this.request(`/observability/traces/${encodeURIComponent(traceId)}`, undefined, signal);
+  }
+  public auditRuns(hours: number, signal?: AbortSignal): Promise<{ runs: AuditRunSummary[] }> {
+    return this.request(`/audit/runs?hours=${String(hours)}`, undefined, signal);
+  }
+  public auditRun(runId: string, signal?: AbortSignal): Promise<{ runId: string; events: AgentEvent[] }> {
+    return this.request(`/audit/runs/${encodeURIComponent(runId)}`, undefined, signal);
   }
   public async prepare(lines: string): Promise<EvaluationCase[]> { return (await this.request<{ cases: EvaluationCase[] }>("/prepare", { lines })).cases; }
   public history(offset: number, signal?: AbortSignal): Promise<{ runs: HistoryItem[] }> { return this.request(`/runs?offset=${offset}`, undefined, signal); }

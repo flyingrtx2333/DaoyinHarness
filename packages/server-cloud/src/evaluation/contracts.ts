@@ -1,5 +1,18 @@
 // Browser-safe contracts. No server credentials or executable user-supplied expressions.
 export const EVALUATOR_VERSION = "harness-evaluation-v2-live-runtime";
+
+export interface AuditRunSummary {
+  runId: string;
+  sessionId: string;
+  accountId: string;
+  scopeId: string;
+  startedAt: string;
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  userMessage: string;
+  eventCount: number;
+  modelCalls: number;
+  toolCalls: number;
+}
 export type TemplateId = "saishi-materials" | "memory-current" | "explore";
 export type EvaluationMode = "replay" | "live";
 export type Verdict = "passed" | "failed" | "review" | "judge_error" | "cancelled";

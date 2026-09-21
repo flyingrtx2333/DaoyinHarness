@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { EVALUATOR_VERSION, EvaluationError, type EvaluationSpec, type Experiment, type Trial } from "./contracts.js";
 import type { StoredTelemetrySpan } from "./telemetry.js";
+import type { AgentEvent } from "@daoyin/harness-protocol";
+import type { AuditRunSummary } from "./contracts.js";
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -20,7 +22,7 @@ export class EvaluationStore {
   public constructor(path: string) {
     this.#db = new DatabaseSync(path);
     const tables = this.#db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-    if (tables.some(table => !["evaluation_lease", "evaluation_runs", "evaluation_calls", "telemetry_spans"].includes(String(table.name)))) {
+    if (tables.some(table => !["evaluation_lease", "evaluation_runs", "evaluation_calls", "telemetry_spans", "audit_events"].includes(String(table.name)))) {
       this.#db.close(); throw new EvaluationError(503, "EVAL_DATABASE_SCOPE", "必须使用独立评估数据库，禁止复用业务或云端会话库。");
     }
     this.#db.exec(`PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
@@ -37,6 +39,11 @@ export class EvaluationStore {
       status TEXT NOT NULL, attributes TEXT NOT NULL, ingested_at TEXT NOT NULL) STRICT;
       CREATE INDEX IF NOT EXISTS telemetry_trace_started ON telemetry_spans(trace_id,started_at,span_id);
       CREATE INDEX IF NOT EXISTS telemetry_recent_roots ON telemetry_spans(started_at DESC) WHERE parent_span_id='';`);
+    this.#db.exec(`CREATE TABLE IF NOT EXISTS audit_events(
+      event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, account_id TEXT NOT NULL, scope_id TEXT NOT NULL,
+      event_seq INTEGER NOT NULL, event_type TEXT NOT NULL, occurred_at TEXT NOT NULL, body TEXT NOT NULL, ingested_at TEXT NOT NULL) STRICT;
+      CREATE INDEX IF NOT EXISTS audit_turn_events ON audit_events(turn_id,event_seq,event_id);
+      CREATE INDEX IF NOT EXISTS audit_recent_runs ON audit_events(occurred_at DESC) WHERE event_type='turn.started';`);
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       const old = this.#db.prepare("SELECT expires FROM evaluation_lease WHERE id=1").get();
@@ -60,6 +67,27 @@ export class EvaluationStore {
     try { this.assertOwner(); const value = fn(); this.assertOwner(); this.#db.exec("COMMIT"); return value; }
     catch (error) { this.#db.exec("ROLLBACK"); throw error; }
   }
+  public ingestAudit(events: readonly AgentEvent[]): number {
+    let accepted = 0; this.#transaction(() => {
+      const insert = this.#db.prepare(`INSERT OR IGNORE INTO audit_events(event_id,session_id,turn_id,account_id,scope_id,event_seq,event_type,occurred_at,body,ingested_at) VALUES (?,?,?,?,?,?,?,?,?,?)`);
+      const ingestedAt = new Date().toISOString();
+      for (const event of events) accepted += Number(insert.run(event.id,event.sessionId,event.turnId,event.accountId,event.scopeId,event.eventSeq,event.type,event.occurredAt,JSON.stringify(event),ingestedAt).changes);
+    }); return accepted;
+  }
+  public auditRuns(hours: number, offset = 0): AuditRunSummary[] {
+    const since = new Date(Date.now() - hours * 3_600_000).toISOString();
+    const rows = this.#db.prepare(`SELECT s.body,s.session_id,s.turn_id,s.account_id,s.scope_id,s.occurred_at,
+      (SELECT COUNT(*) FROM audit_events e WHERE e.turn_id=s.turn_id) event_count,
+      (SELECT COUNT(*) FROM audit_events e WHERE e.turn_id=s.turn_id AND e.event_type='model.requested') model_calls,
+      (SELECT COUNT(*) FROM audit_events e WHERE e.turn_id=s.turn_id AND e.event_type='tool.started') tool_calls,
+      (SELECT e.event_type FROM audit_events e WHERE e.turn_id=s.turn_id AND e.event_type IN ('turn.completed','turn.failed','turn.cancelled','turn.interrupted') ORDER BY e.event_seq DESC LIMIT 1) terminal_type
+      FROM audit_events s WHERE s.event_type='turn.started' AND s.occurred_at>=? ORDER BY s.occurred_at DESC,s.event_id DESC LIMIT 100 OFFSET ?`).all(since, offset) as Array<Record<string, unknown>>;
+    return rows.map(row => { const event = JSON.parse(String(row.body)) as AgentEvent; const terminal = String(row.terminal_type ?? ""); return {
+      runId:String(row.turn_id),sessionId:String(row.session_id),accountId:String(row.account_id),scopeId:String(row.scope_id),startedAt:String(row.occurred_at),
+      status: terminal === "turn.completed" ? "completed" : terminal === "turn.failed" ? "failed" : terminal === "turn.cancelled" ? "cancelled" : terminal === "turn.interrupted" ? "interrupted" : "running",
+      userMessage:event.type === "turn.started" ? event.payload.userMessage : "",eventCount:Number(row.event_count),modelCalls:Number(row.model_calls),toolCalls:Number(row.tool_calls) }; });
+  }
+  public auditRun(runId: string): AgentEvent[] { return this.#db.prepare("SELECT body FROM audit_events WHERE turn_id=? ORDER BY event_seq,event_id").all(runId).map(row => JSON.parse(String(row.body)) as AgentEvent); }
   public renew(): void { this.#transaction(() => { this.#db.prepare("UPDATE evaluation_lease SET expires=? WHERE id=1 AND owner=?").run(Date.now() + 30_000, this.#owner); }); }
   public close(): void {
     try { this.#db.prepare("UPDATE evaluation_lease SET expires=0 WHERE id=1 AND owner=?").run(this.#owner); }

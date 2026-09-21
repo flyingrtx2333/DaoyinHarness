@@ -152,6 +152,26 @@ export interface AgentEventPayloads {
     contentBlockId: string;
     delta: string;
   };
+  "model.requested": {
+    modelCallId: string;
+    callIndex: number;
+    targetRunId: string;
+    systemPrompt: { stableText: string; dynamicText: string };
+    messages: JsonValue[];
+    tools: Array<{ name: string; description: string }>;
+    truncated: boolean;
+  };
+  "model.responded": {
+    modelCallId: string;
+    callIndex: number;
+    targetRunId: string;
+    status: "completed" | "failed" | "cancelled";
+    latencyMs: number;
+    reply?: JsonValue;
+    failureCode?: string;
+    failureMessage?: string;
+    truncated: boolean;
+  };
   "assistant.commentary": {
     contentBlockId: string;
     text: string;

@@ -4,6 +4,7 @@ import { EvaluationError, EVALUATOR_VERSION, metrics, parseSpec, prepareCases, t
 import { EvaluationStore, type Authority } from "./store.js";
 import { PlatformEvaluationRuntime, runLiveTrial } from "./live-runner.js";
 import { parseOtlpJson } from "./telemetry.js";
+import type { AgentEvent, AgentEventType } from "@daoyin/harness-protocol";
 
 export interface EvaluationServiceOptions {
   store: EvaluationStore; serviceToken: string; revision: string | null;
@@ -19,10 +20,26 @@ const liveTemplates: Array<{ id: TemplateId; name: string; fixture: string; fact
 ];
 const safeEqual = (actual: unknown, expected: string): boolean => typeof actual === "string" && Buffer.byteLength(actual) === Buffer.byteLength(expected) && timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
 const idParams = { type: "object", required: ["id"], additionalProperties: false, properties: { id: { type: "string", pattern: "^ev_[a-f0-9]{32}$" } } };
+const auditTypes = new Set<AgentEventType>(["turn.started", "capability.routed", "model.requested", "model.responded",
+  "assistant.delta", "assistant.commentary", "phase.updated", "tool.started", "tool.progress", "tool.completed", "tool.failed",
+  "interaction.requested", "interaction.resolved", "turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted"]);
+function auditBatch(value: unknown): AgentEvent[] {
+  if (!value || typeof value !== "object" || !("events" in value) || !Array.isArray(value.events) || value.events.length < 1 || value.events.length > 128) throw new EvaluationError(400, "AUDIT_INPUT_INVALID", "审计事件格式不正确。");
+  for (const item of value.events) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new EvaluationError(400, "AUDIT_INPUT_INVALID", "审计事件格式不正确。");
+    const event = item as Record<string, unknown>;
+    if (typeof event.id !== "string" || !/^[A-Za-z0-9_-]{1,180}$/u.test(event.id) || typeof event.sessionId !== "string" || !/^[A-Za-z0-9_-]{1,180}$/u.test(event.sessionId) ||
+        typeof event.turnId !== "string" || !/^[A-Za-z0-9_-]{1,180}$/u.test(event.turnId) || typeof event.accountId !== "string" || event.accountId.length > 180 ||
+        typeof event.scopeId !== "string" || event.scopeId.length > 180 || typeof event.type !== "string" || !auditTypes.has(event.type as AgentEventType) ||
+        !Number.isSafeInteger(event.eventSeq) || Number(event.eventSeq) < 1 || typeof event.occurredAt !== "string" || !Number.isFinite(Date.parse(event.occurredAt)) ||
+        !event.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) throw new EvaluationError(400, "AUDIT_INPUT_INVALID", "审计事件格式不正确。");
+  }
+  return value.events as AgentEvent[];
+}
 export function createEvaluationService(options: EvaluationServiceOptions) {
   if (!/^[\x21-\x7e]{32,256}$/u.test(options.serviceToken)) throw new Error("A dedicated evaluation service credential is required.");
   if (!/^[\x21-\x7e]{32,256}$/u.test(options.telemetryToken)) throw new Error("A dedicated telemetry ingest credential is required.");
-  const app = Fastify({ logger: false, forceCloseConnections: true, bodyLimit: 512_000, ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
+  const app = Fastify({ logger: false, forceCloseConnections: true, bodyLimit: 2_000_000, ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const actors = new WeakMap<FastifyRequest, Authority>();
   let active: { id: string; controller: AbortController; done: Promise<void>; caseId: string; repetition: number; stage: string } | undefined;
   let closing = false;
@@ -38,7 +55,7 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
     if (request.url === "/health" && request.method === "GET") return;
     if (closing) throw new EvaluationError(503, "EVAL_NOT_READY", "评估服务暂不可用。");
-    if (request.url === "/v1/traces" && request.method === "POST") {
+    if (["/v1/traces", "/v1/audit"].includes(request.url) && request.method === "POST") {
       if (request.headers.origin !== undefined || !["127.0.0.1", "::1"].includes(request.ip) ||
           !safeEqual(request.headers["x-otlp-token"], options.telemetryToken)) {
         throw new EvaluationError(401, "OTLP_INGEST_DENIED", "遥测写入身份无效。");
@@ -98,6 +115,10 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
       rejectedSpans: spans.length - accepted, errorMessage: "duplicate spans ignored",
     } });
   });
+  app.post("/v1/audit", async (request, reply) => {
+    const events = auditBatch(request.body); const accepted = options.store.ingestAudit(events);
+    return reply.code(200).send({ accepted, duplicates: events.length - accepted });
+  });
   app.get<{ Querystring: { hours?: string } }>("/observability/summary", {
     schema: { querystring: { type: "object", additionalProperties: false,
       properties: { hours: { type: "string", enum: ["1", "6", "24"] } } } },
@@ -111,6 +132,11 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
     schema: { params: { type: "object", required: ["traceId"], additionalProperties: false,
       properties: { traceId: { type: "string", pattern: "^[a-f0-9]{32}$" } } } },
   }, async request => ({ traceId: request.params.traceId, spans: options.store.telemetryTrace(request.params.traceId) }));
+  app.get<{ Querystring: { hours?: string; offset?: string } }>("/audit/runs", { schema: { querystring: { type: "object", additionalProperties: false, properties: {
+    hours: { type: "string", enum: ["1", "6", "24"] }, offset: { type: "string", pattern: "^[0-9]{1,5}$" },
+  } } } }, async request => ({ runs: options.store.auditRuns(Number(request.query.hours ?? "1"), Number(request.query.offset ?? "0")) }));
+  app.get<{ Params: { runId: string } }>("/audit/runs/:runId", { schema: { params: { type: "object", required: ["runId"], additionalProperties: false,
+    properties: { runId: { type: "string", pattern: "^[A-Za-z0-9_-]{1,180}$" } } } } }, async request => ({ runId: request.params.runId, events: options.store.auditRun(request.params.runId) }));
   app.post("/prepare", async request => {
     const cases = prepareCases(request.body);
     if (cases.length > 5) throw new EvaluationError(400, "CASE_LIMIT", "每批最多五道真实问题。");

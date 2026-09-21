@@ -1,4 +1,5 @@
 import { executionScopeKey, type ExecutionScope } from "@daoyin/harness-contracts";
+import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { CloudRepository } from "./repository.js";
 
 /**
@@ -6,8 +7,8 @@ import type { CloudRepository } from "./repository.js";
  * The repository contract resolves mutations after commit. Notify only afterwards.
  * This is single-executor invalidation, NOT cross-worker LISTEN/NOTIFY or an outbox.
  */
-export function withCommittedSessionEvents(base: CloudRepository): CloudRepository {
-  if (base.subscribeSession !== undefined) return base;
+export function withCommittedSessionEvents(base: CloudRepository, onCommitted?: (event: AgentEvent) => void): CloudRepository {
+  if (base.subscribeSession !== undefined && onCommitted === undefined) return base;
   const listeners = new Map<string, Set<() => void>>();
   const key = (scope: ExecutionScope, sessionId: string): string => JSON.stringify([executionScopeKey(scope), sessionId]);
   const notify = (scope: ExecutionScope, sessionId: string): void => {
@@ -59,6 +60,7 @@ export function withCommittedSessionEvents(base: CloudRepository): CloudReposito
         read: (session, after) => stores.events.read(session, after),
         append: async (pending) => {
           const event = await stores.events.append(pending);
+          try { onCommitted?.(event); } catch { /* Audit export cannot undo a committed event. */ }
           notify(scope, sessionId);
           return event;
         },
