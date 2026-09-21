@@ -168,10 +168,22 @@ function packText(pack: CapabilityPackManifest): string {
 }
 function explicitPackIds(message: string, packs: readonly CapabilityPackManifest[]): Set<string> {
   const normalized = message.normalize("NFKC").toLowerCase();
+  const han = new Set([...(normalized.match(/[\p{Script=Han}]/gu) ?? [])]);
+  const hanBigrams = new Set((normalized.match(/[\p{Script=Han}]+/gu) ?? []).flatMap((part) => {
+    const characters = [...part];
+    return characters.slice(0, -1).map((character, index) => character + characters[index + 1]!);
+  }));
   return new Set(packs.filter((pack) => [pack.id, pack.title, ...pack.intents, ...pack.examples, ...pack.toolNames]
     .some((value) => {
       const trigger = value.normalize("NFKC").toLowerCase().trim();
-      return [...trigger].length >= 4 && normalized.includes(trigger);
+      if ([...trigger].length < 4) return false;
+      if (normalized.includes(trigger)) return true;
+      if (!/^[\p{Script=Han}]+$/u.test(trigger)) return false;
+      const characters = [...new Set([...trigger])];
+      const bigrams = [...trigger].slice(0, -1).map((character, index) => character + [...trigger][index + 1]!);
+      const matchingBigrams = bigrams.filter((value) => hanBigrams.has(value)).length;
+      return characters.every((character) => han.has(character)) &&
+        matchingBigrams >= Math.max(2, Math.ceil(bigrams.length * 0.6));
     })).map((pack) => pack.id));
 }
 function bm25(query: string, packs: readonly CapabilityPackManifest[]): CapabilityPackManifest[] {
