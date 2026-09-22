@@ -5,7 +5,8 @@ import "./asset-library.css";
 const categories = { all: "全部", website: "网站", character: "角色图", scene: "场景图", storyboard: "分镜图", video: "视频" };
 type Category = keyof typeof categories;
 type StoryCategory = Exclude<Category, "website">;
-export type Asset = { id: string; title: string; category: StoryCategory; mediaType: "image" | "video"; url?: string; previewUrl?: string; status: string; project: string; error: string; variants: Asset[] };
+export type AssetGeneration = { model?: string; generatedAt?: string; user?: string; platform?: string; consumption?: string };
+export type Asset = { id: string; title: string; category: StoryCategory; mediaType: "image" | "video"; url?: string; previewUrl?: string; status: string; project: string; error: string; generation: AssetGeneration; variants: Asset[] };
 export interface PublishedProject { id: string; title: string; slug: string; activeVersion: string | null }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -20,6 +21,38 @@ function firstSafeUrl(...values: unknown[]): string | undefined {
   }
   return undefined;
 }
+function boundedText(value: unknown, max = 160): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  if (!text || text.length > max || [...text].some(character => {
+    const code = character.codePointAt(0) ?? 0;
+    return code < 32 || code === 127;
+  })) return undefined;
+  return text;
+}
+function firstText(records: Record<string, unknown>[], keys: string[], max = 160): string | undefined {
+  for (const record of records) for (const key of keys) {
+    const text = boundedText(record[key], max);
+    if (text) return text;
+  }
+  return undefined;
+}
+function parseGeneration(value: Record<string, unknown>): AssetGeneration {
+  const records = [value.generation, value.generation_info, value.audit].filter(isRecord);
+  records.push(value);
+  const model = firstText(records, ["model_name", "modelName", "model"], 120);
+  const generatedAt = firstText(records, ["generated_at", "generatedAt", "created_at", "createdAt"], 64);
+  const user = firstText(records, ["created_by_name", "createdByName", "creator_name", "creatorName", "user_name", "userName"], 80);
+  const platform = firstText(records, ["platform_name", "platformName", "platform", "provider_name", "providerName"], 80);
+  const consumption = firstText(records, ["consumption_display", "consumptionDisplay", "actual_consumption", "actualConsumption", "actual_cost_display", "actualCostDisplay", "usage_display", "usageDisplay"], 120);
+  return {
+    ...(model ? { model } : {}),
+    ...(generatedAt && Number.isFinite(Date.parse(generatedAt)) ? { generatedAt } : {}),
+    ...(user ? { user } : {}),
+    ...(platform ? { platform } : {}),
+    ...(consumption ? { consumption } : {}),
+  };
+}
 export function publishedProjectUrl(project: PublishedProject): string | undefined {
   if (!project.activeVersion || !/^[a-z0-9](?:[a-z0-9-]{0,40}[a-z0-9])?$/u.test(project.slug)) return undefined;
   return `https://${project.slug}.demo.daoyintech.com/`;
@@ -33,6 +66,7 @@ export function parseAsset(v: unknown, nested = false): Asset {
   return { id: v.id, title: v.title, category: v.category as StoryCategory, mediaType: v.media_type as Asset["mediaType"],
     ...(u ? { url: u } : {}), ...(previewUrl ? { previewUrl } : {}), status: String(v.status || ""),
     project: typeof v.project_title === "string" ? v.project_title : "", error: typeof v.error_message === "string" ? v.error_message : "",
+    generation: parseGeneration(v),
     variants: !nested && Array.isArray(v.variants) ? v.variants.map(item => parseAsset(item, true)) : [] };
 }
 export function videoPreviewSource(url: string): string {
@@ -140,7 +174,20 @@ function AssetPreview({ asset, onClose }: { asset: Asset; onClose: () => void })
     {!current.url || failed ? <p role="alert">此素材暂时无法预览，请稍后刷新。</p> : current.mediaType === "video"
       ? <video src={current.url} controls preload="metadata" onError={() => setFailed(true)} />
       : <img key={current.id} src={current.url} alt={`${asset.title} · ${current.title}`} onError={() => setFailed(true)} />}
+    <AssetGenerationMeta generation={current.id === asset.id ? asset.generation : current.generation} />
     {current.error && <p role="status">未用于分镜：{current.error}</p>}
     {asset.mediaType === "video" && <p>生成状态不代表画面质检结果。</p>}
   </dialog>;
+}
+
+function AssetGenerationMeta({ generation }: { generation: AssetGeneration }): React.JSX.Element {
+  const entries = [
+    generation.model ? ["生成模型", generation.model] : undefined,
+    generation.generatedAt ? ["生成时间", new Date(generation.generatedAt).toLocaleString("zh-CN")] : undefined,
+    generation.user ? ["创建用户", generation.user] : undefined,
+    generation.platform ? ["来源平台", generation.platform] : undefined,
+    generation.consumption ? ["实际消耗", generation.consumption] : undefined,
+  ].filter((entry): entry is [string, string] => entry !== undefined);
+  if (entries.length === 0) return <p className="asset-generation-empty">暂无生成记录</p>;
+  return <dl className="asset-generation-meta">{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
 }
