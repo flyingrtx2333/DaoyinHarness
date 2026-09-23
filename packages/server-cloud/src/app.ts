@@ -498,7 +498,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           const current = context.executionIdentity;
           if (current === undefined || !sameExecutionScope(identity, current) || current.authorizationId !== identity.authorizationId) return false;
           if (tool.name === "capability_search") {
-            if (capabilitySearchTool === undefined || !current.permissions.includes("agent.use")) return false;
+            if (capabilitySearchTool === undefined || capabilityRoute === undefined ||
+                !capabilityRoute.canSearchReadonly() || !current.permissions.includes("agent.use")) return false;
             if (request !== undefined && (typeof request.input.query !== "string" || !request.input.query.trim() ||
                 request.input.query.length > 500 || Object.keys(request.input).some((key) => key !== "query"))) return false;
             await ensureActive(identity, controller.signal);

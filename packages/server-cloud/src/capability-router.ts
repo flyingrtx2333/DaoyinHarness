@@ -88,6 +88,8 @@ export interface CapabilityRouteResult {
   commentary?: string;
   /** 最终选定暴露给 Agent 运行时的工具名称集合 */
   selectedToolNames: ReadonlySet<string>;
+  /** 是否还允许本轮进行只读能力扩展 */
+  canSearchReadonly(): boolean;
   /** 运行态动态按需追加只读能力包 */
   expandReadonly(query: string): { addedPackIds: string[]; selectedToolNames: ReadonlySet<string> };
 }
@@ -166,6 +168,15 @@ function packText(pack: CapabilityPackManifest): string {
   return [pack.title, pack.summary, ...pack.intents, ...pack.examples,
     ...pack.negativeExamples, ...pack.resourceKinds].join("\n");
 }
+function hasNonNegatedMatch(message: string, pattern: RegExp): boolean {
+  return [...message.matchAll(pattern)].some((match) => {
+    const start = match.index ?? 0;
+    const preceding = message.slice(Math.max(0, start - 32), start);
+    const boundary = Math.max(...["。", "！", "？", "!", "?", "；", ";", "\n", "，", ","].map((value) => preceding.lastIndexOf(value)));
+    const clausePrefix = preceding.slice(boundary + 1);
+    return !/(?:不要|不需要|不必|无需|禁止|避免|暂不|先不|先别|别|do\s+not|don['’]?t|avoid|without)(?:.{0,12})$/iu.test(clausePrefix);
+  });
+}
 function explicitPackIds(message: string, packs: readonly CapabilityPackManifest[]): Set<string> {
   const normalized = message.normalize("NFKC").toLowerCase();
   const han = new Set([...(normalized.match(/[\p{Script=Han}]/gu) ?? [])]);
@@ -173,18 +184,34 @@ function explicitPackIds(message: string, packs: readonly CapabilityPackManifest
     const characters = [...part];
     return characters.slice(0, -1).map((character, index) => character + characters[index + 1]!);
   }));
-  return new Set(packs.filter((pack) => [pack.id, pack.title, ...pack.intents, ...pack.examples, ...pack.toolNames]
+  const selected = new Set(packs.filter((pack) => [pack.id, pack.title, ...pack.intents, ...pack.examples, ...pack.toolNames]
     .some((value) => {
       const trigger = value.normalize("NFKC").toLowerCase().trim();
       if ([...trigger].length < 4) return false;
-      if (normalized.includes(trigger)) return true;
+      if (normalized.includes(trigger)) {
+        const escaped = trigger.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+        return hasNonNegatedMatch(normalized, new RegExp(escaped, "giu"));
+      }
       if (!/^[\p{Script=Han}]+$/u.test(trigger)) return false;
+      const actions = [...new Set(trigger.match(/(?:克隆|导入|创建|挂载|写入|修改|删除|发布|部署|提交|切换|回滚|运行|启动|停止|恢复|读取|查看|检查|导出)/gu) ?? [])];
+      if (actions.length && !hasNonNegatedMatch(normalized,
+        new RegExp(`(?:${actions.join("|")})`, "giu"))) return false;
       const characters = [...new Set([...trigger])];
       const bigrams = [...trigger].slice(0, -1).map((character, index) => character + [...trigger][index + 1]!);
       const matchingBigrams = bigrams.filter((value) => hanBigrams.has(value)).length;
       return characters.every((character) => han.has(character)) &&
         matchingBigrams >= Math.max(2, Math.ceil(bigrams.length * 0.6));
     })).map((pack) => pack.id));
+  const repositoryReference = /(?:(?:https?:\/\/)?(?:www\.)?(?:github|gitlab|bitbucket)\.com[/:]|https?:\/\/[^\s]+\.git\b|\b(?:repo(?:sitory)?|workspace|codebase)\b|仓库|代码库|工作区|\b[\p{L}\p{N}_.-]+\/[\p{L}\p{N}_.-]+\b)/iu;
+  const workspaceIntent = /(?:\bgit\s+clone\b|\bclone\b|\bcheckout\b|\bimport\b|\bsolve\b|\bfix\b|\bimplement\b|\bwork\s+on\b|\bbenchmark\b|\brun\b|\btest\b|\binspect\b|\bread\b|\breview\b|\banaly[sz]e\b|克隆|导入|创建|新建|检出|拉取|修复|实现|修改|开发|处理|运行|测试|查看|读取|阅读|检查|分析|研究|解决)/giu;
+  const gitIntent = /(?:\bgit\s+(?:status|diff|log|branch|checkout|commit|show|apply|format-patch)\b|(?:查看|检查|比较|导出|提交|切换|展示|读取).{0,16}(?:git|diff|分支|补丁|提交))/giu;
+  if (repositoryReference.test(normalized) && hasNonNegatedMatch(normalized, workspaceIntent)) {
+    for (const pack of packs) if (pack.toolNames.includes("workspace_create")) selected.add(pack.id);
+  }
+  if (hasNonNegatedMatch(normalized, gitIntent)) {
+    for (const pack of packs) if (pack.toolNames.some((name) => name.startsWith("git_"))) selected.add(pack.id);
+  }
+  return selected;
 }
 function bm25(query: string, packs: readonly CapabilityPackManifest[]): CapabilityPackManifest[] {
   const documents = packs.map((pack) => tokens(packText(pack)));
@@ -401,20 +428,35 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
     .join("；");
   const lexicalObjectives = clauses.map((clause) => clause.trim()).filter(Boolean).slice(0, 3).join("；");
   const commentary = semanticCommentary || (lexicalObjectives ? `当前目标：${lexicalObjectives}` : "");
+  let readonlySearchCount = 0;
+  let readonlySearchExhausted = false;
   return {
     decision, ...(commentary ? { commentary } : {}), selectedToolNames: names,
+    canSearchReadonly: () => readonlySearchCount < 2 && !readonlySearchExhausted,
     expandReadonly(query: string) {
+      if (readonlySearchCount >= 2 || readonlySearchExhausted) {
+        return { addedPackIds: [], selectedToolNames: names };
+      }
+      readonlySearchCount += 1;
       const additions = rank(query, splitCapabilityIntents(query),
         eligible.filter((pack) => pack.risk === "read"), "")
         .filter((item) => !selectedPackIds.has(item.pack.id)).slice(0, 2).map((item) => item.pack);
+      const addedPackIds: string[] = [];
       for (const pack of additions) {
         if (selectedPackIds.size >= 6) break;
+        const addedNames = pack.toolNames.filter((name) => byName.has(name) && !names.has(name));
+        const addedCharacters = addedNames.reduce((sum, name) => sum + descriptorSize(byName.get(name)!), 0);
+        if (!addedNames.length || names.size + addedNames.length > 48 ||
+            decision.schemaCharacters + addedCharacters > 48_000) continue;
         selectedPackIds.add(pack.id);
-        for (const name of pack.toolNames) if (names.size < 48 && byName.has(name)) names.add(name);
+        addedPackIds.push(pack.id);
+        for (const name of addedNames) names.add(name);
+        decision.schemaCharacters += addedCharacters;
       }
+      if (!addedPackIds.length) readonlySearchExhausted = true;
       decision.selectedPackIds = [...selectedPackIds]; decision.exposedToolCount = names.size;
       decision.schemaCharacters = [...names].reduce((sum, name) => sum + descriptorSize(byName.get(name)!), 0);
-      return { addedPackIds: additions.map((pack) => pack.id).filter((id) => selectedPackIds.has(id)),
+      return { addedPackIds,
         selectedToolNames: names };
     },
   };
