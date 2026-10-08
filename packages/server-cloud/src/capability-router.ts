@@ -218,6 +218,13 @@ function explicitPackIds(message: string, packs: readonly CapabilityPackManifest
   const processIntent = /(?:\b(?:run|execute|start|test|install)\b|运行(?!状态|进度|情况|历史|记录)|执行(?!状态|进度|情况|历史|记录)|启动|测试|安装)/giu;
   if (processContext.test(normalized) && hasNonNegatedMatch(normalized, processIntent)) {
     for (const pack of packs) if (pack.toolNames.includes("process_run")) selected.add(pack.id);
+    // Creating code and executing it is one task: runtime tools alone cannot
+    // inspect inputs, write the requested program or discover its workspace.
+    const codeReference = /(?:\b(?:scripts?|programs?|source|code|files?)\b|\.(?:py|js|mjs|cjs|ts|sh|go|rs|java|c|cpp)\b|程序|脚本|代码|源文件)/iu;
+    const codeEditIntent = /(?:\b(?:create|write|generate|implement|modify|edit|update|develop|fix)\b|创建|新建|编写|写入|生成|实现|修改|编辑|开发|修复)/giu;
+    if (codeReference.test(normalized) && hasNonNegatedMatch(normalized, codeEditIntent)) {
+      for (const pack of packs) if (pack.toolNames.includes("file_write") || pack.toolNames.includes("resource_list")) selected.add(pack.id);
+    }
   }
   return selected;
 }
