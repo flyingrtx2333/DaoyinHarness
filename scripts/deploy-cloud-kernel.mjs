@@ -58,8 +58,8 @@ async function atomicFile(path, text) {
   await writeFile(temporary, text, { mode: 0o600, flag: 'wx' }); await rename(temporary, path);
 }
 const save = () => writeFile(journal, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
-async function health() {
-  const response = await fetch('http://127.0.0.1:4700/health/ready', { redirect: 'error', signal: AbortSignal.timeout(5000) });
+async function health(timeoutMs = 5000) {
+  const response = await fetch('http://127.0.0.1:4700/health/ready', { redirect: 'error', signal: AbortSignal.timeout(Math.max(1, Math.min(5000, timeoutMs))) });
   return response.status === 200 && (await response.json()).status === 'ready';
 }
 async function resourceHealth(timeoutMs = 60000) {
@@ -67,7 +67,7 @@ async function resourceHealth(timeoutMs = 60000) {
     if (run('systemctl', ['is-active', unit]).trim() !== 'active') throw new Error('Resource control service is inactive.');
   }
   return new Promise((resolve, reject) => {
-    const request = http.request({ socketPath: '/run/daoyin-resources/control.sock', path: '/control', method: 'POST',
+    const request = http.request({ socketPath: '/run/daoyin-resources/control.sock', path: '/control', method: 'POST', signal: AbortSignal.timeout(Math.max(1, timeoutMs)),
       headers: { 'Content-Type': 'application/json' } }, response => {
       let body = ''; response.setEncoding('utf8'); response.on('data', chunk => { body += chunk; if (body.length > 100000) request.destroy(new Error('Readiness output limit')); });
       response.on('end', () => { try { const value = JSON.parse(body); if (response.statusCode !== 200 || value.ready !== true) throw new Error('Resource readiness failed.'); resolve(true); } catch { reject(new Error('Resource readiness failed.')); } });
@@ -79,12 +79,13 @@ async function resourceHealth(timeoutMs = 60000) {
 }
 async function waitReady(probe, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try { if (await probe(Math.min(60000, deadline - Date.now()))) return true; }
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    try { if (await probe(Math.min(60000, remaining))) return true; }
     catch { /* A systemd active process can still be creating its socket. */ }
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  return false;
 }
 function range(cidr) {
   const [address, prefix = '32'] = cidr.split('/');
