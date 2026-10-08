@@ -9,6 +9,8 @@ const port = Number(process.env.DAOYIN_CLOUD_PORT ?? "4700");
 const platformUrl = process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "";
 const appServiceToken = process.env.DAOYIN_CLOUD_APP_SERVICE_TOKEN;
 const vectorMinScoreRaw = process.env.DAOYIN_MEMORY_VECTOR_MIN_SCORE;
+const runTimeoutRaw = process.env.DAOYIN_CLOUD_RUN_TIMEOUT_MS;
+const runTimeoutMs = runTimeoutRaw === undefined ? undefined : Number(runTimeoutRaw);
 const capabilityRouterMode = process.env.DAOYIN_CAPABILITY_ROUTER_MODE ?? "off";
 const generalResourcesMode = process.env.HARNESS_GENERAL_RESOURCES_MODE ?? process.env.DAOYIN_GENERAL_RESOURCES_MODE ?? "off";
 const vectorMinScore = vectorMinScoreRaw === undefined ? undefined : Number(vectorMinScoreRaw);
@@ -23,6 +25,10 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) {
 }
 if (vectorMinScore !== undefined && (!Number.isFinite(vectorMinScore) || vectorMinScore < -1 || vectorMinScore > 1)) {
   throw new Error("DAOYIN_MEMORY_VECTOR_MIN_SCORE must be between -1 and 1.");
+}
+if (runTimeoutMs !== undefined && (!/^[0-9]{1,6}$/u.test(runTimeoutRaw ?? "") ||
+    !Number.isSafeInteger(runTimeoutMs) || runTimeoutMs < 1_000 || runTimeoutMs > 600_000)) {
+  throw new Error("DAOYIN_CLOUD_RUN_TIMEOUT_MS must be an integer between 1000 and 600000 milliseconds.");
 }
 if (!["off", "shadow", "enforce"].includes(capabilityRouterMode)) {
   throw new Error("DAOYIN_CAPABILITY_ROUTER_MODE must be off, shadow or enforce.");
@@ -77,6 +83,7 @@ try {
     serviceToken: process.env.DAOYIN_CLOUD_SERVICE_TOKEN ?? "",
     capabilityRouterMode: capabilityRouterMode as "off" | "shadow" | "enforce",
     generalResourcesMode: generalResourcesMode as "off" | "shadow" | "enforce",
+    ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
     ...(appServiceToken ? { appServiceToken } : {}),
   });
   // Startup never creates or changes production schema. Run postgres-migrate first.

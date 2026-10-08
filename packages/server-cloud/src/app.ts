@@ -144,7 +144,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     if (typeof callback !== "function") throw new Error("Cloud authentication, authorization, profile and metered model adapters are required.");
   }
   const maxConcurrentRuns = options.maxConcurrentRuns ?? 4;
-  const runTimeoutMs = options.runTimeoutMs ?? 120_000;
+  const runTimeoutMs = options.runTimeoutMs ?? 300_000;
   const capabilityRouterMode = options.capabilityRouterMode ?? "off";
   const generalResourcesMode = options.generalResourcesMode ?? "off";
   if (!Number.isSafeInteger(maxConcurrentRuns) || maxConcurrentRuns < 1 || maxConcurrentRuns > 32 ||

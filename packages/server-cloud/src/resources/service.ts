@@ -97,8 +97,8 @@ async function completedAudit(auth: ExecutionIdentity, request: ResourceControlR
   for (const key of ["processId", "exitCode", "cursor", "state", "status", "path", "size", "digest"] as const) {
     const item = result[key]; if (typeof item === "string" || typeof item === "number" || typeof item === "boolean" || item === null) payload[key] = item;
   }
-  if (request.workspaceId && (request.action === "process_run" || request.action === "process_read") &&
-      [result.stdout, result.stderr, result.output].some(item => typeof item === "string" && item.length)) {
+  if (request.workspaceId && (request.action === "process_run" || (request.action === "process_read" &&
+      [result.stdout, result.stderr, result.output].some(item => typeof item === "string" && item.length)))) {
     const artifact = await repository.createArtifact(auth, { workspaceId: request.workspaceId, title: `${request.action} output`,
       mediaType: "application/json", content: encoded, metadata: { runId: request.sourceRun ?? null, processId: request.processId ?? null, audit: true } });
     payload.outputArtifactId = artifact.id; payload.outputBlobHash = artifact.blobHash;
