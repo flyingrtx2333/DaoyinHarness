@@ -552,6 +552,9 @@ try {
       if (item.modelCalls > 0 && item.successfulModelResponses > 0) predictions.push({ instance_id: task.instance_id,
         model_name_or_path: `daoyin-cloud-${expected.slice(0, 12)}`, model_patch: patch });
       else item.status = "no-successful-model-inference";
+      if (["interrupted", "cancelled"].includes(run.status)) {
+        throw fail("SWE_RUNTIME_INTERRUPTED", "The accepted run was interrupted or cancelled; retained its terminal evidence and patch and stopped remaining case admission.");
+      }
     } catch (error) {
       item.status = "blocked-or-incomplete";
       if (item.workspaceCreateRecovery?.status === "read-only-pending") {
@@ -573,7 +576,7 @@ try {
         await settleAcceptedRun();
         currentRun = undefined;
       }
-      if ([401, 402, 403].includes(error.publicFailure?.status) || error.code === "SWE_MODEL_ACCESS_BLOCKED" ||
+      if ([401, 402, 403].includes(error.publicFailure?.status) || ["SWE_MODEL_ACCESS_BLOCKED", "SWE_RUNTIME_INTERRUPTED"].includes(error.code) ||
           stage === "ordinary-isolated-runtime-build" || infrastructureFailure(error.code ?? error.publicFailure?.code) ||
           item.lifecycleIncomplete || controller.signal.aborted) throw error;
     } finally { item.durationMs = Math.round(performance.now() - began); await save(); }

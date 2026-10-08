@@ -34,6 +34,13 @@ operation kind, bounded candidate metadata, outcome and latency. These are routi
 operations, not fabricated Agent replies. They can precede `turn.started` because
 the existing route is prepared before Engine initialization. Agent model events
 retain their existing meaning. Evaluation accounting includes both request types.
+The Engine's first-entry replay check treats only these two scoped routing event
+types, with `targetRunId` equal to the current turn, as a prelude. A prior
+`turn.started`, any Agent/tool event or an interrupted/terminal record still
+prevents automatic re-execution. An actual published sample exposed this boundary:
+the old any-event check rejected a pure routing prelude with
+`AGENT_TURN_REPLAY_BLOCKED` before the first task request. Its failure remains
+recorded, and the corrected entry path requires fresh real-model evidence.
 
 After routing the Engine receives the remaining request allowance. A trusted
 dynamic callback also accounts for capacity consumed by children or condensation.

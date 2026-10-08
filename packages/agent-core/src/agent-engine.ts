@@ -179,6 +179,11 @@ function existingResult(events: readonly AgentEvent[], input: AgentTurnInput): A
     return { status: terminal.payload.status, finalText: terminal.payload.outcomeSummary, lastEventSeq: terminal.eventSeq };
   }
   if (terminal?.type === "turn.cancelled") return { status: "cancelled", finalText: "任务已停止。", lastEventSeq: terminal.eventSeq };
+  // Capability routing is audited before the engine starts its turn. These
+  // scoped prelude facts alone do not mean Agent/tool execution has begun.
+  if (started === undefined && own.every((event) =>
+    (event.type === "capability.model.requested" || event.type === "capability.model.responded") &&
+    event.payload.targetRunId === input.turnId)) return undefined;
   throw new AgentPolicyError("AGENT_TURN_REPLAY_BLOCKED", "该回合已开始但没有可重放的完成结果。请核对中断记录，在新回合继续；不能自动重复外部操作。");
 }
 
