@@ -1,7 +1,7 @@
 // Grade only patches exported by an actual Harness inference run.
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, statfs, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, statfs, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
@@ -163,10 +163,22 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
       { cwd: output, env: environment, timeout: 30_000, maxBuffer: 100_000, signal })).stdout.trim();
     if (version !== report.graderVersion) throw new Error("Official grader version mismatch.");
     const dockerEnvironment = { ...environment, DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? join(homedir(), ".docker") };
-    const context = (await execute("docker", ["context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
-      { cwd: output, env: dockerEnvironment, timeout: 30_000, maxBuffer: 100_000, signal })).stdout.trim();
+    let context;
+    if (process.env.SWEBENCH_DOCKER_HOST !== undefined) {
+      const endpoint = new URL(process.env.SWEBENCH_DOCKER_HOST);
+      if (endpoint.protocol !== "unix:" || endpoint.host || endpoint.search || endpoint.hash || !isAbsolute(endpoint.pathname)) {
+        throw new Error("Explicit grading daemon must be a repository-cache Unix socket.");
+      }
+      const socket = await cachePath(decodeURIComponent(endpoint.pathname));
+      if (!(await lstat(socket)).isSocket()) throw new Error("Explicit grading daemon socket is unavailable.");
+      context = `unix://${socket}`;
+    } else {
+      context = (await execute("docker", ["context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
+        { cwd: output, env: dockerEnvironment, timeout: 30_000, maxBuffer: 100_000, signal })).stdout.trim();
+    }
     if (!context.startsWith("unix://")) throw new Error("This grader runner requires the existing local Unix Docker daemon.");
     environment.DOCKER_HOST = context;
+    report.environment.dockerHost = { endpoint: context, selection: process.env.SWEBENCH_DOCKER_HOST === undefined ? "existing-context" : "explicit-cache-socket" };
     // Public official images use an anonymous, run-scoped configuration. An
     // existing config.json prevents the SDK from falling back to user Keychain.
     environment.DOCKER_CONFIG = join(output, "docker-config");
@@ -174,7 +186,7 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
     const dockerConfiguration = { auths: {} };
     if (process.env.SWEBENCH_BUILD_PROXY !== undefined) {
       const proxy = new URL(process.env.SWEBENCH_BUILD_PROXY);
-      if (proxy.protocol !== "http:" || proxy.hostname !== "host.docker.internal" || proxy.username || proxy.password ||
+      if (proxy.protocol !== "http:" || !["host.docker.internal", "host.lima.internal"].includes(proxy.hostname) || proxy.username || proxy.password ||
           proxy.pathname !== "/" || proxy.search || proxy.hash || !/^\d+$/u.test(proxy.port) ||
           Number(proxy.port) < 1 || Number(proxy.port) > 65535) {
         throw new Error("Official grader proxy must be a credential-free HTTP Docker host URL with an explicit port.");
