@@ -173,7 +173,7 @@ Local memory is implemented as append-only JSONL records with explicit `session`
 
 The model-facing memory pack exposes `memory_search`, `memory_remember`, `memory_update` and `memory_forget`. Account/session/resource IDs are injected by trusted Tool execution context rather than accepted from model arguments. `resource` scope uses a stable hash of the canonical workspace root, preventing memory bleed across different selected workspaces without exposing the path as an identifier.
 
-Context compaction is a separate derived store. When older completed turns exceed configured turn/character thresholds, `ContextCompactor` writes a `SessionCompaction` covering an explicit `sourceStartSeq..sourceEndSeq` range. The first implementation uses a deterministic trajectory projection so it never requires an extra model call or hidden reasoning. Covered raw dialogue and tool events remain in the canonical transcript; only model context changes. The prompt receives the compacted summary plus raw recent dialogue/tool evidence after the covered range, avoiding duplicate context.
+Context compaction is a separate derived store. When older completed turns exceed configured turn/character thresholds, `ContextCompactor` writes a `SessionCompaction` covering an explicit `sourceStartSeq..sourceEndSeq` range. The shared engine attempts one bounded, tool-free semantic summary through the authenticated ModelClient, within its existing request budget. Ordinary summary failures use an explicitly lossy deterministic projection. New v3 envelopes record source digests and omission markers; memory-aware reuse validates freshly filtered source events and current memory revisions. Legacy summaries are not reused in that path. Covered raw dialogue and tool events remain in the canonical transcript; only model context changes. The prompt receives the compacted summary plus raw recent dialogue/tool evidence after the covered range, avoiding duplicate context.
 
 ### Process, permission and OS sandbox capability
 
@@ -265,7 +265,7 @@ Cancellation aborts the active model/tool signal and prevents future tool dispat
 
 ### Context compaction
 
-Compaction is implemented as a separate append-only derived store. The current deterministic strategy summarizes completed older turns and tool outcomes into an explicit source event range while retaining a configurable number of recent raw turns. `ContextAssembler` excludes covered raw dialogue/tool evidence from the model request and injects the derived `session_compaction` section instead. The canonical JSONL transcript is never rewritten or shortened. A later semantic summarizer may improve the summary contents, but it must preserve the same source-range/provenance contract.
+Compaction is implemented as a separate append-only derived store. The current semantic strategy summarizes completed older turns and tool outcomes into an explicit source event range while retaining a configurable number of recent raw turns; a bounded deterministic projection is its failure fallback. `ContextAssembler` excludes covered raw dialogue/tool evidence from the model request and injects the derived `session_compaction` section instead. The canonical JSONL transcript is never rewritten or shortened. Source digests must match the currently accessible event prefix. Invalidation never rewrites an old summary or violates the store watermark; when a new safe watermark is unavailable, the engine uses filtered original history. See ADR-0025 for accounting and rejection recovery.
 
 ## 7. Memory model
 

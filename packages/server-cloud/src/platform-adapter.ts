@@ -9,6 +9,7 @@ import { createSaishiProfile, isSaishiIdentity } from "./saishi-profile.js";
 import { createStoryProfile, isStoryIdentity } from "./story-profile.js";
 import { createWorkbenchProfile, isWorkbenchIdentity } from "./workbench-profile.js";
 import { readModelStream } from "./model-stream.js";
+import { readModelErrorPayload, structuredModelError } from "./model-error.js";
 import { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import { RESOURCE_TOOL_NAMES } from "./resources/contracts.js";
 import { VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS } from "./video-interaction.js";
@@ -173,7 +174,10 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       if (!response.ok) {
         const status = [400, 401, 402, 403, 404, 409, 413, 429].includes(response.status) ? response.status : 503;
         let message = "平台授权或业务调用未完成，请保留原请求标识。";
-        if (privateApp && path === "call") {
+        if (path === "model" && ![401, 402, 403].includes(response.status)) {
+          const classified = structuredModelError(await readModelErrorPayload(response, signal));
+          if (classified !== undefined) throw classified;
+        } else if (privateApp && path === "call") {
           const detail: unknown = await response.json().catch(() => null);
           if (record(detail) && record(detail.detail) && detail.detail.code === "STORY_OPERATION_FAILED" &&
               typeof detail.detail.message === "string" && detail.detail.message.length <= 600) message = detail.detail.message;
@@ -343,4 +347,3 @@ export function createPlatformCloudServer(options: PlatformAdapterOptions & Pick
     ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
   });
 }
-

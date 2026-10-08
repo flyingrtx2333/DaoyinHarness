@@ -1,8 +1,12 @@
 import { wireMessages, type ModelClient, type ModelReply, type ModelRequest, type ModelToolCall } from "@daoyin/harness-agent-core";
 
 const MAX_RESPONSE_BYTES = 2_000_000;
+const MAX_ERROR_RESPONSE_BYTES = 16_384;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_MESSAGE_CHARACTERS = 100_000;
+const CONTEXT_ERROR_CODES = new Set([
+  "MODEL_CONTEXT_TOO_LARGE", "context_length_exceeded", "context_window_exceeded", "model_context_window_exceeded",
+]);
 
 export interface CloudCredentialProvider {
   getCredential(signal: AbortSignal): Promise<string>;
@@ -108,6 +112,12 @@ function publicError(value: unknown): { code?: string; message?: string } {
 
 function statusError(status: number, payload: unknown, requestId: string | null): ModelGatewayError {
   const gateway = publicError(payload);
+  // Authentication and quota status always take precedence over a conflicting body code.
+  if (![401, 402, 403, 408, 429].includes(status) && isRecord(payload) &&
+      [payload, payload.error, payload.detail].some((candidate: unknown) => isRecord(candidate) &&
+        typeof candidate.code === "string" && CONTEXT_ERROR_CODES.has(candidate.code))) {
+    return new ModelGatewayError("MODEL_CONTEXT_TOO_LARGE", "模型上下文超过服务允许的长度，请缩小读取范围后重试。", { status, requestId });
+  }
   if (status === 422) {
     // Validation responses may echo credentials or document contents in `input`.
     // Inspect only the known error type/location; never surface raw details.
@@ -185,19 +195,44 @@ function parseReply(payload: unknown): ModelReply {
   throw new ModelGatewayError("MODEL_GATEWAY_PROTOCOL", "模型网关返回了未知输出类型。", { retryable: true });
 }
 
-async function parsePayload(response: Response): Promise<unknown> {
+async function parsePayload(response: Response, signal: AbortSignal): Promise<unknown> {
+  const limit = response.ok ? MAX_RESPONSE_BYTES : MAX_ERROR_RESPONSE_BYTES;
   const declared = Number(response.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel().catch(() => undefined);
+    if (!response.ok) return null;
     throw new ModelGatewayError("MODEL_GATEWAY_RESPONSE_TOO_LARGE", "模型网关响应超过本地允许大小。", { retryable: true, status: response.status });
   }
-  const text = await response.text();
-  if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) {
-    throw new ModelGatewayError("MODEL_GATEWAY_RESPONSE_TOO_LARGE", "模型网关响应超过本地允许大小。", { retryable: true, status: response.status });
+  const reader = response.body?.getReader();
+  if (reader === undefined) return null;
+  const abort = (): void => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener("abort", abort, { once: true });
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > limit) {
+        if (!response.ok) return null;
+        throw new ModelGatewayError("MODEL_GATEWAY_RESPONSE_TOO_LARGE", "模型网关响应超过本地允许大小。", { retryable: true, status: response.status });
+      }
+      chunks.push(chunk.value);
+    }
+    signal.throwIfAborted();
+  } finally {
+    signal.removeEventListener("abort", abort);
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
+  const text = Buffer.concat(chunks).toString("utf8");
   if (text.trim().length === 0) return null;
   try {
     return JSON.parse(text) as unknown;
   } catch (error) {
+    if (!response.ok) return null;
     throw new ModelGatewayError("MODEL_GATEWAY_PROTOCOL", "模型网关返回了无法解析的 JSON。", { retryable: true, status: response.status, cause: error });
   }
 }
@@ -266,7 +301,7 @@ export class DaoyinGatewayModelClient implements ModelClient {
       throw new ModelGatewayError("MODEL_GATEWAY_NETWORK", "无法连接道引模型网关。", { retryable: true, cause: error });
     }
 
-    const payload = await parsePayload(response);
+    const payload = await parsePayload(response, signal);
     const requestId = response.headers.get("x-request-id")?.trim() || requestIdFrom(payload);
     if (!response.ok) throw statusError(response.status, payload, requestId || null);
     try {

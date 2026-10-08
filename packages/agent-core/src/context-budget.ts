@@ -13,6 +13,8 @@ export interface ModelContextBudget {
   overheadCharacters: number;
   maxCharacters: number;
   maxMessages: number;
+  /** Further reduce observations after a confirmed context rejection; never trim arguments. */
+  maxToolResultCharacters?: number;
 }
 
 function toolGroups(messages: readonly ModelConversationItem[]): ModelConversationItem[][] {
@@ -67,7 +69,9 @@ export function boundModelContext(input: ModelContextBudget): ModelConversationI
   const groups = toolGroups(input.current.slice(1));
   const prior = historyGroups(input.history);
   let first = 0;
-  let kept = groups.map((group) => [...group]);
+  let kept = groups.map((group) => group.map((message) => message.role === "tool" && input.maxToolResultCharacters !== undefined ? {
+    ...message, content: contextPreview(JSON.parse(message.content) as JsonValue, input.maxToolResultCharacters),
+  } : message));
   const compose = (history: readonly ModelConversationItem[], batches: readonly ModelConversationItem[][]): ModelConversationItem[] => {
     const note = checkpoint(groups.slice(0, first), input.history.length - history.length);
     const receipt: ModelConversationItem[] = input.runtimeNote ? [{ role: "system", content: input.runtimeNote }] : [];
@@ -78,7 +82,7 @@ export function boundModelContext(input: ModelContextBudget): ModelConversationI
 
   while (!fits(compose([], kept)) && kept.length > 1) {
     first += 1;
-    kept = groups.slice(first).map((group) => [...group]);
+    kept = kept.slice(1);
   }
   // A single latest batch is never dropped. Reduce result previews, not executable arguments.
   for (const budget of [8_000, 4_000, 2_000, 1_000, 512, 256]) {

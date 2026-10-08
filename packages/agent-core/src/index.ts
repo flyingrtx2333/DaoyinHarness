@@ -23,6 +23,8 @@ export {
 export {
   ContextCompactor,
   type ContextCompactorOptions,
+  type CompactContextOptions,
+  type SummaryRequest,
 } from "./context-compactor.js";
 export {
   SystemPromptRegistry,

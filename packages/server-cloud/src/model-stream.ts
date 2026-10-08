@@ -1,3 +1,5 @@
+import { structuredModelError } from "./model-error.js";
+
 /** Bounded internal NDJSON transport. A final validated reply is mandatory. */
 export async function readModelStream(response: Response, onTextDelta: (delta: string) => Promise<void>, signal: AbortSignal): Promise<unknown> {
   const reader = response.body?.getReader();
@@ -17,6 +19,7 @@ export async function readModelStream(response: Response, onTextDelta: (delta: s
       if (text.length > 16_000) throw new Error("Model text exceeds limit.");
       await onTextDelta(item.delta);
     } else if (item.type === "result" && "value" in item) { result = item.value; finished = true; }
+    else if (item.type === "error") throw structuredModelError(item) ?? new Error("Model stream failed.");
     else throw new Error("Model stream failed.");
   }
   try {
@@ -34,5 +37,5 @@ export async function readModelStream(response: Response, onTextDelta: (delta: s
     if (buffer.trim()) throw new Error("Incomplete model frame.");
     if (!finished) throw new Error("Model stream ended before completion.");
     return result;
-  } finally { signal.removeEventListener("abort", abort); await reader.cancel(); reader.releaseLock(); }
+  } finally { signal.removeEventListener("abort", abort); await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
