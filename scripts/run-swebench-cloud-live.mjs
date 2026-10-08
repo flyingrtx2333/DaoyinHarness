@@ -14,9 +14,13 @@ const sha = value => createHash("sha256").update(value).digest("hex");
 const infrastructureFailure = code => /^(?:EGRESS_|SANDBOX_|OCI_|WORKSPACE_(?:SUBNET_|NETWORK_)|RESOURCE_(?:EXECUTOR_|AUDIT_PERSISTENCE_FAILED|SERVICE_FAILED)|PROCESS_CLEANUP_|SWE_(?:BUDGET_|RUNTIME_|UNEXPECTED_DELEGATION|GIT_SETUP_))/u.test(code ?? "");
 const args = process.argv.slice(2);
 const expected = args[args.indexOf("--expected-revision") + 1];
-if (args.length !== 3 || !args.includes("--run") || args.indexOf("--expected-revision") < 0 || !/^[a-f0-9]{40}$/u.test(expected ?? "")) {
-  throw new Error("Use --run --expected-revision FULL_DEPLOYED_COMMIT; normal account credentials are read through hidden stdin.");
+const selectedInstance = args.includes("--instance") ? args[args.indexOf("--instance") + 1] : undefined;
+if (args.length !== (selectedInstance === undefined ? 3 : 5) || !args.includes("--run") ||
+    args.indexOf("--expected-revision") < 0 || !/^[a-f0-9]{40}$/u.test(expected ?? "") ||
+    (args.includes("--instance") && !ids.includes(selectedInstance))) {
+  throw new Error("Use --run --expected-revision FULL_DEPLOYED_COMMIT [--instance PINNED_INSTANCE_ID]; normal account credentials are read through hidden stdin.");
 }
+const selectedIds = selectedInstance === undefined ? ids : [selectedInstance];
 const manifestPath = join(root, ".cache/swebench-verified-3/manifest.json");
 const dockerfilePath = join(root, "deployment/resource-runtimes/swe-python/Dockerfile");
 const dockerfile = await readFile(dockerfilePath, "utf8");
@@ -40,6 +44,7 @@ await mkdir(output, { recursive: true, mode: 0o700 });
 const report = { kind: "swebench-verified-cloud-harness-inference", mode: "real", output,
   dataset: manifest.dataset, datasetRevision: revision, datasetSha256: manifest.datasetSha256, manifestSha256: sha(manifestText),
   expectedRuntimeRevision: expected, fakeModels: false, fabricatedBusinessResponses: false,
+  sampleIds: ids, selectedIds,
   driverSourceSha256: sha(await readFile(new URL(import.meta.url))),
   transportSourceSha256: sha(await readFile(new URL("./cloud-live-client.mjs", import.meta.url))),
   sourceUploadDriverSourceSha256: sha(await readFile(new URL("./swebench-source-upload.mjs", import.meta.url))),
@@ -51,7 +56,7 @@ const report = { kind: "swebench-verified-cloud-harness-inference", mode: "real"
   modelAccounting: { source: "persisted AgentEngine model.requested events", scope: "AgentEngine attempts only",
     routingSource: "persisted capability.model.requested events", sharedBudgetIncludesRouting: true,
     providerTotalCalls: "unknown; gateway attempts do not prove provider execution or settlement" },
-  limits: { cases: 3, perCaseModelCalls: 12, totalModelCalls: 36, perCaseMs: 420_000, totalMs: 1_800_000 },
+  limits: { cases: selectedIds.length, perCaseModelCalls: 12, totalModelCalls: 12 * selectedIds.length, perCaseMs: 420_000, totalMs: 1_800_000 },
   inferenceEnvironment: "ordinary account cloud API; locally prepared exact-base sources uploaded into independent Python/Git Dockerfile workspaces; isolated builder and gVisor",
   cases: [], status: "preflight", startedAt: new Date().toISOString() };
 const predictions = [];
@@ -333,7 +338,7 @@ try {
   seed.status = "snapshot-ready";
   await save();
   report.status = "actual-cloud-inference";
-  for (const task of manifest.tasks) {
+  for (const task of manifest.tasks.filter(task => selectedIds.includes(task.instance_id))) {
     controller.signal.throwIfAborted();
     const item = { instance_id: task.instance_id, inputSha256: sha(task.problem_statement), baseCommit: task.base_commit,
       modelCalls: 0, routingModelCalls: 0, sharedModelCalls: 0, status: "initializing", operations: [] };
@@ -458,7 +463,7 @@ try {
       }
       stage = "actual-model-inference";
       await runtime();
-      if (report.sharedModelCalls + 12 > 36) throw Object.assign(new Error("Insufficient shared budget for an ordinary 12-call run."), { code: "SWE_BUDGET_ADMISSION_DENIED" });
+      if (report.sharedModelCalls + 12 > report.limits.totalModelCalls) throw Object.assign(new Error("Insufficient shared budget for an ordinary 12-call run."), { code: "SWE_BUDGET_ADMISSION_DENIED" });
       item.input = `Work only in attached workspace ${item.workspaceId}, a Python repository at the exact issue base commit.\n` +
         "Fix the following issue by inspecting and changing actual source files. You may install needed dependencies and execute focused real repository tests through the workspace tools. " +
         "Do not delegate, start workflows, push, deploy, access business resources, fetch later source revisions, search for benchmark/reference patches, or request hints. " +
@@ -485,7 +490,7 @@ try {
           await writeFile(join(caseOutput, "cloud-events.json"), text, { mode: 0o600 });
           item.persisted = { source: "ordinary-cloud-session-events-API", events: allEvents.filter(event => event.turnId === item.runId).length,
             file: join(caseOutput, "cloud-events.json"), sha256: sha(text), lastEventSeq: cursor };
-          if (item.sharedModelCalls > 12 || report.sharedModelCalls > 36) throw Object.assign(new Error("Actual persisted shared model calls exceeded the budget."), { code: "SWE_BUDGET_EXCEEDED" });
+          if (item.sharedModelCalls > 12 || report.sharedModelCalls > report.limits.totalModelCalls) throw Object.assign(new Error("Actual persisted shared model calls exceeded the budget."), { code: "SWE_BUDGET_EXCEEDED" });
           if (allEvents.some(event => event.type === "model.responded" && ["MODEL_AUTH_REQUIRED", "MODEL_ACCESS_DENIED", "MODEL_QUOTA_EXHAUSTED"].includes(event.payload.failureCode))) {
             throw Object.assign(new Error("Actual model authorization or quota failed; inference stopped."), { code: "SWE_MODEL_ACCESS_BLOCKED" });
           }
@@ -581,7 +586,7 @@ try {
           item.lifecycleIncomplete || controller.signal.aborted) throw error;
     } finally { item.durationMs = Math.round(performance.now() - began); await save(); }
   }
-  report.status = predictions.length === 3 ? "cloud-inference-exported-awaiting-official-grading" : "cloud-inference-incomplete";
+  report.status = predictions.length === selectedIds.length ? "cloud-inference-exported-awaiting-official-grading" : "cloud-inference-incomplete";
 } catch (error) {
   report.status = controller.signal.aborted ? "cancelled-or-timeout" : "blocked";
   report.error = { code: String(error.code ?? error.name), stage, message: String(error.message).slice(0, 700),
@@ -589,8 +594,8 @@ try {
 } finally {
   clearTimeout(timer); client.close(); report.finishedAt = new Date().toISOString();
   report.durationMs = Math.round(performance.now() - started); report.submittedIds = predictions.map(row => row.instance_id);
-  report.missingIds = ids.filter(id => !report.submittedIds.includes(id)); await save();
+  report.missingIds = selectedIds.filter(id => !report.submittedIds.includes(id)); await save();
   process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop);
 }
 console.log(JSON.stringify({ status: report.status, output, submitted: predictions.length, modelCalls: report.modelCalls }));
-process.exitCode = predictions.length === 3 ? 0 : 1;
+process.exitCode = predictions.length === selectedIds.length ? 0 : 1;
