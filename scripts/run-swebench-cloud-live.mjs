@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createCloudAccountClient, readHiddenCredentials, sanitizeEvidence } from "./cloud-live-client.mjs";
+import { loadPreparedSources, uploadPreparedSource } from "./swebench-source-upload.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const revision = "c104f840cc67f8b6eec6f759ebc8b2693d585d4a";
@@ -33,6 +34,7 @@ if (manifest.datasetRevision !== revision || manifest.dataset !== "princeton-nlp
       Object.keys(task).some(key => !["instance_id", "repo", "base_commit", "problem_statement", "version"].includes(key)))) {
   throw new Error("Pinned issue-only manifest provenance mismatch; do not expose full dataset rows to inference.");
 }
+const preparedSources = await loadPreparedSources({ root, issueManifestText: manifestText, manifest });
 const output = join(root, ".cache/swebench-cloud-live", new Date().toISOString().replaceAll(":", "-") + "_" + randomUUID().slice(0, 8));
 await mkdir(output, { recursive: true, mode: 0o700 });
 const report = { kind: "swebench-verified-cloud-harness-inference", mode: "real", output,
@@ -48,7 +50,7 @@ const report = { kind: "swebench-verified-cloud-harness-inference", mode: "real"
   modelAccounting: { source: "persisted AgentEngine model.requested events", scope: "AgentEngine attempts only",
     routingAndProviderTotalCalls: "unknown; not represented by these event counts" },
   limits: { cases: 3, perCaseModelCalls: 12, totalModelCalls: 36, perCaseMs: 420_000, totalMs: 1_800_000 },
-  inferenceEnvironment: "ordinary account cloud API; independent snapshot-seeded Python/Git Dockerfile workspaces; isolated OCI builder and gVisor",
+  inferenceEnvironment: "ordinary account cloud API; locally prepared exact-base sources uploaded into independent Python/Git Dockerfile workspaces; isolated builder and gVisor",
   cases: [], status: "preflight", startedAt: new Date().toISOString() };
 const predictions = [];
 const save = async () => {
@@ -427,22 +429,22 @@ try {
       }
       await control("file_remove", { path: seed.dockerfilePath });
       await control("file_remove", { path: ".dockerignore" });
-      stage = "exact-base-source";
-      await process(["init"]);
-      await process(["remote", "add", "origin", `https://github.com/${task.repo}.git`]);
-      // The controlled proxy uses Basic grants. Select the documented public
-      // authentication method without copying any grant into argv or source.
-      await process(["-c", "http.proxyAuthMethod=basic", "fetch", "--depth=1", "--no-tags", "origin", task.base_commit], 180_000);
-      await process(["checkout", "--detach", task.base_commit]);
+      stage = "exact-base-source-upload";
+      await uploadPreparedSource({ item, source: preparedSources.get(task.instance_id), control, sandboxProcess, save });
       const actualBase = (await process(["rev-parse", "HEAD"])).stdout.trim();
+      const actualTree = (await process(["rev-parse", "HEAD^{tree}"])).stdout.trim();
+      const shallow = (await process(["rev-parse", "--is-shallow-repository"])).stdout.trim() === "true";
       const rootTree = (await process(["ls-tree", "-z", "--name-only", task.base_commit])).stdout;
       if (rootTree.split("\0").some(name => name === ".harness" || name === "lost+found" || name.startsWith(".harness-restore-") || name === patchPath)) {
         throw Object.assign(new Error("Reserved runtime paths are tracked by the benchmark base; exclusions cannot hide legitimate source."), { code: "SWE_GIT_SETUP_RESERVED_PATH_CONFLICT" });
       }
       const clean = (await process(["status", "--porcelain", "--", ...sourcePaths])).stdout.trim() === "";
-      item.source = { repo: task.repo, commit: actualBase, cleanBeforeInference: clean, shallowExactBase: true,
+      item.source = { repo: task.repo, commit: actualBase, tree: actualTree, cleanBeforeInference: clean, shallowExactBase: shallow,
+        materialization: "local exact-base archive uploaded through ordinary cloud file/process capabilities",
         cleanScope: "source tree excluding verified-untracked reserved runtime paths", baseRootTreeSha256: sha(rootTree), reservedRuntimePathsTrackedAtBase: false };
-      if (actualBase !== task.base_commit || !clean) throw new Error("Actual cloud checkout is not the clean exact benchmark base.");
+      if (actualBase !== task.base_commit || actualTree !== preparedSources.get(task.instance_id).tree || !shallow || !clean) {
+        throw new Error("Actual uploaded cloud checkout is not the clean, shallow exact benchmark base and tree.");
+      }
       stage = "actual-model-inference";
       await runtime();
       if (report.modelCalls + 12 > 36) throw Object.assign(new Error("Insufficient budget for an ordinary 12-call run."), { code: "SWE_BUDGET_ADMISSION_DENIED" });
