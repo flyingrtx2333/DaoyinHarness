@@ -149,7 +149,14 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
       { cwd: output, env: dockerEnvironment, timeout: 30_000, maxBuffer: 100_000, signal })).stdout.trim();
     if (!context.startsWith("unix://")) throw new Error("This grader runner requires the existing local Unix Docker daemon.");
     environment.DOCKER_HOST = context;
-    await execute("docker", ["info", "--format", "{{.ServerVersion}}"], { cwd: output, env: environment, timeout: 30_000, maxBuffer: 100_000, signal });
+    const daemon = JSON.parse((await execute("docker", ["info", "--format",
+      '{"serverVersion":{{json .ServerVersion}},"architecture":{{json .Architecture}},"memoryBytes":{{.MemTotal}},"cpus":{{.NCPU}}}'],
+    { cwd: output, env: environment, timeout: 30_000, maxBuffer: 100_000, signal })).stdout);
+    if (typeof daemon.serverVersion !== "string" || typeof daemon.architecture !== "string" ||
+        !Number.isSafeInteger(daemon.memoryBytes) || daemon.memoryBytes <= 0 || !Number.isSafeInteger(daemon.cpus) || daemon.cpus <= 0) {
+      throw new Error("Actual Docker daemon capability metadata is unavailable.");
+    }
+    report.environment.daemon = daemon;
     const space = await statfs(output);
     report.freeDiskBytesBefore = space.bavail * space.bsize;
     if (report.freeDiskBytesBefore < 12 * 1024 ** 3) throw new Error("Less than 12 GiB free for the official Docker evaluation; no images started.");

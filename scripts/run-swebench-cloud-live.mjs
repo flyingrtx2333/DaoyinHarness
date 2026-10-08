@@ -45,6 +45,8 @@ const report = { kind: "swebench-verified-cloud-harness-inference", mode: "real"
     upstreamOriginal: "python@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26",
     builder: "ordinary-account-isolated-Dockerfile-builder" },
   referencePatchExposed: false, testPatchExposed: false, modelCalls: 0, usage: "unknown", cost: "unknown",
+  modelAccounting: { source: "persisted AgentEngine model.requested events", scope: "AgentEngine attempts only",
+    routingAndProviderTotalCalls: "unknown; not represented by these event counts" },
   limits: { cases: 3, perCaseModelCalls: 12, totalModelCalls: 36, perCaseMs: 420_000, totalMs: 1_800_000 },
   inferenceEnvironment: "ordinary account cloud API; independent snapshot-seeded Python/Git Dockerfile workspaces; isolated OCI builder and gVisor",
   cases: [], status: "preflight", startedAt: new Date().toISOString() };
@@ -568,7 +570,8 @@ try {
   report.status = predictions.length === 3 ? "cloud-inference-exported-awaiting-official-grading" : "cloud-inference-incomplete";
 } catch (error) {
   report.status = controller.signal.aborted ? "cancelled-or-timeout" : "blocked";
-  report.error = { code: String(error.code ?? error.name), stage, message: String(error.message).slice(0, 700) };
+  report.error = { code: String(error.code ?? error.name), stage, message: String(error.message).slice(0, 700),
+    ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}) };
 } finally {
   clearTimeout(timer); client.close(); report.finishedAt = new Date().toISOString();
   report.durationMs = Math.round(performance.now() - started); report.submittedIds = predictions.map(row => row.instance_id);
