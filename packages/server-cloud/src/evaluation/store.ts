@@ -78,7 +78,7 @@ export class EvaluationStore {
     const since = new Date(Date.now() - hours * 3_600_000).toISOString();
     const rows = this.#db.prepare(`SELECT s.body,s.session_id,s.turn_id,s.account_id,s.scope_id,s.occurred_at,
       (SELECT COUNT(*) FROM audit_events e WHERE e.turn_id=s.turn_id) event_count,
-      (SELECT COUNT(*) FROM audit_events e WHERE e.turn_id=s.turn_id AND e.event_type='model.requested') model_calls,
+      (SELECT COUNT(*) FROM audit_events e WHERE e.turn_id=s.turn_id AND e.event_type IN ('model.requested','capability.model.requested')) model_calls,
       (SELECT COUNT(*) FROM audit_events e WHERE e.turn_id=s.turn_id AND e.event_type='tool.started') tool_calls,
       (SELECT e.event_type FROM audit_events e WHERE e.turn_id=s.turn_id AND e.event_type IN ('turn.completed','turn.failed','turn.cancelled','turn.interrupted') ORDER BY e.event_seq DESC LIMIT 1) terminal_type
       FROM audit_events s WHERE s.event_type='turn.started' AND s.occurred_at>=? ORDER BY s.occurred_at DESC,s.event_id DESC LIMIT 100 OFFSET ?`).all(since, offset) as Array<Record<string, unknown>>;

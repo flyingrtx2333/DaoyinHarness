@@ -6,6 +6,7 @@ import "./audit.css";
 const statusLabel: Record<AuditRunSummary["status"], string> = { running: "执行中", completed: "完成", failed: "失败", cancelled: "已取消", interrupted: "已中断" };
 const eventLabel: Partial<Record<AgentEvent["type"], string>> = {
   "turn.started": "用户提问", "capability.routed": "能力路由", "model.requested": "模型请求", "model.responded": "模型响应",
+  "capability.model.requested": "能力路由请求", "capability.model.responded": "能力路由响应",
   "assistant.delta": "AI 正文", "assistant.commentary": "AI 中途说明", "phase.updated": "执行阶段", "tool.started": "工具开始执行",
   "tool.progress": "工具执行进度", "tool.completed": "工具执行完成", "tool.failed": "工具执行失败", "interaction.requested": "等待确认",
   "interaction.resolved": "确认结果", "turn.completed": "任务完成", "turn.failed": "任务失败", "turn.cancelled": "任务取消", "turn.interrupted": "任务中断",
@@ -81,6 +82,8 @@ function rowSummary(row: AuditRow, timings: ReadonlyMap<string, ToolTiming>): st
   const event = row.event;
   switch (event.type) {
     case "turn.started": return `用户提交的问题（${event.payload.userMessage.length} 字）`;
+    case "capability.model.requested": return `能力${event.payload.operation === "retrieve" ? "检索" : "分析"} · 共享请求 #${event.payload.callIndex} · 候选 ${event.payload.candidatePackIds.length} 个`;
+    case "capability.model.responded": return `能力${event.payload.operation === "retrieve" ? "检索" : "分析"} · ${event.payload.status === "completed" ? "完成" : event.payload.failureCode ?? event.payload.status} · ${duration(event.payload.latencyMs)}`;
     case "model.requested": return `第 ${event.payload.callIndex} 轮 · 上下文 ${event.payload.messages.length} 条 · 可用工具 ${event.payload.tools.length} 个${event.payload.truncated ? " · 请求内容已截断" : ""}`;
     case "model.responded": {
       if (event.payload.status !== "completed") return `${event.payload.failureCode ?? event.payload.status}${event.payload.failureMessage ? ` · ${event.payload.failureMessage}` : ""} · ${duration(event.payload.latencyMs)}`;
@@ -118,7 +121,7 @@ function rowSummary(row: AuditRow, timings: ReadonlyMap<string, ToolTiming>): st
 
 function eventDuration(row: AuditRow, timings: ReadonlyMap<string, ToolTiming>, events: readonly AgentEvent[]): string | null {
   const event = row.event;
-  if (event.type === "model.responded") return duration(event.payload.latencyMs);
+  if (event.type === "model.responded" || event.type === "capability.model.responded") return duration(event.payload.latencyMs);
   if (event.type === "assistant.delta") {
     const firstSeq = row.sourceEvents[0]?.eventSeq ?? event.eventSeq;
     const lastSeq = row.sourceEvents.at(-1)?.eventSeq ?? event.eventSeq;
@@ -147,6 +150,8 @@ function readableEvent(row: AuditRow, timings: ReadonlyMap<string, ToolTiming>):
   const event = row.event;
   switch (event.type) {
     case "turn.started": return <p className="audit-readable-text">{event.payload.userMessage}</p>;
+    case "capability.model.requested":
+    case "capability.model.responded": return <p className="audit-readable-text">{rowSummary(row, timings)}</p>;
     case "assistant.delta": return <p className="audit-readable-text audit-assistant-text">{rowSummary(row, timings)}</p>;
     case "assistant.commentary": return <p className="audit-readable-text audit-assistant-text">{event.payload.text}</p>;
     case "phase.updated": {

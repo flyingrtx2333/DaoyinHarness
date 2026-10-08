@@ -27,7 +27,7 @@ import { describeRun, RunMeasurements } from "./run-diagnostics.js";
 import { VIDEO_CONFIRMATION_INSTRUCTIONS, VIDEO_CONFIRMATION_TOOL, VIDEO_GENERATION_OPERATIONS, VideoInteractionCoordinator } from "./video-interaction.js";
 import { createExplicitStoryProjectListFlow, createExplicitVideoFlow } from "./explicit-video-flow.js";
 import { disabledTelemetry, type Telemetry } from "./observability.js";
-import { failedAudit, requestedAudit, respondedAudit } from "./model-audit.js";
+import { capabilityRequestedAudit, capabilityRespondedAudit, failedAudit, requestedAudit, respondedAudit } from "./model-audit.js";
 
 export interface CloudToolBinding {
   definition: ToolDefinition;
@@ -399,6 +399,42 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             return bound.events.append(pending);
           }),
         } };
+        // Routing, summaries and children all consume the platform's root-run allowance.
+        let modelCalls = 0;
+        const chargeModel = (reserveMainReply: boolean): number => {
+          const limit = maxModelCalls - (reserveMainReply ? 1 : 0);
+          if (modelCalls >= limit) throw new CloudError(409, "MODEL_CALL_LIMIT", "本轮共享模型预算已达上限；路由与子任务必须保留主 Agent 的最后回答额度。");
+          return ++modelCalls; // No await or refund: concurrent/uncertain attempts retain their slot.
+        };
+        type SemanticInput = Parameters<CapabilitySemanticProvider["analyze"]>[0];
+        const meteredSemantic = async <T>(operation: "retrieve" | "analyze", input: SemanticInput,
+          action: (signal: AbortSignal) => Promise<T>): Promise<T> => measurements.measure(run.id, "model_inclusive", async () => {
+          const signal = AbortSignal.any([input.signal, controller.signal]);
+          await ensureActive(identity, signal);
+          signal.throwIfAborted();
+          const callIndex = chargeModel(true);
+          const modelCallId = `model_${randomUUID()}`;
+          const startedAt = Date.now();
+          let requestedStored = false;
+          try {
+            await stores.events.append({ type: "capability.model.requested", accountId: stores.accountId, scopeId: stores.scopeId,
+              sessionId: run.sessionId, turnId: run.id,
+              payload: capabilityRequestedAudit(input, operation, modelCallId, callIndex, run.id) });
+            requestedStored = true;
+            const result = await abortable(() => action(signal), signal);
+            await ensureActive(identity, signal);
+            await stores.events.append({ type: "capability.model.responded", accountId: stores.accountId, scopeId: stores.scopeId,
+              sessionId: run.sessionId, turnId: run.id,
+              payload: capabilityRespondedAudit(result, operation, modelCallId, callIndex, run.id, Date.now() - startedAt) });
+            return result;
+          } catch (error) {
+            if (requestedStored) await stores.events.append({ type: "capability.model.responded", accountId: stores.accountId, scopeId: stores.scopeId,
+              sessionId: run.sessionId, turnId: run.id,
+              payload: { ...failedAudit(error, modelCallId, callIndex, run.id, Date.now() - startedAt), operation,
+                ...(signal.aborted ? { status: "cancelled" as const, failureCode: "MODEL_CANCELLED" } : {}) } }).catch(() => undefined);
+            throw error;
+          }
+        });
         const memoryRuntime = options.repository.memory === undefined || identity.space.kind === "public" ? undefined
           : createCloudMemoryRuntime({ memory: options.repository.memory, identity, run, events: stores.events, profileId: profile.id, ensureActive });
         const episodicBindings = options.repository.episodicMemory === undefined || identity.space.kind === "public" ? []
@@ -455,11 +491,18 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             attributes: { "daoyin.router.eligible_tools": routableDefinitions.length } });
         let capabilityRoute: Awaited<ReturnType<typeof routeCapabilities>> | undefined;
         try {
+          // Both semantic stages need capacity; a tiny budget uses the existing lexical route.
+          const semantic = routeSpan === undefined || options.createCapabilitySemantic === undefined || maxModelCalls - modelCalls < 3 ? undefined
+            : options.createCapabilitySemantic(identity, run);
+          const meteredRoute: CapabilitySemanticProvider | undefined = semantic === undefined ? undefined : {
+            ...(semantic.retrieve === undefined ? {} : { retrieve: (input: SemanticInput) =>
+              meteredSemantic("retrieve", input, (signal) => semantic.retrieve!({ ...input, signal })) }),
+            analyze: (input) => meteredSemantic("analyze", input, (signal) => semantic.analyze({ ...input, signal })),
+          };
           capabilityRoute = routeSpan === undefined ? undefined : await routeCapabilities({
               message: run.userMessage, continuity, packs,
               tools: routableDefinitions, explicitHighRiskPackIds: highRiskPacks, pinnedPackIds: highRiskPacks,
-              ...(options.createCapabilitySemantic === undefined ? {} :
-                { semantic: options.createCapabilitySemantic(identity, run) }),
+              ...(meteredRoute === undefined ? {} : { semantic: meteredRoute }),
               signal: controller.signal,
             });
           routeSpan?.end({ attributes: capabilityRoute === undefined ? {} : {
@@ -537,7 +580,6 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         // One gateway client and operation sequence for the complete tree: accounting stays on the root Run.
         const platformModel = await abortable(() => options.createModel(identity, run, controller.signal), controller.signal);
         const baseModel = createExplicitStoryProjectListFlow(run, platformModel) ?? createExplicitVideoFlow(run, platformModel) ?? platformModel;
-        let modelCalls = 0;
         const auditStores = new Map<string, Promise<BoundRunStores>>([[run.id, Promise.resolve(stores)]]);
         const auditStoreFor = (targetRun: CloudRun): Promise<BoundRunStores> => {
           const existing = auditStores.get(targetRun.id);
@@ -558,10 +600,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
               let auditStore: BoundRunStores | undefined;
               try {
                 await ensureActive(identity, modelSignal);
-                const limit = targetRun.id === run.id ? maxModelCalls : maxModelCalls - 1;
-                if (modelCalls >= limit) throw new CloudError(409, "MODEL_CALL_LIMIT", "本轮共享模型预算已达上限；子任务不能消耗父 Agent 的最后汇总额度。");
-                modelCalls++;
-                callIndex = modelCalls;
+                modelSignal.throwIfAborted();
+                callIndex = chargeModel(targetRun.id !== run.id);
                 auditStore = await auditStoreFor(targetRun);
                 await auditStore.events.append({ type: "model.requested", accountId: auditStore.accountId, scopeId: auditStore.scopeId,
                   sessionId: targetRun.sessionId, turnId: targetRun.id, payload: requestedAudit(request, modelCallId, callIndex, targetRun.id) });
@@ -649,7 +689,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           model, tools, events: engineEvents, compactionStore: stores.compactions,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
           systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
-          maxSteps: maxModelCalls, maxToolCalls: 24,
+          maxSteps: Math.max(1, maxModelCalls - modelCalls), maxToolCalls: 24,
+          remainingModelCalls: () => Math.max(0, maxModelCalls - modelCalls),
         });
         preparingWorkspaceContext = resourceBindings.length > 0;
         const workspaceContext = resourceBindings.length ? await attachedWorkspaceContext(identity, run.sessionId, controller.signal) : undefined;

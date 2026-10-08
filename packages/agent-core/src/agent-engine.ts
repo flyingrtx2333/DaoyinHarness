@@ -63,6 +63,8 @@ export interface AgentEngineOptions {
   promptRegistry?: SystemPromptRegistry;
   /** 单回合最大推理步数（防止死循环，默认 16） */
   maxSteps?: number;
+  /** Trusted shared-run allowance, including routing, condensation and child requests. */
+  remainingModelCalls?: () => number;
   /** 单回合累计工具调用上限（防止无限调用，默认 32） */
   maxToolCalls?: number;
   /** 上下文中保留的最大历史轮数 */
@@ -187,6 +189,7 @@ export class AgentEngine {
   readonly #context: ContextAssembler;
   readonly #compactor: ContextCompactor | null;
   readonly #maxSteps: number;
+  readonly #remainingModelCalls: (() => number) | undefined;
   readonly #maxToolCalls: number;
   readonly #maxContextCharacters: number;
   readonly #maxContextMessages: number;
@@ -215,6 +218,7 @@ export class AgentEngine {
       ...(options.compactionMaxSummaryCharacters === undefined ? {} : { maxSummaryCharacters: options.compactionMaxSummaryCharacters }),
     });
     this.#maxSteps = limit(options.maxSteps ?? 16, 1, 100, "step limit");
+    this.#remainingModelCalls = options.remainingModelCalls;
     this.#maxToolCalls = limit(options.maxToolCalls ?? 32, 1, 200, "tool limit");
     this.#maxContextCharacters = limit(options.maxContextCharacters ?? 96_000, 8_000, 400_000, "context character limit");
     this.#maxContextMessages = limit(options.maxContextMessages ?? 36, 6, 100, "context message limit");
@@ -283,9 +287,16 @@ export class AgentEngine {
     let contextCharacters = this.#maxContextCharacters;
     let contextMessages = this.#maxContextMessages;
     let toolResultCharacters: number | undefined;
+    const remainingCalls = (): number => {
+      const local = this.#maxSteps - modelRequests;
+      if (this.#remainingModelCalls === undefined) return local;
+      const shared = this.#remainingModelCalls();
+      if (!Number.isSafeInteger(shared) || shared < 0) throw new AgentPolicyError("MODEL_CALL_LIMIT", "共享模型调用额度无效，已停止新增请求。");
+      return Math.min(local, shared);
+    };
     const summarize = async ({ source, maxSummaryCharacters, signal: parent = signal }: SummaryRequest): Promise<string> => {
       // Condensation shares this turn's request budget and leaves room for real task work.
-      if (summaryAttempted || modelRequests >= this.#maxSteps - 2) {
+      if (summaryAttempted || remainingCalls() <= 2) {
         throw new AgentPolicyError("MODEL_COMPACTION_BUDGET", "本轮摘要额度已用尽，保留有界事实预览。");
       }
       summaryAttempted = true;
@@ -338,7 +349,7 @@ export class AgentEngine {
       if (signal.aborted) return cancel();
       const stop = progress.exhausted ? { code: "AGENT_NO_PROGRESS", message: "重复操作没有带来有效进展，已停止继续执行工具。" }
         : attempts >= this.#maxToolCalls ? { code: "AGENT_TOOL_LIMIT", message: "本轮工具调用预算已用尽。" } : undefined;
-      const finalStep = stop !== undefined || modelRequests === this.#maxSteps - 1;
+      let finalStep = stop !== undefined || remainingCalls() <= 1;
       let tools: ToolDescriptor[];
       try { tools = await this.#tools.descriptorsFor(executionContext); }
       catch { return signal.aborted ? cancel() : this.#fail(append, "AGENT_AUTHORIZATION_DENIED", "执行身份或工具授权已失效。"); }
@@ -370,13 +381,21 @@ export class AgentEngine {
         }
         const context = await this.#context.assembleStep({ turn: input, priorEvents: contextEvents, step, tools,
           ...(contextInherited.length ? { inheritedEvents: contextInherited } : {}), ...(compaction === undefined ? {} : { compaction }) });
+        const remaining = remainingCalls();
+        if (remaining <= 0) throw new AgentPolicyError("MODEL_CALL_LIMIT", "本轮共享模型调用预算已用尽。");
+        // Condensation or a concurrent sibling may have consumed capacity during context assembly.
+        finalStep = finalStep || remaining <= 1;
+        if (finalStep) tools = [];
+        const budgetNotice = this.#remainingModelCalls === undefined ? "" :
+          `\n\n可信运行预算：当前本 Agent 包括本次请求在内最多还可使用 ${remaining} 次模型调用；路由、摘要和子任务消耗同一共享预算。`;
         const closing = finalStep ? `\n\n本轮最后一次回答，不再调用工具。${stop?.message ?? "请根据已完成的工具证据收尾。"}说明已完成事项与尚未解决的阻碍，不把局部成功说成全部完成。` : "";
         const memoryText = memorySnapshot?.text ? `\n\n${memorySnapshot.text}` : "";
-        const systemPrompt = { stableText: context.prompt.stableText, dynamicText: context.prompt.dynamicText + memoryText + closing,
+        const systemPrompt = { stableText: context.prompt.stableText, dynamicText: context.prompt.dynamicText + memoryText + budgetNotice + closing,
           sections: [...context.prompt.sections.map((section) => ({ id: section.id, kind: section.kind })),
-            ...(memoryText ? [{ id: "confirmed_memory", kind: "dynamic" as const }] : [])] };
+            ...(memoryText ? [{ id: "confirmed_memory", kind: "dynamic" as const }] : []),
+            ...(budgetNotice ? [{ id: "shared_model_budget", kind: "dynamic" as const }] : [])] };
         const budget: ModelContextBudget = {
-          systemMessage: { role: "system", content: context.systemMessage.content + memoryText + closing },
+          systemMessage: { role: "system", content: context.systemMessage.content + memoryText + budgetNotice + closing },
           history, current, ...(memoryCheckpoint === undefined ? {} : { runtimeNote: memoryCheckpoint }),
           overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
           maxCharacters: contextCharacters, maxMessages: contextMessages,
@@ -406,7 +425,7 @@ export class AgentEngine {
           try {
             if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
             modelSignal.throwIfAborted();
-            if (modelRequests >= this.#maxSteps) throw new AgentPolicyError("MODEL_CALL_LIMIT", "本轮模型调用预算已用尽。");
+            if (remainingCalls() <= 0) throw new AgentPolicyError("MODEL_CALL_LIMIT", "本轮模型调用预算已用尽。");
             modelRequests++;
             const raw = await modelResponse(() => this.#model.complete({ messages, tools, systemPrompt, signal: modelSignal,
               onTextDelta: async (delta) => {
@@ -427,7 +446,7 @@ export class AgentEngine {
             if (!signal.aborted && timeout.aborted) throw new AgentPolicyError("MODEL_TIMEOUT", "模型响应超时；请求结果不确定，未自动重试。");
             if (streamFailure.signal.aborted) throw streamFailure.signal.reason;
             // Only a definite pre-output context rejection can be retried. No tools are replayed.
-            if (signal.aborted || streamed || recoveryUsed || modelRequests >= this.#maxSteps - 1 ||
+            if (signal.aborted || streamed || recoveryUsed || remainingCalls() <= 1 ||
                 modelFailure(error).code !== "MODEL_CONTEXT_TOO_LARGE") throw error;
             const previousSize = JSON.stringify(messages).length;
             const reduced: ModelContextBudget = { ...budget,

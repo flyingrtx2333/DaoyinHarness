@@ -20,7 +20,7 @@ const liveTemplates: Array<{ id: TemplateId; name: string; fixture: string; fact
 ];
 const safeEqual = (actual: unknown, expected: string): boolean => typeof actual === "string" && Buffer.byteLength(actual) === Buffer.byteLength(expected) && timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
 const idParams = { type: "object", required: ["id"], additionalProperties: false, properties: { id: { type: "string", pattern: "^ev_[a-f0-9]{32}$" } } };
-const auditTypes = new Set<AgentEventType>(["turn.started", "capability.routed", "model.requested", "model.responded",
+const auditTypes = new Set<AgentEventType>(["turn.started", "capability.routed", "capability.model.requested", "capability.model.responded", "model.requested", "model.responded",
   "assistant.delta", "assistant.commentary", "phase.updated", "tool.started", "tool.progress", "tool.completed", "tool.failed",
   "interaction.requested", "interaction.resolved", "turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted"]);
 function auditBatch(value: unknown): AgentEvent[] {

@@ -61,3 +61,21 @@ export function failedAudit(error: unknown, modelCallId: string, callIndex: numb
   return { modelCallId, callIndex, targetRunId, status: cancelled ? "cancelled" as const : "failed" as const,
     latencyMs, failureCode, failureMessage: text(rawMessage, budget), truncated: budget.truncated };
 }
+
+/** Routing has its own event contract; semantic results are not Agent replies. */
+export function capabilityRequestedAudit(input: { query: string; clauses: readonly string[];
+  candidates: readonly { id: string }[] }, operation: "retrieve" | "analyze",
+modelCallId: string, callIndex: number, targetRunId: string) {
+  const candidatePackIds = input.candidates.slice(0, 100).map(pack => pack.id.slice(0, 160));
+  return { modelCallId, callIndex, targetRunId, operation, queryCharacters: input.query.length,
+    clauseCount: input.clauses.length, candidatePackIds,
+    truncated: input.candidates.length > 100 || input.candidates.some(pack => pack.id.length > 160) };
+}
+
+export function capabilityRespondedAudit(result: unknown, operation: "retrieve" | "analyze",
+modelCallId: string, callIndex: number, targetRunId: string, latencyMs: number) {
+  const budget: AuditBudget = { remaining: MAX_TOTAL, truncated: false };
+  const bounded = value(result, budget);
+  return { modelCallId, callIndex, targetRunId, operation, status: "completed" as const,
+    latencyMs, result: bounded, truncated: budget.truncated };
+}

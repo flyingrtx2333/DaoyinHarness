@@ -152,6 +152,28 @@ export interface AgentEventPayloads {
     contentBlockId: string;
     delta: string;
   };
+  "capability.model.requested": {
+    modelCallId: string;
+    callIndex: number;
+    targetRunId: string;
+    operation: "retrieve" | "analyze";
+    queryCharacters: number;
+    clauseCount: number;
+    candidatePackIds: string[];
+    truncated: boolean;
+  };
+  "capability.model.responded": {
+    modelCallId: string;
+    callIndex: number;
+    targetRunId: string;
+    operation: "retrieve" | "analyze";
+    status: "completed" | "failed" | "cancelled";
+    latencyMs: number;
+    result?: JsonValue;
+    failureCode?: string;
+    failureMessage?: string;
+    truncated: boolean;
+  };
   "model.requested": {
     modelCallId: string;
     callIndex: number;
