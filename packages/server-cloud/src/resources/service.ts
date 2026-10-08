@@ -433,10 +433,15 @@ const server = http.createServer((request, response) => {
           payload: requestedAudit(parsed) });
       }
       const value = await dispatch(parsed, controller.signal);
-      if (auditIdentity) await repository.appendEvent(auditIdentity, { eventType: "operation.completed",
-        ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}), ...(parsed.sourceRun ? { runId: parsed.sourceRun } : {}),
-        ...(parsed.requestId ? { requestId: parsed.requestId } : {}), ...(resourceId ? { resourceId } : {}),
-        payload: await completedAudit(auditIdentity, parsed, value) });
+      try {
+        if (auditIdentity) await repository.appendEvent(auditIdentity, { eventType: "operation.completed",
+          ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}), ...(parsed.sourceRun ? { runId: parsed.sourceRun } : {}),
+          ...(parsed.requestId ? { requestId: parsed.requestId } : {}), ...(resourceId ? { resourceId } : {}),
+          payload: await completedAudit(auditIdentity, parsed, value) });
+      } catch (error) {
+        if (parsed.action !== "process_run" && parsed.action !== "process_read") throw error;
+        throw new ResourceError("RESOURCE_AUDIT_PERSISTENCE_FAILED", "Execution returned, but its audit evidence could not be saved. Do not repeat the command automatically.", 503);
+      }
       response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
     } catch (error) {
       const failure = error instanceof ResourceError ? error : new ResourceError("RESOURCE_SERVICE_FAILED", "Resource service operation failed.", 503);

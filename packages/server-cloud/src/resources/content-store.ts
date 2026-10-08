@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, chown, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, chmod, chown, lstat, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { assertSha256Digest } from "@daoyin/harness-contracts";
 
@@ -27,15 +28,37 @@ export class FileContentStore implements ContentStore {
     if (!path.isAbsolute(root)) throw Object.assign(new Error("Content store root must be absolute."), { code: "CONTENT_ROOT_INVALID" });
     const parsed = Number(process.env.HARNESS_CONTENT_STORE_GID ?? "");
     const sharedGid = Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
-    await mkdir(root, { recursive: true, mode: sharedGid === undefined ? 0o700 : 0o2770 });
-    if (sharedGid !== undefined) { await chown(root, -1, sharedGid); await chmod(root, 0o2770); }
-    return new FileContentStore(path.resolve(root), sharedGid);
+    const store = new FileContentStore(path.resolve(root), sharedGid);
+    await mkdir(path.dirname(store.#root), { recursive: true, mode: sharedGid === undefined ? 0o700 : 0o2770 });
+    await store.#ensureDirectory(store.#root);
+    return store;
   }
 
   async #ensureDirectory(directory: string): Promise<void> {
-    try { await mkdir(directory, { mode: this.#sharedGid === undefined ? 0o700 : 0o2770 }); }
+    const mode = this.#sharedGid === undefined ? 0o700 : 0o2770;
+    let created = false;
+    try { await mkdir(directory, { mode }); created = true; }
     catch (error) { if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error; }
-    if (this.#sharedGid !== undefined) { await chown(directory, -1, this.#sharedGid); await chmod(directory, 0o2770); }
+    const effectiveUid = process.geteuid?.() ?? process.getuid?.();
+    const initial = await lstat(directory);
+    if (!initial.isDirectory() || (created && effectiveUid !== undefined && initial.uid !== effectiveUid)) {
+      throw Object.assign(new Error("Content directory is not a real owned directory."), { code: "CONTENT_DIRECTORY_INVALID" });
+    }
+    // Only initialize directories created by this operation. Another service may
+    // own a perfectly usable shared prefix; attempting chown/chmod would fail.
+    if (created) {
+      if (this.#sharedGid !== undefined) await chown(directory, -1, this.#sharedGid);
+      await chmod(directory, mode);
+    }
+    const current = await lstat(directory);
+    const ownershipMatches = this.#sharedGid === undefined
+      ? effectiveUid === undefined || current.uid === effectiveUid
+      : current.gid === this.#sharedGid;
+    if (!current.isDirectory() || !ownershipMatches || (current.mode & 0o7777) !== mode) {
+      throw Object.assign(new Error("Content directory permissions do not match its configured access boundary."), { code: "CONTENT_DIRECTORY_PERMISSIONS" });
+    }
+    // Mode bits alone do not prove this process can use the configured group.
+    await access(directory, constants.R_OK | constants.W_OK | constants.X_OK);
   }
 
   public async put(content: Uint8Array): Promise<{ digest: string; size: number }> {

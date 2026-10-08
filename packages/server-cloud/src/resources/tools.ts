@@ -112,6 +112,7 @@ const NETWORK_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   WORKSPACE_SUBNET_POOL_INVALID: "云端工作区地址池配置无效，命令未能启动。需要先修复运行环境。",
   WORKSPACE_SUBNET_POOL_EXHAUSTED: "云端工作区网络地址池已耗尽，命令未能启动。需要先配置可用的工作区地址池。",
   WORKSPACE_NETWORK_CREATE_FAILED: "云端未能创建隔离网络，命令未能启动。需要先修复运行环境。",
+  RESOURCE_AUDIT_PERSISTENCE_FAILED: "云端执行已返回，但回执保存失败；命令可能已完成。为避免重复执行，本轮不再自动运行命令，需要先修复审计存储。",
 };
 
 const RESOURCE_INPUT_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
@@ -166,7 +167,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             }
             if (!Object.hasOwn(NETWORK_FAILURE_MESSAGES, error.code)) throw error;
             await ensureActive(identity, signal);
-            if (startsProcess && workspaceId) blockedProcessWorkspaces.set(workspaceId, error.code);
+            if (workspaceId && (startsProcess || error.code === "RESOURCE_AUDIT_PERSISTENCE_FAILED")) blockedProcessWorkspaces.set(workspaceId, error.code);
             return { ok: false, code: error.code, message: NETWORK_FAILURE_MESSAGES[error.code]!, retryable: false };
           }
           await ensureActive(identity, signal);

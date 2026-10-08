@@ -131,7 +131,7 @@ def prepare(release: pathlib.Path) -> dict[str, object]:
     CONFIG.mkdir(mode=0o750, parents=True, exist_ok=True)
     os.chown(CONFIG, 0, resource_gid)
     for directory, mode, uid, gid in [
-        (STATE, 0o710, 0, resource_gid), (STATE / "content", 0o700, account.pw_uid, resource_gid),
+        (STATE, 0o710, 0, resource_gid), (STATE / "content", 0o2770, account.pw_uid, resource_gid),
         (STATE / "workspaces", 0o711, 0, executor_gid), (STATE / "disks", 0o700, 0, executor_gid),
         (STATE / "builds", 0o700, builder.pw_uid, builder_gid), (STATE / "deployments", 0o700, 0, executor_gid),
     ]:
