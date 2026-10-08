@@ -29,7 +29,7 @@ const runtimeSource = resolve('.cache/cloud-release', revision);
 const runtimeDestination = join(root, 'releases', revision);
 const resourceDestination = join('/opt/daoyin-resources/releases', revision);
 const runtimeLink = join(root, 'current');
-const units = ['daoyin-resource-executor.service', 'daoyin-resource-deployer.service'];
+const units = ['daoyin-resource-executor.service', 'daoyin-resource-deployer.service', 'daoyin-resources.service'];
 const overrides = units.map(unit => `/etc/systemd/system/${unit}.d/90-harness-kernel.conf`);
 const poolConfiguration = '/etc/daoyin-resources/workspace-subnet-pool.env';
 const changedFiles = [...overrides, poolConfiguration];
@@ -44,7 +44,7 @@ async function verify(path, resource = false) {
   for (const [name, expected] of Object.entries(manifest.files ?? {})) {
     if (!/^[A-Za-z0-9_.-]+$/.test(name) || digest(await readFile(join(path, name))) !== expected) throw new Error('Artifact integrity mismatch.');
   }
-  if (!manifest.files?.[resource ? 'executor.mjs' : 'main.mjs'] || (resource && !manifest.files['deployment.mjs'])) throw new Error('Missing release entry.');
+  if (!manifest.files?.[resource ? 'executor.mjs' : 'main.mjs'] || (resource && (!manifest.files['deployment.mjs'] || !manifest.files['service.mjs']))) throw new Error('Missing release entry.');
   return manifest;
 }
 async function replaceLink(path, target) {
@@ -63,7 +63,7 @@ async function health(timeoutMs = 5000) {
   return response.status === 200 && (await response.json()).status === 'ready';
 }
 async function resourceHealth(timeoutMs = 60000) {
-  for (const unit of [...units, 'daoyin-resources.service']) {
+  for (const unit of units) {
     if (run('systemctl', ['is-active', unit]).trim() !== 'active') throw new Error('Resource control service is inactive.');
   }
   return new Promise((resolve, reject) => {
@@ -119,7 +119,7 @@ for (const network of networks) for (const configuration of network.IPAM.Config 
   if (!overlapsPool(occupied)) continue;
   const workspace = network.Labels?.['daoyin.harness.workspace'];
   const expectedName = typeof workspace === 'string' ? 'harness-ws-' + digest(workspace).slice(0, 24) : '';
-  if (!previousOverrides[2]?.includes(`HARNESS_WORKSPACE_SUBNET_POOL=${subnetPool}\n`) || network.Internal !== true ||
+  if (!previousOverrides.at(-1)?.includes(`HARNESS_WORKSPACE_SUBNET_POOL=${subnetPool}\n`) || network.Internal !== true ||
       network.Labels?.['daoyin.harness.egress'] !== 'workspace-controlled' || !/^wsp_[a-f0-9]{24}$/.test(workspace ?? '') ||
       network.Name !== expectedName || !/\/24$/.test(configuration.Subnet) || occupied.start < subnetRange.start || occupied.end > subnetRange.end) {
     throw new Error('Dedicated pool overlaps an unrelated network.');
@@ -171,7 +171,7 @@ try {
   await assertIdle();
   await atomicFile(poolConfiguration, `HARNESS_WORKSPACE_SUBNET_POOL=${subnetPool}\n`);
   for (let index = 0; index < units.length; index++) {
-    const entry = index === 0 ? 'executor.mjs' : 'deployment.mjs';
+    const entry = ['executor.mjs', 'deployment.mjs', 'service.mjs'][index];
     await atomicFile(overrides[index], `[Service]\nExecStart=\nExecStart=${node} ${resourceDestination}/${entry}\nEnvironmentFile=${poolConfiguration}\n`);
   }
   run('systemctl', ['daemon-reload']);

@@ -17,6 +17,8 @@ File schemas describe workspace-relative paths and require omission of the root 
 
 Subsequent component deployments may reuse networks inside the already configured dedicated pool only when their internal isolation, workspace label, hashed name and /24 subnet match. Overlapping routes must belong to the same verified bridge and fit that subnet. Foreign overlap still blocks deployment; no existing network is removed or renumbered.
 
+The real CSV task on `c238343843ae280824615992d006ea99555fd01a` executed successfully and its independent arithmetic check passed, but immutable artifact verification exposed PostgreSQL `int8` byte counts returned as strings. Normalize only artifact byte-count reads into non-negative safe integers; reject invalid metadata without a global database type parser. Deploy the resource control entry point through the same fixed-release drop-in as its workers, leaving the proxy release symlink unchanged. This requires no data migration.
+
 ## Acceptance
 
 Use the ordinary account BFF and actual model/tools/persistence path. The Agent must itself execute its program successfully inside gVisor before independent output, input integrity, snapshot and artifact checks. Source/type/lint checks are not behavior evidence. No mock or legacy deterministic suite is an acceptance gate.

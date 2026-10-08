@@ -33,6 +33,18 @@ const canonical = (value: unknown): string => Array.isArray(value) ? `[${value.m
   : value !== null && typeof value === "object" ? `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`
     : JSON.stringify(value) ?? "null";
 
+type ArtifactRow = Omit<Artifact, "size"> & { size: unknown };
+
+/** pg returns int8 columns as strings; normalize only this public byte-count field. */
+function artifactValue(row: ArtifactRow): Artifact {
+  const size = typeof row.size === "number" ? row.size :
+    typeof row.size === "string" && /^(?:0|[1-9][0-9]*)$/u.test(row.size) ? Number(row.size) : NaN;
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new ResourceError("ARTIFACT_METADATA_INVALID", "Artifact byte count is outside the supported integer range.", 503);
+  }
+  return { ...row, size };
+}
+
 function safeSymlink(entryPath: string, target: string): void {
   if (!target || target.includes("\0") || path.posix.isAbsolute(target)) throw new ResourceError("WORKSPACE_SYMLINK_INVALID", "Symbolic link target must be workspace-relative.");
   const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(entryPath), target));
@@ -308,11 +320,11 @@ export class ResourceRepository {
 
   public async artifact(identity: ExecutionIdentity, artifactId: string): Promise<Artifact> {
     assertResourceId(artifactId, "art");
-    const row = (await this.pool.query<Artifact>(`SELECT ${resourceColumns},a.workspace_id AS "workspaceId",a.snapshot_id AS "snapshotId",
+    const row = (await this.pool.query<ArtifactRow>(`SELECT ${resourceColumns},a.workspace_id AS "workspaceId",a.snapshot_id AS "snapshotId",
       a.media_type AS "mediaType",a.size_bytes AS size,a.blob_hash AS "blobHash",a.metadata
       FROM harness_resources r JOIN harness_artifacts a ON a.resource_id=r.id WHERE r.id=$1 AND r.owner_key=$2`, [artifactId, ownerKey(identity)])).rows[0];
     if (!row) throw new ResourceError("ARTIFACT_NOT_FOUND", "Artifact does not exist or is not available to this account.", 404);
-    return row;
+    return artifactValue(row);
   }
 
   public async artifactContent(identity: ExecutionIdentity, artifactId: string, maximumBytes: number): Promise<{ artifact: Artifact; content: Buffer }> {
@@ -322,10 +334,10 @@ export class ResourceRepository {
 
   public async artifacts(identity: ExecutionIdentity, workspaceId: string): Promise<Artifact[]> {
     await this.workspace(identity, workspaceId);
-    return (await this.pool.query<Artifact>(`SELECT ${resourceColumns},a.workspace_id AS "workspaceId",a.snapshot_id AS "snapshotId",
+    return (await this.pool.query<ArtifactRow>(`SELECT ${resourceColumns},a.workspace_id AS "workspaceId",a.snapshot_id AS "snapshotId",
       a.media_type AS "mediaType",a.size_bytes AS size,a.blob_hash AS "blobHash",a.metadata
       FROM harness_resources r JOIN harness_artifacts a ON a.resource_id=r.id
-      WHERE r.owner_key=$1 AND a.workspace_id=$2 ORDER BY r.created_at DESC,r.id DESC LIMIT 100`, [ownerKey(identity), workspaceId])).rows;
+      WHERE r.owner_key=$1 AND a.workspace_id=$2 ORDER BY r.created_at DESC,r.id DESC LIMIT 100`, [ownerKey(identity), workspaceId])).rows.map(artifactValue);
   }
 
   public async createDeployment(identity: ExecutionIdentity, input: { workspaceId: string; artifactId: string; operationId: string; endpoint?: string; previousDeploymentId?: string }): Promise<Deployment> {
