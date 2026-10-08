@@ -112,10 +112,24 @@ const subnetRange = range(subnetPool);
 const routes = JSON.parse(run('ip', ['-json', '-4', 'route', 'show', 'table', 'all']));
 const networkIds = run('docker', ['network', 'ls', '-q']).trim().split(/\s+/).filter(Boolean);
 const networks = networkIds.length ? JSON.parse(run('docker', ['network', 'inspect', ...networkIds])) : [];
-for (const cidr of [...routes.map(item => item.dst).filter(value => value && value !== 'default'),
-  ...networks.flatMap(item => (item.IPAM.Config ?? []).map(config => config.Subnet).filter(Boolean))]) {
-  const occupied = range(cidr);
-  if (occupied && subnetRange.start <= occupied.end && subnetRange.end >= occupied.start) throw new Error('Dedicated pool overlaps an existing route or network.');
+const overlapsPool = occupied => occupied && subnetRange.start <= occupied.end && subnetRange.end >= occupied.start;
+const managed = [];
+for (const network of networks) for (const configuration of network.IPAM.Config ?? []) {
+  const occupied = range(configuration.Subnet ?? '');
+  if (!overlapsPool(occupied)) continue;
+  const workspace = network.Labels?.['daoyin.harness.workspace'];
+  const expectedName = typeof workspace === 'string' ? 'harness-ws-' + digest(workspace).slice(0, 24) : '';
+  if (!previousOverrides[2]?.includes(`HARNESS_WORKSPACE_SUBNET_POOL=${subnetPool}\n`) || network.Internal !== true ||
+      network.Labels?.['daoyin.harness.egress'] !== 'workspace-controlled' || !/^wsp_[a-f0-9]{24}$/.test(workspace ?? '') ||
+      network.Name !== expectedName || !/\/24$/.test(configuration.Subnet) || occupied.start < subnetRange.start || occupied.end > subnetRange.end) {
+    throw new Error('Dedicated pool overlaps an unrelated network.');
+  }
+  managed.push({ ...occupied, device: 'br-' + network.Id.slice(0, 12) });
+}
+for (const route of routes) {
+  const occupied = range(route.dst ?? '');
+  if (overlapsPool(occupied) && !managed.some(network => route.dev === network.device &&
+      occupied.start >= network.start && occupied.end <= network.end)) throw new Error('Dedicated pool overlaps an unrelated route.');
 }
 if (run('docker', ['ps', '--filter', 'label=daoyin.harness.resource=1', '--format', '{{.Names}}']).trim()) {
   throw new Error('Active Harness sandbox processes exist; no switch performed.');

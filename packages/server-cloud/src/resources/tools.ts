@@ -8,8 +8,12 @@ import { RESOURCE_TOOL_NAMES, type ResourceControlRequest, type ResourceToolName
 
 const object = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({ type: "object", additionalProperties: false, properties, required });
 const id = { type: "string", pattern: "^(?:res|wsp|snp|art|dep|prc)_[a-f0-9]{24}$" };
-const workspaceId = { type: "string", pattern: "^wsp_[a-f0-9]{24}$" };
-const path = { type: "string", minLength: 1, maxLength: 512 };
+const workspaceId = { type: "string", pattern: "^wsp_[a-f0-9]{24}$",
+  description: "Use a real workspace ID from this session's attached resources or workspace_create; never invent one. Call resource_list if unknown." };
+const WORKSPACE_PATH_PATTERN = "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.{1,2}(?:/|$)).{1,512}$";
+const workspacePath = new RegExp(WORKSPACE_PATH_PATTERN, "u");
+const path = { type: "string", minLength: 1, maxLength: 512, pattern: WORKSPACE_PATH_PATTERN,
+  description: "Workspace-relative path, for example input.csv or src/app.py. No leading slash, dot segments, backslashes or drive letters. To list or search the workspace root, omit path." };
 const cwd = { type: "string", pattern: "^(?:\\.|(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).{1,512})$" };
 const processMode = { type: "string", enum: ["foreground", "background", "pty"] };
 const workspaceSource = { oneOf: [
@@ -29,14 +33,14 @@ const deploymentSpec = object({
 }, ["version", "kind", "command", "transport", "health", "environment", "resourceIds"]);
 
 export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { description: string; mutating: boolean; inputSchema: Record<string, unknown> }>> = {
-  resource_list: { description: "List resources available to the account and resources attached to this session.", mutating: false, inputSchema: object({ sessionId: { type: "string", maxLength: 160 } }) },
+  resource_list: { description: "Discover real resource IDs available to the account and attached to this session. Use the attached workspace IDs for file, Git and process calls; never guess them.", mutating: false, inputSchema: object({ sessionId: { type: "string", maxLength: 160 } }) },
   resource_attach: { description: "Attach an owned resource to the current session.", mutating: true, inputSchema: object({ resourceId: id }, ["resourceId"]) },
   resource_detach: { description: "Detach a resource from the current session without deleting it.", mutating: true, inputSchema: object({ resourceId: id }, ["resourceId"]) },
   workspace_create: { description: "Create a language- and task-neutral cloud workspace from an empty tree, credential-free HTTPS Git source at an explicit revision, upload artifact or existing snapshot. runtimeId is required: choose node22, python313, go125 or rust190; use node22 only when no language was requested.", mutating: true, inputSchema: object({ title: { type: "string", minLength: 1, maxLength: 120 }, source: workspaceSource, runtimeId: { type: "string", enum: ["node22", "python313", "go125", "rust190"] } }, ["title", "source", "runtimeId"]) },
   workspace_inspect: { description: "Inspect one attached workspace, runtime, limits and snapshots.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   workspace_snapshot: { description: "Create an immutable content-addressed snapshot of the current workspace.", mutating: true, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   workspace_restore: { description: "Restore an attached workspace to one of its immutable snapshots.", mutating: true, inputSchema: object({ workspaceId, snapshotId: { type: "string", pattern: "^snp_[a-f0-9]{24}$" } }, ["workspaceId", "snapshotId"]) },
-  file_list: { description: "List files and directories inside an attached workspace.", mutating: false, inputSchema: object({ workspaceId, path, glob: { type: "string", maxLength: 256 } }, ["workspaceId"]) },
+  file_list: { description: "List files and directories inside an attached workspace. Omit path for the workspace root; never use / or . as path.", mutating: false, inputSchema: object({ workspaceId, path, glob: { type: "string", maxLength: 256 } }, ["workspaceId"]) },
   file_stat: { description: "Read file, directory or safe symlink metadata.", mutating: false, inputSchema: object({ workspaceId, path }, ["workspaceId", "path"]) },
   file_read: { description: "Read a bounded text range or return an artifact reference for binary content.", mutating: false, inputSchema: object({ workspaceId, path, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, maximumBytes: { type: "integer", minimum: 1, maximum: 1000000 } }, ["workspaceId", "path"]) },
   file_search: { description: "Search workspace paths or text using literal, regular expression or glob matching.", mutating: false, inputSchema: object({ workspaceId, query: { type: "string", minLength: 1, maxLength: 4000 }, searchMode: { type: "string", enum: ["literal", "regex", "glob"] }, path, glob: { type: "string", maxLength: 256 } }, ["workspaceId", "query", "searchMode"]) },
@@ -66,7 +70,7 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   deployment_rollback: { description: "Roll back to a previous immutable deployment after an explicit current-turn request.", mutating: true, inputSchema: object({ deploymentId: { type: "string", pattern: "^dep_[a-f0-9]{24}$" } }, ["deploymentId"]) },
 };
 
-export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all cloud development and artifact tasks. A session may attach multiple resources; every file, Git and process call must name the intended workspaceId. workspace_create always requires runtimeId: Node.js uses node22, Python uses python313, Go uses go125 and Rust uses rust190; choose node22 only when the user did not specify a language. Read before editing and use snapshots for durable checkpoints. Commands run only in the workspace gVisor sandbox and accept executable plus argument arrays, never host shell text. Public network access is available through the audited egress boundary; private, loopback, metadata and platform addresses remain forbidden. Never put credentials in files, arguments or messages. Git push, deployment, payment, external writes and destructive external actions require an explicit current-turn request. A command exit code, artifact digest, deployment health event or official evaluator is the evidence of completion; do not infer success from intent.`;
+export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all cloud development and artifact tasks. A session may attach multiple resources; every file, Git and process call must name the intended workspaceId. Use IDs from the current attached-resource context or workspace_create; if unknown, first call resource_list and inspect attached, never invent an ID. File paths are workspace-relative, for example input.csv or src/app.py; omit path when listing or searching the workspace root, never use / or . as a file path. process cwd may be omitted or . for the workspace root. workspace_create always requires runtimeId: Node.js uses node22, Python uses python313, Go uses go125 and Rust uses rust190; choose node22 only when the user did not specify a language. Read before editing and use snapshots for durable checkpoints. Commands run only in the workspace gVisor sandbox and accept executable plus argument arrays, never host shell text. Public network access is available through the audited egress boundary; private, loopback, metadata and platform addresses remain forbidden. Never put credentials in files, arguments or messages. Git push, deployment, payment, external writes and destructive external actions require an explicit current-turn request. A command exit code, artifact digest, deployment health event or official evaluator is the evidence of completion; do not infer success from intent.`;
 
 function owner(identity: ExecutionIdentity): { actor: string; space: string } {
   if (identity.space.kind === "public") throw new CloudError(403, "RESOURCE_ACCOUNT_REQUIRED", "Please sign in before using cloud resources.");
@@ -110,6 +114,25 @@ const NETWORK_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   WORKSPACE_NETWORK_CREATE_FAILED: "云端未能创建隔离网络，命令未能启动。需要先修复运行环境。",
 };
 
+const RESOURCE_INPUT_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+  WORKSPACE_PATH_INVALID: "文件路径必须是工作区内的相对路径，例如 input.csv 或 src/app.py；不能使用 /、.、..、盘符或反斜杠。列出或搜索工作区根目录时省略 path；进程 cwd 可省略或使用 .。",
+  WORKSPACE_PATH_ESCAPE: "路径超出了当前工作区边界，未执行操作。请使用工作区内的相对路径；不能通过父目录或链接访问工作区之外。",
+  WORKSPACE_PATH_RESERVED: "该路径由工作区运行环境保护，不能读取或修改。请选择普通任务文件路径。",
+  RESOURCE_ID_INVALID: "资源 ID 无效，未执行操作。请先调用 resource_list，使用 attached 中的真实工作区 ID，不要编造 ID。",
+  RESOURCE_NOT_ATTACHED: "目标资源未挂载到当前会话，未执行操作。请调用 resource_list 核对当前 attached 资源和真实 ID。",
+  RESOURCE_NOT_FOUND: "当前账号无法使用该资源，未执行操作。请调用 resource_list 核对当前账号和会话可用的真实资源 ID。",
+};
+
+function invalidWorkspacePath(name: ResourceToolName, input: Record<string, unknown>): boolean {
+  if (!name.startsWith("file_") && name !== "artifact_create") return false;
+  const required = RESOURCE_DEFINITIONS[name].inputSchema.required;
+  return ["path", "from", "to"].some(key => {
+    const value = input[key];
+    if (value === undefined) return Array.isArray(required) && required.includes(key);
+    return typeof value !== "string" || value.includes("\0") || !workspacePath.test(value);
+  });
+}
+
 export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, ensureActive: (identity: ExecutionIdentity, signal?: AbortSignal) => Promise<void>): CloudToolBinding[] {
   if (identity.space.kind === "public") return [];
   const blockedProcessWorkspaces = new Map<string, string>();
@@ -124,6 +147,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
         async execute(input, signal) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");
           await ensureActive(identity, signal);
+          if (invalidWorkspacePath(name, input)) return { ok: false, code: "WORKSPACE_PATH_INVALID", message: RESOURCE_INPUT_FAILURE_MESSAGES.WORKSPACE_PATH_INVALID!, retryable: false };
           const startsProcess = name === "process_run" || name === "process_start";
           const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : undefined;
           const blockedCode = startsProcess && workspaceId ? blockedProcessWorkspaces.get(workspaceId) : undefined;
@@ -135,7 +159,12 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             // Preserve only independently specified infrastructure failures. The
             // registry still hides all other remote errors and arbitrary text.
             if (signal?.aborted) throw error;
-            if (!(error instanceof CloudError) || !Object.hasOwn(NETWORK_FAILURE_MESSAGES, error.code)) throw error;
+            if (!(error instanceof CloudError)) throw error;
+            if (Object.hasOwn(RESOURCE_INPUT_FAILURE_MESSAGES, error.code)) {
+              await ensureActive(identity, signal);
+              return { ok: false, code: error.code, message: RESOURCE_INPUT_FAILURE_MESSAGES[error.code]!, retryable: false };
+            }
+            if (!Object.hasOwn(NETWORK_FAILURE_MESSAGES, error.code)) throw error;
             await ensureActive(identity, signal);
             if (startsProcess && workspaceId) blockedProcessWorkspaces.set(workspaceId, error.code);
             return { ok: false, code: error.code, message: NETWORK_FAILURE_MESSAGES[error.code]!, retryable: false };

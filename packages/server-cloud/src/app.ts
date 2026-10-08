@@ -4,6 +4,7 @@ import { createProjectTools, PROJECT_INSTRUCTIONS, cancelProjectRun } from "./pr
 import { registerProjectRoutes } from "./projects/routes.js";
 import { cancelResourceRun, createResourceTools, RESOURCE_INSTRUCTIONS } from "./resources/tools.js";
 import { registerResourceRoutes } from "./resources/routes.js";
+import { attachedWorkspaceContext } from "./resources/session-context.js";
 import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createCloudOrchestrationTools, validateCloudOrchestrationInput } from "./cloud-orchestration.js";
 export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
@@ -381,6 +382,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     };
     resumeRunDeadline();
     const done = (async () => {
+      let preparingWorkspaceContext = false;
       try {
         const bound = await options.repository.bindRun(identity, run.sessionId, run.id);
         const stores: BoundRunStores = { ...bound, events: {
@@ -649,9 +651,13 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: maxModelCalls, maxToolCalls: 24,
         });
+        preparingWorkspaceContext = resourceBindings.length > 0;
+        const workspaceContext = resourceBindings.length ? await attachedWorkspaceContext(identity, run.sessionId, controller.signal) : undefined;
+        preparingWorkspaceContext = false;
         await engine.runTurn({
           accountId: stores.accountId, scopeId: stores.scopeId, sessionId: run.sessionId, turnId: run.id,
           userMessage: run.userMessage, executionIdentity: identity, signal: controller.signal,
+          ...(workspaceContext === undefined ? {} : { systemInstruction: workspaceContext }),
         });
         runSpan.end({ attributes: { "daoyin.model.calls": modelCalls, "daoyin.tool.calls": toolCalls } });
       } catch (error) {
@@ -674,6 +680,13 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
               sessionId: run.sessionId, turnId: run.id,
               payload: { status: "cancelled", source: controller.signal.reason === "runtime" ? "runtime" : "user", lastCompletedEventSeq: current.lastEventSeq },
             });
+          } else if (current.status === "running" && preparingWorkspaceContext) {
+            const stores = await options.repository.bindRun(identity, run.sessionId, run.id);
+            const message = "读取当前会话工作区失败，本轮未开始工作区操作。请检查当前账号的工作区连接后重试。";
+            const fields = { accountId: stores.accountId, scopeId: stores.scopeId, sessionId: run.sessionId, turnId: run.id };
+            await stores.events.append({ ...fields, type: "turn.started", payload: { status: "running", userMessageId: `msg_${randomUUID()}`, userMessage: run.userMessage } });
+            await stores.events.append({ ...fields, type: "assistant.delta", payload: { contentBlockId: `block_${randomUUID()}`, delta: message } });
+            await stores.events.append({ ...fields, type: "turn.failed", payload: { status: "failed", assistantMessageId: `msg_${randomUUID()}`, code: "RESOURCE_CONTEXT_UNAVAILABLE", outcomeSummary: message } });
           } else if (current.status === "running") {
             // Unknown external outcomes must never be automatically replayed.
             await options.repository.interruptRun(identity, run.id, "runtime_recovery");

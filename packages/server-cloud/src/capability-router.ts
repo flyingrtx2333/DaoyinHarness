@@ -211,6 +211,14 @@ function explicitPackIds(message: string, packs: readonly CapabilityPackManifest
   if (hasNonNegatedMatch(normalized, gitIntent)) {
     for (const pack of packs) if (pack.toolNames.some((name) => name.startsWith("git_"))) selected.add(pack.id);
   }
+  // A task that explicitly runs workspace code needs its authorized process
+  // tools even when lexical/semantic ranking otherwise favors file editing.
+  // Capability search can add only read-only packs, so it cannot repair this later.
+  const processContext = /(?:\b(?:python[\d.]*|node(?:js)?|pytest|npm|pip|cargo|rust|go|scripts?|programs?|commands?|dependencies|code|workspace|sandbox)\b|\.(?:py|js|mjs|cjs|ts|sh)\b|程序|脚本|命令|依赖|代码|工作区|沙箱)/iu;
+  const processIntent = /(?:\b(?:run|execute|start|test|install)\b|运行(?!状态|进度|情况|历史|记录)|执行(?!状态|进度|情况|历史|记录)|启动|测试|安装)/giu;
+  if (processContext.test(normalized) && hasNonNegatedMatch(normalized, processIntent)) {
+    for (const pack of packs) if (pack.toolNames.includes("process_run")) selected.add(pack.id);
+  }
   return selected;
 }
 function bm25(query: string, packs: readonly CapabilityPackManifest[]): CapabilityPackManifest[] {
@@ -338,10 +346,8 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
   const eligibilityMs = elapsed(eligibilityStarted), retrievalStarted = performance.now();
   const clauses = splitCapabilityIntents(input.message);
   const semanticSignal = AbortSignal.any([input.signal, AbortSignal.timeout(1_500)]);
-  let vectorScores: Readonly<Record<string, number>> = {};
   let fallback: CapabilityRouteDecision["fallback"] = "none";
   const lexicalRanked = rank(input.message, clauses, eligible, (input.continuity ?? "").slice(0, 1_500));
-  let semantic: CapabilitySemanticResult | undefined;
   const vectorTask = input.semantic?.retrieve && eligible.length ? input.semantic.retrieve({
     query: input.message, clauses, candidates: eligible, signal: semanticSignal,
   }).then((scores) => {
@@ -367,7 +373,7 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
       }
       return value;
     }).catch(() => { fallback = "lexical" as const; return undefined; }) : Promise.resolve(undefined);
-  [vectorScores, semantic] = await Promise.all([vectorTask, semanticTask]);
+  const [vectorScores, semantic] = await Promise.all([vectorTask, semanticTask]);
   if (!input.semantic && fallback === "none") fallback = "lexical";
   const ranked = rank(input.message, clauses, eligible,
     (input.continuity ?? "").slice(0, 1_500), vectorScores);
