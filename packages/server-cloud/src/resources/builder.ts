@@ -61,7 +61,9 @@ async function build(request: BuildRequest): Promise<Record<string, unknown>> {
   try {
     const result = await execute("/usr/bin/buildctl", ["--addr", BUILDKIT, "build", "--frontend", "dockerfile.v0",
       "--local", `context=${context}`, "--local", `dockerfile=${path.dirname(dockerfile)}`, "--opt", `filename=${path.basename(dockerfile)}`,
-      "--output", `type=oci,dest=${output}`, "--progress", "plain"], Math.min(request.timeoutMs ?? 600_000, 600_000));
+      // The executor imports with docker load, whose classic image store expects
+      // a Docker-layout archive rather than an OCI-layout archive.
+      "--output", `type=docker,dest=${output}`, "--progress", "plain"], Math.min(request.timeoutMs ?? 600_000, 600_000));
     const info = await stat(output); if (!info.isFile() || info.size > 2 * 1024 * 1024 * 1024) throw new ResourceError("OCI_IMAGE_LIMIT", "Built OCI image exceeds the limit.", 413);
     return { archive: output, archiveDigest: await digest(output), size: info.size, log: `${result.stdout}${result.stderr}`.slice(-200_000) };
   } catch (error) { await rm(output, { force: true }); throw error; }
