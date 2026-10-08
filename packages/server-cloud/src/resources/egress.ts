@@ -65,43 +65,78 @@ async function audit(value: Grant | undefined, hostname: string, targetPort: num
 
 const server = http.createServer((request, response) => { void (async () => {
   let value: Grant | undefined; let hostname = "invalid"; let targetPort = 80; let sent = 0; let received = 0;
+  let upstream: http.ClientRequest | undefined; let upstreamReply: http.IncomingMessage | undefined; let audited = false;
+  const completed = (decision: "allowed" | "denied", reason?: string): void => {
+    if (audited) return; audited = true;
+    void audit(value, hostname, targetPort, request.method ?? null, sent, received, decision, reason);
+  };
+  const disconnect = (): void => { upstream?.destroy(); upstreamReply?.destroy(); };
+  request.on("error", (error) => { disconnect(); response.destroy(); completed("denied", error.message); });
+  request.once("aborted", () => { disconnect(); response.destroy(); completed("denied", "client disconnected"); });
+  response.on("error", (error) => { disconnect(); response.destroy(); completed("denied", error.message); });
+  response.once("close", () => { disconnect(); if (!response.writableFinished) completed("denied", "client disconnected"); });
   try {
     value = grant(request); const target = new URL(request.url ?? "");
     if (target.protocol !== "http:") throw new Error("only absolute HTTP proxy requests are accepted");
     hostname = target.hostname; targetPort = Number(target.port || 80); const resolved = await destination(hostname);
+    if (response.destroyed) return;
     const headers: Record<string, string | string[] | undefined> = { ...request.headers, host: target.host };
     delete headers["proxy-authorization"]; delete headers["proxy-connection"];
-    const upstream = http.request({ protocol: "http:", hostname, port: targetPort, method: request.method, path: `${target.pathname}${target.search}`,
+    upstream = http.request({ protocol: "http:", hostname, port: targetPort, method: request.method, path: `${target.pathname}${target.search}`,
       headers, lookup: (_host, _options, callback) => callback(null, resolved.address, resolved.family) }, (reply) => {
+      upstreamReply = reply;
+      reply.on("error", (error) => { disconnect(); response.destroy(); completed("denied", error.message); });
+      reply.once("aborted", () => { disconnect(); response.destroy(); completed("denied", "upstream disconnected"); });
+      if (response.destroyed) { disconnect(); return; }
       response.writeHead(reply.statusCode ?? 502, reply.headers);
       reply.on("data", (chunk: Buffer) => { received += chunk.byteLength; }); reply.pipe(response);
-      reply.once("end", () => { void audit(value, hostname, targetPort, request.method ?? null, sent, received, "allowed"); });
+      reply.once("end", () => { completed("allowed"); });
     });
-    upstream.once("error", (error) => { if (!response.headersSent) response.writeHead(502); response.end(); void audit(value, hostname, targetPort, request.method ?? null, sent, received, "denied", error.message); });
+    upstream.on("error", (error) => {
+      completed("denied", error.message); upstreamReply?.destroy();
+      if (!response.destroyed && !response.writableEnded) { if (!response.headersSent) response.writeHead(502); response.end(); }
+    });
     request.on("data", (chunk: Buffer) => { sent += chunk.byteLength; }); request.pipe(upstream);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "egress denied"; response.writeHead(403).end("Egress destination denied.\n");
-    await audit(value, hostname, targetPort, request.method ?? null, sent, received, "denied", reason);
+    const reason = error instanceof Error ? error.message : "egress denied";
+    if (!response.destroyed && !response.writableEnded) { if (!response.headersSent) response.writeHead(403); response.end("Egress destination denied.\n"); }
+    completed("denied", reason);
   }
 })(); });
 
 server.on("connect", (request, client, head) => { void (async () => {
   let value: Grant | undefined; let hostname = "invalid"; let targetPort = 443; let sent = head.byteLength; let received = 0;
+  let upstream: net.Socket | undefined; let audited = false;
+  const completed = (decision: "allowed" | "denied", reason?: string): void => {
+    if (audited) return; audited = true;
+    void audit(value, hostname, targetPort, "CONNECT", sent, received, decision, reason);
+  };
+  client.on("error", (error) => { completed("denied", error.message); upstream?.destroy(); client.destroy(); });
+  client.once("close", () => { upstream?.destroy(); });
   try {
     value = grant(request); const separator = (request.url ?? "").lastIndexOf(":");
     if (separator < 1) throw new Error("CONNECT destination is invalid");
     hostname = request.url!.slice(0, separator).replace(/^\[|\]$/gu, ""); targetPort = Number(request.url!.slice(separator + 1));
     if (!Number.isSafeInteger(targetPort) || targetPort < 1 || targetPort > 65535) throw new Error("CONNECT port is invalid");
-    const resolved = await destination(hostname); const upstream = net.connect({ host: resolved.address, port: targetPort, family: resolved.family });
-    upstream.once("connect", () => { client.write("HTTP/1.1 200 Connection Established\r\n\r\n"); if (head.length) upstream.write(head); client.pipe(upstream); upstream.pipe(client); });
+    const resolved = await destination(hostname);
+    if (client.destroyed) return;
+    upstream = net.connect({ host: resolved.address, port: targetPort, family: resolved.family });
+    const connected = upstream;
+    connected.once("connect", () => {
+      if (client.destroyed) { connected.destroy(); return; }
+      client.write("HTTP/1.1 200 Connection Established\r\n\r\n"); if (head.length) connected.write(head); client.pipe(connected); connected.pipe(client);
+    });
     client.on("data", (chunk: Buffer) => { sent += chunk.byteLength; }); upstream.on("data", (chunk: Buffer) => { received += chunk.byteLength; });
-    const completed = (): void => { void audit(value, hostname, targetPort, "CONNECT", sent, received, "allowed"); };
-    upstream.once("close", completed); upstream.once("error", (error) => { client.destroy(); void audit(value, hostname, targetPort, "CONNECT", sent, received, "denied", error.message); });
+    upstream.once("close", () => { completed("allowed"); client.destroy(); });
+    upstream.on("error", (error) => { completed("denied", error.message); client.destroy(); });
   } catch (error) {
-    client.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
-    await audit(value, hostname, targetPort, "CONNECT", sent, received, "denied", error instanceof Error ? error.message : "egress denied");
+    if (!client.destroyed && !client.writableEnded) client.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    completed("denied", error instanceof Error ? error.message : "egress denied");
   }
 })(); });
+
+// HTTP parser sockets can fail before a request or CONNECT handler exists.
+server.on("connection", (socket) => { socket.on("error", () => { socket.destroy(); }); });
 
 server.listen(port, "0.0.0.0");
 async function close(): Promise<void> { await new Promise<void>((resolve) => server.close(() => resolve())); await pool.end(); }
