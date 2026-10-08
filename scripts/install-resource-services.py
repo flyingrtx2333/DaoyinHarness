@@ -227,7 +227,7 @@ Requires=daoyin-resource-buildkit.service
 Type=simple
 User=daoyin-resource-builder
 Group=daoyin-resource-builder
-SupplementaryGroups=daoyin-agent
+SupplementaryGroups=daoyin-agent daoyin-resources
 EnvironmentFile={CONFIG / 'service.env'}
 Environment=HARNESS_BUILDKIT_ADDRESS=unix:///run/daoyin-buildkit/buildkitd.sock
 RuntimeDirectory=daoyin-resource-builder
