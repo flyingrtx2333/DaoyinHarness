@@ -62,7 +62,7 @@ async function health() {
   const response = await fetch('http://127.0.0.1:4700/health/ready', { redirect: 'error', signal: AbortSignal.timeout(5000) });
   return response.status === 200 && (await response.json()).status === 'ready';
 }
-async function resourceHealth() {
+async function resourceHealth(timeoutMs = 60000) {
   for (const unit of [...units, 'daoyin-resources.service']) {
     if (run('systemctl', ['is-active', unit]).trim() !== 'active') throw new Error('Resource control service is inactive.');
   }
@@ -73,9 +73,18 @@ async function resourceHealth() {
       response.on('end', () => { try { const value = JSON.parse(body); if (response.statusCode !== 200 || value.ready !== true) throw new Error('Resource readiness failed.'); resolve(true); } catch { reject(new Error('Resource readiness failed.')); } });
       response.on('error', reject);
     });
-    request.setTimeout(60000, () => request.destroy(new Error('Resource readiness timeout.')));
+    request.setTimeout(timeoutMs, () => request.destroy(new Error('Resource readiness timeout.')));
     request.on('error', reject); request.end(JSON.stringify({ action: 'readiness' }));
   });
+}
+async function waitReady(probe, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try { if (await probe(Math.min(60000, deadline - Date.now()))) return true; }
+    catch { /* A systemd active process can still be creating its socket. */ }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return false;
 }
 function range(cidr) {
   const [address, prefix = '32'] = cidr.split('/');
@@ -154,15 +163,10 @@ try {
   run('systemctl', ['restart', ...units]);
   run('systemctl', ['start', 'daoyin-resources.service']);
   for (const unit of units) if (run('systemctl', ['is-active', unit]).trim() !== 'active') throw new Error('Resource service failed to start.');
-  await resourceHealth();
+  if (!await waitReady(resourceHealth, 90000)) throw new Error('Candidate resources failed readiness.');
   await replaceLink(runtimeLink, runtimeDestination);
   run('systemctl', ['start', 'daoyin-harness-cloud.service']);
-  let ready = false;
-  for (let attempt = 0; attempt < 20; attempt++) {
-    try { if (await health()) { ready = true; break; } } catch { /* Bounded startup readiness polling. */ }
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  if (!ready) throw new Error('Candidate runtime failed readiness.');
+  if (!await waitReady(health, 20000)) throw new Error('Candidate runtime failed readiness.');
   if (await readlink('/opt/daoyin-resources/current') !== report.previous.resourceCurrent) throw new Error('Unexpected resource proxy release change.');
   report.phase = 'deployed'; report.completedAt = new Date().toISOString(); await save();
   console.log(JSON.stringify({ ...report, journal }));
@@ -178,7 +182,9 @@ try {
       run('systemctl', ['daemon-reload']); run('systemctl', ['restart', ...units]);
       run('systemctl', ['start', 'daoyin-resources.service']);
       await replaceLink(runtimeLink, previousRuntime); run('systemctl', ['start', 'daoyin-harness-cloud.service']);
-      report.rollback = await health() ? 'previous-components-restored-and-ready' : 'previous-components-restored-readiness-unconfirmed';
+      const resourcesReady = await waitReady(resourceHealth, 90000);
+      const runtimeReady = await waitReady(health, 20000);
+      report.rollback = resourcesReady && runtimeReady ? 'previous-components-restored-and-ready' : 'previous-components-restored-readiness-unconfirmed';
     } catch (rollback) { report.rollback = rollback.message; }
   }
   await save(); console.error(JSON.stringify({ ...report, journal })); process.exitCode = 1;
