@@ -42,6 +42,7 @@ const report = { kind: "swebench-verified-cloud-harness-inference", mode: "real"
   expectedRuntimeRevision: expected, fakeModels: false, fabricatedBusinessResponses: false,
   driverSourceSha256: sha(await readFile(new URL(import.meta.url))),
   transportSourceSha256: sha(await readFile(new URL("./cloud-live-client.mjs", import.meta.url))),
+  sourceUploadDriverSourceSha256: sha(await readFile(new URL("./swebench-source-upload.mjs", import.meta.url))),
   runtimeDockerfile: { file: dockerfilePath, sha256: dockerfileDigest,
     base: "mirror.ccs.tencentyun.com/library/python@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26",
     upstreamOriginal: "python@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26",

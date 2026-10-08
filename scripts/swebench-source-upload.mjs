@@ -6,7 +6,9 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 const DATASET_REVISION = 'c104f840cc67f8b6eec6f759ebc8b2693d585d4a';
 const IDS = ['pytest-dev__pytest-5787', 'pytest-dev__pytest-5631', 'sympy__sympy-12481'];
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
-const CHUNK_BYTES = 128 * 1024;
+// The ordinary BFF forwards through the cloud Nginx route's 64-KiB body cap.
+// Base64 plus identifiers must fit that whole-request limit.
+const CHUNK_BYTES = 32 * 1024;
 const digest = value => createHash('sha256').update(value).digest('hex');
 const fail = code => Object.assign(new Error('Prepared public source transfer failed its bounded evidence or safety contract.'), { code });
 const below = (parent, child) => {
@@ -113,7 +115,7 @@ def main():
     if not re.fullmatch(r'__swe_source_upload_[a-f0-9]{32}', directory) or not re.fullmatch(r'[a-f0-9]{64}', expected_hash) or not re.fullmatch(r'[a-f0-9]{40}', base) or not re.fullmatch(r'[a-f0-9]{40}', tree):
         reject('UPLOAD_ARGUMENT_INVALID')
     expected_size, count = int(expected_size), int(count)
-    if not 0 < expected_size <= 33554432 or not 0 < count <= 256:
+    if not 0 < expected_size <= 33554432 or not 0 < count <= 1024:
         reject('UPLOAD_BOUND_INVALID')
     root = pathlib.Path.cwd().resolve()
     stage = root / directory
@@ -134,10 +136,10 @@ def main():
         for i in range(count):
             chunk = stage / ('chunk-%05d.bin' % i)
             info = chunk.lstat()
-            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 131072:
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 32768:
                 reject('UPLOAD_CHUNK_INVALID')
             data = chunk.read_bytes()
-            if len(data) != info.st_size or (i < count - 1 and len(data) != 131072):
+            if len(data) != info.st_size or (i < count - 1 and len(data) != 32768):
                 reject('UPLOAD_CHUNK_LENGTH_INVALID')
             checksum.update(data)
             size += len(data)
