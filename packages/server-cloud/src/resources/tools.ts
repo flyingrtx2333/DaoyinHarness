@@ -102,8 +102,17 @@ function basicInput(name: ResourceToolName, input: Record<string, unknown>): boo
   return Object.keys(input).every(key => !["owner", "authorization", "accountId", "actorUserId", "billingAccountId"].includes(key));
 }
 
+const NETWORK_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+  EGRESS_UNAVAILABLE: "工作区的受控网络尚不可用，命令未能启动。当前轮次不再尝试启动该工作区的进程；需要先修复云端网络。",
+  EGRESS_NETWORK_INSPECTION_FAILED: "无法核验工作区网络，命令未能启动。当前轮次不再尝试启动该工作区的进程。",
+  WORKSPACE_SUBNET_POOL_INVALID: "云端工作区地址池配置无效，命令未能启动。需要先修复运行环境。",
+  WORKSPACE_SUBNET_POOL_EXHAUSTED: "云端工作区网络地址池已耗尽，命令未能启动。需要先配置可用的工作区地址池。",
+  WORKSPACE_NETWORK_CREATE_FAILED: "云端未能创建隔离网络，命令未能启动。需要先修复运行环境。",
+};
+
 export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, ensureActive: (identity: ExecutionIdentity, signal?: AbortSignal) => Promise<void>): CloudToolBinding[] {
   if (identity.space.kind === "public") return [];
+  const blockedProcessWorkspaces = new Map<string, string>();
   const deploymentMutationsEnabled = process.env.HARNESS_DEPLOYMENT_EXECUTOR_ENABLED === "1";
   return RESOURCE_TOOL_NAMES.filter(name => identity.allowedTools.includes(name) &&
     (deploymentMutationsEnabled || !["deployment_create", "deployment_rollback"].includes(name))).map(name => {
@@ -115,7 +124,22 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
         async execute(input, signal) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");
           await ensureActive(identity, signal);
-          const result = await resourceCall<Record<string, unknown>>(identity, { ...input, action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}` } as ResourceControlRequest, signal);
+          const startsProcess = name === "process_run" || name === "process_start";
+          const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : undefined;
+          const blockedCode = startsProcess && workspaceId ? blockedProcessWorkspaces.get(workspaceId) : undefined;
+          if (blockedCode) return { ok: false, code: blockedCode, message: NETWORK_FAILURE_MESSAGES[blockedCode]!, retryable: false };
+          let result: Record<string, unknown>;
+          try {
+            result = await resourceCall<Record<string, unknown>>(identity, { ...input, action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}` } as ResourceControlRequest, signal);
+          } catch (error) {
+            // Preserve only independently specified infrastructure failures. The
+            // registry still hides all other remote errors and arbitrary text.
+            if (signal?.aborted) throw error;
+            if (!(error instanceof CloudError) || !Object.hasOwn(NETWORK_FAILURE_MESSAGES, error.code)) throw error;
+            await ensureActive(identity, signal);
+            if (startsProcess && workspaceId) blockedProcessWorkspaces.set(workspaceId, error.code);
+            return { ok: false, code: error.code, message: NETWORK_FAILURE_MESSAGES[error.code]!, retryable: false };
+          }
           await ensureActive(identity, signal);
           return { ok: true, summary: typeof result.summary === "string" ? result.summary : `${name} completed.`, evidence: { schemaVersion: 1, toolName: name, result: result as JsonValue, artifacts: [], diagnostics: [] } };
         },
