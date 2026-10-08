@@ -33,6 +33,13 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
       inference.cases.reduce((sum, item) => sum + item.modelCalls, 0) !== inference.modelCalls) {
     throw new Error("Cloud inference model accounting does not match the bounded actual case exports.");
   }
+  const sharedBudget = inference.modelAccounting?.sharedBudgetIncludesRouting === true;
+  if (sharedBudget && (inference.cases.some(item => !Number.isSafeInteger(item.routingModelCalls) || item.routingModelCalls < 0 ||
+      !Number.isSafeInteger(item.sharedModelCalls) || item.sharedModelCalls !== item.modelCalls + item.routingModelCalls || item.sharedModelCalls > 12) ||
+      inference.cases.reduce((sum, item) => sum + item.routingModelCalls, 0) !== inference.routingModelCalls ||
+      inference.sharedModelCalls !== inference.modelCalls + inference.routingModelCalls || inference.sharedModelCalls > 36)) {
+    throw new Error("Routing and Agent attempts do not match the bounded shared cloud budget.");
+  }
   const runtimeText = await readFile(await cachePath(inference.runtimeEvidence?.file ?? ""), "utf8");
   if (inference.runtimeEvidence?.source !== "ordinary-cloud-runtime-API" || hash(runtimeText) !== inference.runtimeEvidence.sha256 ||
       JSON.parse(runtimeText).build?.revision !== inference.expectedRuntimeRevision) throw new Error("Actual cloud runtime evidence changed.");
@@ -92,6 +99,17 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
         event.payload.status === "completed" && calls.has(event.payload.modelCallId))) {
       throw new Error("Cloud model audit does not prove actual successful model inference.");
     }
+    if (sharedBudget) {
+      const routing = events.filter(event => event.type === "capability.model.requested");
+      const routingCalls = new Set(routing.map(event => event.payload.modelCallId));
+      if (routing.length !== routingCalls.size || routingCalls.size !== observation.routingModelCalls ||
+          [...routingCalls].some(id => calls.has(id)) || observation.sharedModelCalls !== calls.size + routingCalls.size ||
+          routing.some(event => event.payload.targetRunId !== observation.runId ||
+            !["retrieve", "analyze"].includes(event.payload.operation)) ||
+          events.some(event => event.type === "capability.model.responded" && !routingCalls.has(event.payload.modelCallId))) {
+        throw new Error("Actual routing audit does not match the shared model budget.");
+      }
+    }
     const starts = new Set(events.filter(event => event.type === "tool.started").map(event => event.payload.toolCallId));
     if (events.some(event => event.type === "tool.started" && /^(?:delegate_|workflow_)/u.test(event.payload.toolName))) {
       throw new Error("Unexpected delegated work has no bounded single-run benchmark acceptance.");
@@ -149,6 +167,22 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
       { cwd: output, env: dockerEnvironment, timeout: 30_000, maxBuffer: 100_000, signal })).stdout.trim();
     if (!context.startsWith("unix://")) throw new Error("This grader runner requires the existing local Unix Docker daemon.");
     environment.DOCKER_HOST = context;
+    // Public official images use an anonymous, run-scoped configuration. An
+    // existing config.json prevents the SDK from falling back to user Keychain.
+    environment.DOCKER_CONFIG = join(output, "docker-config");
+    await mkdir(environment.DOCKER_CONFIG, { mode: 0o700 });
+    const dockerConfiguration = { auths: {} };
+    if (process.env.SWEBENCH_BUILD_PROXY !== undefined) {
+      const proxy = new URL(process.env.SWEBENCH_BUILD_PROXY);
+      if (proxy.protocol !== "http:" || proxy.hostname !== "host.docker.internal" || proxy.username || proxy.password ||
+          proxy.pathname !== "/" || proxy.search || proxy.hash || !/^\d+$/u.test(proxy.port) ||
+          Number(proxy.port) < 1 || Number(proxy.port) > 65535) {
+        throw new Error("Official grader proxy must be a credential-free HTTP Docker host URL with an explicit port.");
+      }
+      dockerConfiguration.proxies = { default: { httpProxy: proxy.origin, httpsProxy: proxy.origin, noProxy: "127.0.0.1,localhost" } };
+      report.environment.proxy = { url: proxy.origin, scope: "official-build-and-evaluation-containers", configuration: "run-scoped" };
+    }
+    await writeFile(join(environment.DOCKER_CONFIG, "config.json"), JSON.stringify(dockerConfiguration) + "\n", { flag: "wx", mode: 0o600 });
     const daemon = JSON.parse((await execute("docker", ["info", "--format",
       '{"serverVersion":{{json .ServerVersion}},"architecture":{{json .Architecture}},"memoryBytes":{{.MemTotal}},"cpus":{{.NCPU}}}'],
     { cwd: output, env: environment, timeout: 30_000, maxBuffer: 100_000, signal })).stdout);
@@ -173,7 +207,7 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
     report.graderDataset = { file: graderDataset, sha256: hash(await readFile(graderDataset)), referencePatchExposedToAgent: false };
     const args = ["-m", "swebench.harness.run_evaluation", "--dataset_name", graderDataset,
       "--predictions_path", predictionsPath, "--instance_ids", ...ids, "--max_workers", "1", "--timeout", "900",
-      "--run_id", runId, "--report_dir", resultsDirectory, "--namespace", "none"];
+      "--run_id", runId, "--report_dir", resultsDirectory, "--namespace", ""];
     report.command = { executable: python, args }; report.status = "official-grader-running"; await save();
     console.log(JSON.stringify({ status: report.status, output, submitted: predictions.length }));
     const result = await execute(python, args, { cwd: output, env: environment, timeout: report.limits.totalProcessTimeoutMs,

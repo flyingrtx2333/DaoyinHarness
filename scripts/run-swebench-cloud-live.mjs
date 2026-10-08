@@ -22,7 +22,7 @@ const dockerfilePath = join(root, "deployment/resource-runtimes/swe-python/Docke
 const dockerfile = await readFile(dockerfilePath, "utf8");
 const dockerfileDigest = sha(dockerfile);
 const dockerignore = ".harness/\n.harness-restore-*/\nlost+found/\n";
-if (dockerfileDigest !== "8c43719fb91cd3eb5570add3ab31de792fdfb0017b89c40411a03273b37960a7") {
+if (dockerfileDigest !== "0ca8350dddde55125d68f9841643415a0b46f3a76b24cc087a538fafbcf44c4e") {
   throw new Error("The independently authored, pinned Python/Git runtime Dockerfile has changed; review its exact recipe before inference.");
 }
 const manifestText = await readFile(manifestPath, "utf8");
@@ -47,9 +47,10 @@ const report = { kind: "swebench-verified-cloud-harness-inference", mode: "real"
     base: "mirror.ccs.tencentyun.com/library/python@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26",
     upstreamOriginal: "python@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26",
     builder: "ordinary-account-isolated-Dockerfile-builder" },
-  referencePatchExposed: false, testPatchExposed: false, modelCalls: 0, usage: "unknown", cost: "unknown",
+  referencePatchExposed: false, testPatchExposed: false, modelCalls: 0, routingModelCalls: 0, sharedModelCalls: 0, usage: "unknown", cost: "unknown",
   modelAccounting: { source: "persisted AgentEngine model.requested events", scope: "AgentEngine attempts only",
-    routingAndProviderTotalCalls: "unknown; not represented by these event counts" },
+    routingSource: "persisted capability.model.requested events", sharedBudgetIncludesRouting: true,
+    providerTotalCalls: "unknown; gateway attempts do not prove provider execution or settlement" },
   limits: { cases: 3, perCaseModelCalls: 12, totalModelCalls: 36, perCaseMs: 420_000, totalMs: 1_800_000 },
   inferenceEnvironment: "ordinary account cloud API; locally prepared exact-base sources uploaded into independent Python/Git Dockerfile workspaces; isolated builder and gVisor",
   cases: [], status: "preflight", startedAt: new Date().toISOString() };
@@ -57,6 +58,14 @@ const predictions = [];
 const save = async () => {
   await writeFile(join(output, "report.json"), JSON.stringify(sanitizeEvidence(report), null, 2) + "\n", { mode: 0o600 });
   await writeFile(join(output, "predictions.jsonl"), predictions.map(row => JSON.stringify(row)).join("\n") + (predictions.length ? "\n" : ""), { mode: 0o600 });
+};
+const accountModelAttempts = (item, events) => {
+  item.modelCalls = events.filter(event => event.type === "model.requested").length;
+  item.routingModelCalls = events.filter(event => event.type === "capability.model.requested").length;
+  item.sharedModelCalls = item.modelCalls + item.routingModelCalls;
+  report.modelCalls = report.cases.reduce((sum, observed) => sum + observed.modelCalls, 0);
+  report.routingModelCalls = report.cases.reduce((sum, observed) => sum + (observed.routingModelCalls ?? 0), 0);
+  report.sharedModelCalls = report.modelCalls + report.routingModelCalls;
 };
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(new Error("Cloud inference total deadline exceeded.")), report.limits.totalMs);
@@ -327,7 +336,7 @@ try {
   for (const task of manifest.tasks) {
     controller.signal.throwIfAborted();
     const item = { instance_id: task.instance_id, inputSha256: sha(task.problem_statement), baseCommit: task.base_commit,
-      modelCalls: 0, status: "initializing", operations: [] };
+      modelCalls: 0, routingModelCalls: 0, sharedModelCalls: 0, status: "initializing", operations: [] };
     report.cases.push(item);
     const began = performance.now();
     const caseOutput = join(output, task.instance_id);
@@ -380,8 +389,7 @@ try {
         await writeFile(join(caseOutput, "cloud-events.json"), eventText, { mode: 0o600 });
         item.persisted = { source: "ordinary-cloud-session-events-API", events: ownEvents.length,
           file: join(caseOutput, "cloud-events.json"), sha256: sha(eventText), lastEventSeq: cursor };
-        item.modelCalls = ownEvents.filter(event => event.type === "model.requested").length;
-        report.modelCalls = report.cases.reduce((sum, observed) => sum + observed.modelCalls, 0);
+        accountModelAttempts(item, ownEvents);
         item.finalEvidenceCollected = true;
       } catch (cleanupError) {
         item.cleanupFailure = { code: String(cleanupError.code ?? cleanupError.name),
@@ -424,9 +432,11 @@ try {
       stage = "workspace-toolchain-preflight";
       item.preflight = { python: await sandboxProcess("python", ["--version"], 30_000) };
       item.preflight.git = await process(["--version"], 30_000);
+      item.preflight.ripgrep = await sandboxProcess("rg", ["--version"], 30_000);
       if (!/^Python 3\./u.test(`${item.preflight.python.stdout}\n${item.preflight.python.stderr ?? ""}`.trim()) ||
-          !/^git version [0-9]/u.test(item.preflight.git.stdout.trim())) {
-        throw Object.assign(new Error("Actual Python/Git version preflight did not identify the required tools; inference was not started."), { code: "SWE_GIT_SETUP_PREFLIGHT_FAILED" });
+          !/^git version [0-9]/u.test(item.preflight.git.stdout.trim()) ||
+          !/^ripgrep [0-9]/u.test(item.preflight.ripgrep.stdout.trim())) {
+        throw Object.assign(new Error("Actual Python/Git/ripgrep version preflight did not identify the required tools; inference was not started."), { code: "SWE_GIT_SETUP_PREFLIGHT_FAILED" });
       }
       await control("file_remove", { path: seed.dockerfilePath });
       await control("file_remove", { path: ".dockerignore" });
@@ -448,11 +458,11 @@ try {
       }
       stage = "actual-model-inference";
       await runtime();
-      if (report.modelCalls + 12 > 36) throw Object.assign(new Error("Insufficient budget for an ordinary 12-call run."), { code: "SWE_BUDGET_ADMISSION_DENIED" });
+      if (report.sharedModelCalls + 12 > 36) throw Object.assign(new Error("Insufficient shared budget for an ordinary 12-call run."), { code: "SWE_BUDGET_ADMISSION_DENIED" });
       item.input = `Work only in attached workspace ${item.workspaceId}, a Python repository at the exact issue base commit.\n` +
         "Fix the following issue by inspecting and changing actual source files. You may install needed dependencies and execute focused real repository tests through the workspace tools. " +
         "Do not delegate, start workflows, push, deploy, access business resources, fetch later source revisions, search for benchmark/reference patches, or request hints. " +
-        "Do not edit reserved runtime paths .harness, .harness-restore-* or lost+found. Do not rewrite Git history or change the Git index yourself; the harness will export a base-relative patch. Avoid committing. Finish within 12 model calls.\n\nISSUE:\n" + task.problem_statement;
+        "Do not edit reserved runtime paths .harness, .harness-restore-* or lost+found. Do not rewrite Git history or change the Git index yourself; the harness will export a base-relative patch. Avoid committing. Finish within the remaining bounded model-call budget.\n\nISSUE:\n" + task.problem_statement;
       if (item.input.length > 10_000) throw new Error("Issue prompt exceeds the ordinary cloud run API limit.");
       const requestId = randomUUID();
       item.requestId = requestId;
@@ -470,13 +480,12 @@ try {
             allEvents.push(event); cursor = event.eventSeq;
           }
           if (value.nextEventSeq !== cursor || (value.hasMore && !value.events.length)) throw new Error("Cloud transcript cursor did not advance.");
-          item.modelCalls = allEvents.filter(event => event.turnId === item.runId && event.type === "model.requested").length;
-          report.modelCalls = report.cases.reduce((sum, observed) => sum + observed.modelCalls, 0);
+          accountModelAttempts(item, allEvents.filter(event => event.turnId === item.runId));
           const text = JSON.stringify(sanitizeEvidence(allEvents.filter(event => event.turnId === item.runId)), null, 2) + "\n";
           await writeFile(join(caseOutput, "cloud-events.json"), text, { mode: 0o600 });
           item.persisted = { source: "ordinary-cloud-session-events-API", events: allEvents.filter(event => event.turnId === item.runId).length,
             file: join(caseOutput, "cloud-events.json"), sha256: sha(text), lastEventSeq: cursor };
-          if (item.modelCalls > 12 || report.modelCalls > 36) throw Object.assign(new Error("Actual persisted model calls exceeded the budget."), { code: "SWE_BUDGET_EXCEEDED" });
+          if (item.sharedModelCalls > 12 || report.sharedModelCalls > 36) throw Object.assign(new Error("Actual persisted shared model calls exceeded the budget."), { code: "SWE_BUDGET_EXCEEDED" });
           if (allEvents.some(event => event.type === "model.responded" && ["MODEL_AUTH_REQUIRED", "MODEL_ACCESS_DENIED", "MODEL_QUOTA_EXHAUSTED"].includes(event.payload.failureCode))) {
             throw Object.assign(new Error("Actual model authorization or quota failed; inference stopped."), { code: "SWE_MODEL_ACCESS_BLOCKED" });
           }
@@ -514,8 +523,7 @@ try {
       await writeFile(eventFile, eventsText, { mode: 0o600 });
       item.persisted = { source: "ordinary-cloud-session-events-API", events: events.length,
         file: eventFile, sha256: sha(eventsText), lastEventSeq: cursor };
-      item.modelCalls = events.filter(event => event.type === "model.requested").length;
-      report.modelCalls = report.cases.reduce((sum, observed) => sum + observed.modelCalls, 0);
+      accountModelAttempts(item, events);
       item.successfulModelResponses = events.filter(event => event.type === "model.responded" && event.payload.status === "completed").length;
       item.diagnostics = await call(`/runs/${item.runId}/diagnostics`);
       if (events.some(event => event.type === "model.responded" && ["MODEL_AUTH_REQUIRED", "MODEL_ACCESS_DENIED", "MODEL_QUOTA_EXHAUSTED"].includes(event.payload.failureCode))) {
