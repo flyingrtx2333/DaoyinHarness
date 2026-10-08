@@ -58,9 +58,9 @@ async function protectedState() {
     units[unit] = digest(properties);
   }
   const ids = run('docker', ['ps', '-q']).trim().split(/\s+/).filter(Boolean).sort();
-  const containers = ids.length ? JSON.parse(run('docker', ['inspect', ...ids])).map(value => ({
-    id: value.Id, image: value.Image, startedAt: value.State.StartedAt, pid: value.State.Pid,
-  })).sort((a, b) => a.id.localeCompare(b.id)) : [];
+  const format = '{"id":{{json .Id}},"image":{{json .Image}},"startedAt":{{json .State.StartedAt}},"pid":{{json .State.Pid}}}';
+  const containers = ids.length ? run('docker', ['inspect', '--format', format, ...ids]).trim().split('\n')
+    .map(line => JSON.parse(line)).sort((a, b) => a.id.localeCompare(b.id)) : [];
   const links = {};
   for (const path of [join(root, 'node'), join(root, 'workbench/current'), '/opt/daoyin-resources/current']) links[path] = await readlink(path);
   const configs = {};
