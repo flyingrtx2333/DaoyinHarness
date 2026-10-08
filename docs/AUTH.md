@@ -1,5 +1,7 @@
 # DaoyinHarness Authentication
 
+> 2026-10-08 owner clarification: the active product is the server-hosted cloud workbench. Sign in at <https://harness.daoyintech.com/login> using the existing daoyintech account/password method. The local OAuth documentation below is historical and must not be used as the current testing/login workflow. See [ADR-0026](adr/0026-cloud-only-product-and-validation.md).
+
 > This document covers the local OAuth client. Current unified platform evidence is in [UNIFIED-AGENT.md](UNIFIED-AGENT.md); production login availability must be verified live rather than inferred from this source document.
 
 ## Automatic account access for all business plugins
