@@ -2,6 +2,9 @@ export const API_VERSION = "v1" as const;
 
 export type Readiness = "ready" | "planned" | "unavailable";
 
+/** Model-reported task outcome, not independent verification of task success. */
+export type AgentTaskOutcome = "completed" | "partial" | "blocked" | "unknown";
+
 export interface RuntimeHealth {
   status: "ready";
   apiVersion: typeof API_VERSION;
@@ -257,6 +260,8 @@ export interface AgentEventPayloads {
     status: "completed";
     assistantMessageId: string;
     outcomeSummary: string;
+    /** The turn ended; this optional model report does not certify the user's goal. */
+    taskOutcome?: AgentTaskOutcome;
   };
   "turn.failed": {
     status: "failed";

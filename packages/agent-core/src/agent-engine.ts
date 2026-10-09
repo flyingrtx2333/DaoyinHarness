@@ -391,8 +391,18 @@ export class AgentEngine {
         // Condensation or a concurrent sibling may have consumed capacity during context assembly.
         finalStep = finalStep || remaining <= 1;
         if (finalStep) tools = [];
-        const budgetNotice = this.#remainingModelCalls === undefined ? "" :
-          `\n\n可信运行预算：当前本 Agent 包括本次请求在内最多还可使用 ${remaining} 次模型调用；路由、摘要和子任务消耗同一共享预算。`;
+        const budgetNotice = `\n\n可信运行预算：当前本 Agent 包括本次请求在内最多还可使用 ${remaining} 次模型调用；` +
+          `本次请求之后最多还可使用 ${remaining - 1} 次。` +
+          (this.#remainingModelCalls === undefined ? "" : "路由、摘要和子任务消耗同一共享预算。") +
+          (!finalStep && tools.length > 0
+            ? `当前不是最后一次回答，工具调用额度尚余 ${this.#maxToolCalls - attempts} 次。` +
+              "若目标尚未完成且存在可执行的合法下一步，应继续推进；不要仅因预计无法完成全部目标而把尚有余额说成预算已用尽。" +
+              "运行时会明确通知最后一次回答，届时保留已完成证据并说明未完成事项。任务已完成、不需要工具的问答或有具体阻碍时可以直接回答。"
+            : "") +
+          (this.#remainingModelCalls === undefined ? "" :
+          "只有最终普通回答才在正文末尾另起独立一行添加任务结果标记，从 [[task_outcome:completed]]、[[task_outcome:partial]]、[[task_outcome:blocked]] 中选择且仅添加一种；不要输出竖线或多个标记。" +
+          "completed 表示你判断用户目标已完成（不涉及任务动作的普通问答也使用 completed）；partial 表示仍有未完成事项，例如预算收尾；blocked 表示有具体阻碍而无法继续。" +
+          "此标记仅是你的结果报告，不替代工具证据或实际验收。工具调用附带的正文不得添加此标记。");
         const closing = finalStep ? `\n\n本轮最后一次回答，不再调用工具。${stop?.message ?? "请根据已完成的工具证据收尾。"}说明已完成事项与尚未解决的阻碍，不把局部成功说成全部完成。` : "";
         const memoryText = memorySnapshot?.text ? `\n\n${memorySnapshot.text}` : "";
         const systemPrompt = { stableText: context.prompt.stableText, dynamicText: context.prompt.dynamicText + memoryText + budgetNotice + closing,
@@ -496,8 +506,9 @@ export class AgentEngine {
         // 若没有通过流式输出过，补发全量文本片段事件
         if (!streamed) await append("assistant.delta", { contentBlockId, delta: content });
         if (signal.aborted) return cancel();
-        // 持久化记录回合顺利完成的不可变事实事件
-        await append("turn.completed", { status: "completed", assistantMessageId: `msg_${crypto.randomUUID()}`, outcomeSummary: content });
+        // Record that the turn ended separately from the model's unverified task-outcome report.
+        await append("turn.completed", { status: "completed", assistantMessageId: `msg_${crypto.randomUUID()}`,
+          outcomeSummary: content, taskOutcome: reply.taskOutcome ?? "unknown" });
         return { status: "completed", finalText: content, lastEventSeq };
       }
 

@@ -34,7 +34,11 @@ export function validateModelReply(value: unknown, seenIds: ReadonlySet<string>)
     if (typeof value.content !== "string" || value.content.length > 64_000) {
       throw new AgentPolicyError("MODEL_REPLY_INVALID", "模型回复正文无效或过长。");
     }
-    return { kind: "assistant", content: value.content };
+    const taskOutcome = value.taskOutcome === undefined ? "unknown" : value.taskOutcome;
+    if (taskOutcome !== "completed" && taskOutcome !== "partial" && taskOutcome !== "blocked" && taskOutcome !== "unknown") {
+      throw new AgentPolicyError("MODEL_REPLY_INVALID", "模型任务结果标记无效。");
+    }
+    return { kind: "assistant", content: value.content, taskOutcome };
   }
   if (value.kind !== "tool_calls" || !Array.isArray(value.calls)) {
     throw new AgentPolicyError("MODEL_REPLY_INVALID", "模型返回了无效的工具请求结构。");

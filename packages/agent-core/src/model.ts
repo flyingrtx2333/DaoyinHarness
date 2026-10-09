@@ -1,4 +1,5 @@
 import type { ToolDescriptor } from "@daoyin/harness-tools";
+import type { AgentTaskOutcome } from "@daoyin/harness-protocol";
 
 export interface ModelToolCall {
   id: string;
@@ -27,7 +28,7 @@ export interface ModelRequest {
 }
 
 export type ModelReply =
-  | { kind: "assistant"; content: string }
+  | { kind: "assistant"; content: string; taskOutcome?: AgentTaskOutcome }
   | { kind: "tool_calls"; content?: string; calls: ModelToolCall[] };
 
 export interface ModelClient {

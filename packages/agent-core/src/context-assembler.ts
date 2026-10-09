@@ -74,6 +74,13 @@ export class ContextAssembler {
       else if (event.type === "turn.completed" || event.type === "turn.failed") {
         if (!turn.assistant.trim()) turn.assistant = event.payload.outcomeSummary;
         if (event.type === "turn.failed") turn.assistant += `\n[Recorded turn status: failed; code=${event.payload.code}]`;
+        else if (event.payload.taskOutcome === "partial" || event.payload.taskOutcome === "blocked") {
+          turn.assistant += `\n[Model-reported task outcome: ${event.payload.taskOutcome}. The turn ended with unfinished work; this report is not independent verification. Preserve completed evidence and do not automatically repeat external operations.]`;
+        } else if (event.payload.taskOutcome === "completed") {
+          turn.assistant += "\n[Model-reported task outcome: completed. This report is not independent verification of the user's goal.]";
+        } else {
+          turn.assistant += "\n[Task outcome: unknown. A completed turn does not independently verify that the user's goal was achieved.]";
+        }
       } else if (event.type === "turn.cancelled" || event.type === "turn.interrupted") {
         turn.assistant += `\n[Recorded turn status: ${event.payload.status}. Partial output is not proof of completion; do not automatically repeat external work.]`;
       }

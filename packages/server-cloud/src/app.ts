@@ -9,6 +9,7 @@ import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createClou
 export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { AgentEngine, type ModelClient } from "@daoyin/harness-agent-core";
+import { CLOUD_MODEL_TIMEOUT_MS } from "./model-limits.js";
 import { YINGHUO_MUTATIONS } from "./yinghuo-contract.js";
 import { capabilityPacksFor, explicitHighRiskPacks } from "./capability-packs.js";
 import { routeCapabilities, type CapabilitySemanticProvider } from "./capability-router.js";
@@ -638,7 +639,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                     code: "MODEL_AUTHORIZATION_FAILED",
                   });
                 }
-                if (error instanceof CloudError && ["MODEL_CONTEXT_TOO_LARGE", "MODEL_TOOL_INVALID"].includes(error.code)) throw error;
+                if (error instanceof CloudError && ["MODEL_CONTEXT_TOO_LARGE", "MODEL_TOOL_INVALID", "MODEL_TIMEOUT", "MODEL_FIRST_RESPONSE_TIMEOUT", "MODEL_STREAM_IDLE_TIMEOUT"].includes(error.code)) throw error;
                 const message = toolCalls === 0
                   ? "模型服务本次未完成响应，本轮尚未执行任何业务工具；请重试。"
                   : `模型服务本次未完成响应；本轮此前已完成 ${String(toolCalls)} 次业务工具调用，请保留已显示结果后重试。`;
@@ -688,6 +689,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         // Keep the provider even without memory.read: revoked dependencies cannot re-enter through history.
         const engine = new AgentEngine({
           model, tools, events: engineEvents, compactionStore: stores.compactions,
+          modelTimeoutMs: CLOUD_MODEL_TIMEOUT_MS,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
           systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: Math.max(1, maxModelCalls - modelCalls), maxToolCalls: 24,

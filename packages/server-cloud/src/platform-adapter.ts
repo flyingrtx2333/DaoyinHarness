@@ -9,6 +9,7 @@ import { createSaishiProfile, isSaishiIdentity } from "./saishi-profile.js";
 import { createStoryProfile, isStoryIdentity } from "./story-profile.js";
 import { createWorkbenchProfile, isWorkbenchIdentity } from "./workbench-profile.js";
 import { readModelStream } from "./model-stream.js";
+import { CLOUD_MODEL_TRANSPORT_TIMEOUT_MS } from "./model-limits.js";
 import { readModelErrorPayload, structuredModelError } from "./model-error.js";
 import { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import { RESOURCE_TOOL_NAMES } from "./resources/contracts.js";
@@ -109,7 +110,11 @@ function reply(value: unknown, appPolicy?: CallPolicy): ModelReply {
   if (!record(value) || value.schemaVersion !== 1 || !record(value.output)) throw new Error("Invalid model response.");
   const output = value.output;
   if (typeof output.content !== "string" || output.content.length > 16_000) throw new Error("Invalid model text.");
-  if (output.kind === "assistant") return { kind: "assistant", content: output.content };
+  if (output.kind === "assistant") {
+    if (output.taskOutcome !== undefined && !["completed", "partial", "blocked"].includes(String(output.taskOutcome))) throw new Error("Invalid task outcome.");
+    return { kind: "assistant", content: output.content,
+      ...(output.taskOutcome === "completed" || output.taskOutcome === "partial" || output.taskOutcome === "blocked" ? { taskOutcome: output.taskOutcome } : {}) };
+  }
   if (output.kind !== "tool_calls" || !Array.isArray(output.calls) || output.calls.length < 1 || output.calls.length > 4) throw new Error("Invalid model calls.");
   const seen = new Set<string>();
   const calls = output.calls.map((call) => {
@@ -164,7 +169,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
     const secret = privateApp ? options.appServiceToken : options.serviceToken;
     if (!secret) throw new CloudError(503, "APP_BRIDGE_DISABLED", "私有业务插件尚未配置。");
     if ((!privateApp && ["profile", "call", "authorize-tool"].includes(path)) || (privateApp && path === "search")) throw new Error("Invalid bridge path.");
-    const duration = path === "model" ? 160_000 : path === "search" ? 90_000 : ["profile", "call", "authorize-tool"].includes(path) ? (path === "call" ? 100_000 : 30_000) : 5_000;
+    const duration = path === "model" ? CLOUD_MODEL_TRANSPORT_TIMEOUT_MS : path === "search" ? 90_000 : ["profile", "call", "authorize-tool"].includes(path) ? (path === "call" ? 100_000 : 30_000) : 5_000;
     const signal = AbortSignal.any([parent, AbortSignal.timeout(duration)]);
     try {
       const response = await transport(new URL(`/api/internal/${privateApp ? "agent-apps" : "agent-public"}/v1/${path}`, base), {
