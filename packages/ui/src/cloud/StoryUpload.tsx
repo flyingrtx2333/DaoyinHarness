@@ -45,9 +45,9 @@ export function StoryUpload({ client, disabled, remaining, onUploaded, onBusy, o
   }
 
   return <div className="composer-add" ref={root}>
-    <input ref={imageInput} className="composer-file-input" type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={disabled || busy || remaining <= 0}
+    <input ref={imageInput} className="composer-file-input" tabIndex={-1} type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={disabled || busy || remaining <= 0}
       aria-label="添加参考图片" onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} />
-    <input ref={videoInput} className="composer-file-input" type="file" multiple accept="video/mp4" disabled={disabled || busy || remaining <= 0}
+    <input ref={videoInput} className="composer-file-input" tabIndex={-1} type="file" multiple accept="video/mp4" disabled={disabled || busy || remaining <= 0}
       aria-label="添加参考视频" onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} />
     <button type="button" className="composer-add-button" disabled={disabled || busy || remaining <= 0} aria-label={busy ? "正在上传参考素材" : remaining <= 0 ? "最多添加 5 个参考素材" : "添加内容"}
       aria-expanded={open} aria-controls="composer-add-menu" onClick={() => { setError(""); setOpen(value => !value); }}>
