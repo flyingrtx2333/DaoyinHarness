@@ -95,7 +95,8 @@ export class CampfireService {
     if (!isVideo && (requestedStart !== null || requestedDuration !== null)) fail("CAMPFIRE_WINDOW_INVALID", "只有视频支持按时间窗口查看。");
     const windowStart = request.startSeconds ?? 0;
     const windowDuration = request.durationSeconds ?? (duration - windowStart);
-    if (isVideo && (windowStart >= duration || windowDuration > duration - windowStart + 0.05)) fail("CAMPFIRE_WINDOW_INVALID", "分析窗口超出真实视频时长。");
+    if (isVideo && (windowStart >= duration || windowDuration > duration - windowStart + 0.05))
+      fail("CAMPFIRE_WINDOW_INVALID", `视频真实总长${duration}秒；当前起点${windowStart}秒，请求分析${windowDuration}秒。该起点最多可分析${Number(Math.max(0, duration - windowStart).toFixed(6))}秒。请按此范围调整窗口，或省略时间窗口查看完整素材，不必反复猜测时长。`);
     const windowArgs = isVideo ? ["-ss", String(windowStart), "-t", String(Math.min(windowDuration, duration - windowStart))] : [];
     const filter = isVideo ? `fps=1/${Math.max(windowDuration / 6, 0.01)},scale=160:160:force_original_aspect_ratio=decrease,pad=160:160:(ow-iw)/2:(oh-ih)/2,tile=3x2` : "scale=320:320:force_original_aspect_ratio=decrease";
     await this.#process(workspaceId, "/usr/bin/ffmpeg", ["-v", "error", "-nostdin", "-y", ...windowArgs, "-i", path, "-vf", filter, "-frames:v", "1", "-q:v", "25", "frames.jpg"], request, signal);
