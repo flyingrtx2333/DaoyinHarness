@@ -202,6 +202,9 @@ function explicitPackIds(message: string, packs: readonly CapabilityPackManifest
       return characters.every((character) => han.has(character)) &&
         matchingBigrams >= Math.max(2, Math.ceil(bigrams.length * 0.6));
     })).map((pack) => pack.id));
+  // The composer already records the selected native capability in this prefix.
+  // Pin only an eligible pack: ownership and operation intent remain tool checks.
+  if (/\[营火内置剪辑[;；]店铺资料 id:res_[a-f0-9]{24}/u.test(normalized) && packs.some(pack => pack.id === "campfire.media")) selected.add("campfire.media");
   const repositoryReference = /(?:(?:https?:\/\/)?(?:www\.)?(?:github|gitlab|bitbucket)\.com[/:]|https?:\/\/[^\s]+\.git\b|\b(?:repo(?:sitory)?|workspace|codebase)\b|仓库|代码库|工作区|\b[\p{L}\p{N}_.-]+\/[\p{L}\p{N}_.-]+\b)/iu;
   const workspaceIntent = /(?:\bgit\s+clone\b|\bclone\b|\bcheckout\b|\bimport\b|\bsolve\b|\bfix\b|\bimplement\b|\bwork\s+on\b|\bbenchmark\b|\brun\b|\btest\b|\binspect\b|\bread\b|\breview\b|\banaly[sz]e\b|克隆|导入|创建|新建|检出|拉取|修复|实现|修改|开发|处理|运行|测试|查看|读取|阅读|检查|分析|研究|解决)/giu;
   const gitIntent = /(?:\bgit\s+(?:status|diff|log|branch|checkout|commit|show|apply|format-patch)\b|(?:查看|检查|比较|导出|提交|切换|展示|读取).{0,16}(?:git|diff|分支|补丁|提交))/giu;
