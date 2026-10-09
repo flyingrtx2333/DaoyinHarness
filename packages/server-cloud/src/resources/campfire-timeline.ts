@@ -15,6 +15,7 @@ export interface CampfireAudio {
   sourceVolume?: number;
   musicVolume?: number;
 }
+export interface CampfireCaption { startSeconds: number; durationSeconds: number; text: string }
 export function campfireDimensions(aspectRatio: string): [number, number] {
   return aspectRatio === "16:9" ? [1920, 1080] : aspectRatio === "1:1" ? [1080, 1080] : [1080, 1920];
 }
@@ -35,23 +36,23 @@ function timestamp(seconds: number): string {
   const cs = Math.round(seconds * 100);
   return `${Math.floor(cs / 360000)}:${String(Math.floor(cs / 6000) % 60).padStart(2, "0")}:${String(Math.floor(cs / 100) % 60).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`;
 }
-export function campfireCaptions(segments: CampfireSegment[], width: number, height: number): string {
+export function campfireCaptions(segments: CampfireSegment[], width: number, height: number, narrationCaptions?: CampfireCaption[]): string {
   const portrait = height > width;
   const fontSize = portrait ? 58 : 48;
   const lineLength = portrait ? 16 : 28;
   const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Noto Sans CJK SC,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,70,70,${portrait ? 160 : 80},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
   const cues: string[] = [];
   let elapsed = 0;
-  for (const segment of segments) {
-    const chars = [...(segment.caption ?? "")].map(char => /[\p{Cc}{}\\<>]/u.test(char) ? " " : char).join("").trim();
+  const timeline = narrationCaptions ?? segments.map(segment => { const cue = { startSeconds: elapsed, durationSeconds: segment.durationSeconds, text: segment.caption ?? "" }; elapsed += segment.durationSeconds; return cue; });
+  for (const cue of timeline) {
+    const chars = [...cue.text].map(char => /[\p{Cc}{}\\<>]/u.test(char) ? " " : char).join("").trim();
     const all = [...chars];
     const pages: string[] = [];
     for (let index = 0; index < all.length; index += lineLength * 2) {
       const page = all.slice(index, index + lineLength * 2);
       pages.push(page.length > lineLength ? `${page.slice(0, lineLength).join("")}\\N${page.slice(lineLength).join("")}` : page.join(""));
     }
-    pages.forEach((page, index) => cues.push(`Dialogue: 0,${timestamp(elapsed + segment.durationSeconds * index / pages.length)},${timestamp(elapsed + segment.durationSeconds * (index + 1) / pages.length)},Default,,0,0,0,,${page}`));
-    elapsed += segment.durationSeconds;
+    pages.forEach((page, index) => cues.push(`Dialogue: 0,${timestamp(cue.startSeconds + cue.durationSeconds * index / pages.length)},${timestamp(cue.startSeconds + cue.durationSeconds * (index + 1) / pages.length)},Default,,0,0,0,,${page}`));
   }
   return header + cues.join("\n") + "\n";
 }

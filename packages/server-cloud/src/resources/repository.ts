@@ -107,13 +107,18 @@ export class ResourceRepository {
   public constructor(private readonly pool: Pool, private readonly content: ContentStore) {}
 
   /** Capability-owned manifests are immutable resource facts, scoped like every other resource. */
-  public async createBusiness(identity: ExecutionIdentity, title: string, eventType: string, payload: JsonValue): Promise<string> {
-    const resourceId = `res_${randomBytes(12).toString("hex")}`;
+  public async createBusiness(identity: ExecutionIdentity, title: string, eventType: string, payload: JsonValue, requestKey?: string): Promise<string> {
+    const resourceId = `res_${requestKey ? createHash("sha256").update(JSON.stringify([ownerKey(identity), eventType, requestKey])).digest("hex").slice(0, 24) : randomBytes(12).toString("hex")}`;
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("INSERT INTO harness_resources(id,owner_key,kind,title,capabilities) VALUES($1,$2,'business',$3,$4)",
+      const inserted = await client.query("INSERT INTO harness_resources(id,owner_key,kind,title,capabilities) VALUES($1,$2,'business',$3,$4) ON CONFLICT(id) DO NOTHING RETURNING id",
         [resourceId, ownerKey(identity), title.slice(0, 120), JSON.stringify(["campfire.media"])]);
+      if (!inserted.rowCount) {
+        const same = await client.query("SELECT 1 FROM harness_resource_events WHERE owner_key=$1 AND resource_id=$2 AND event_type=$3 AND payload=$4::jsonb LIMIT 1", [ownerKey(identity), resourceId, eventType, JSON.stringify(payload)]);
+        if (!requestKey || !same.rowCount) throw new ResourceError("CAMPFIRE_REQUEST_CONFLICT", "同一制作请求的内容已变化，请使用新的请求标识。", 409);
+        await client.query("COMMIT"); return resourceId;
+      }
       await client.query("INSERT INTO harness_resource_events(owner_key,resource_id,event_type,payload) VALUES($1,$2,$3,$4)",
         [ownerKey(identity), resourceId, eventType, JSON.stringify(payload)]);
       await client.query("COMMIT");

@@ -73,6 +73,11 @@ export interface ResourceControlRequest {
   audio?: CampfireAudio;
   startSeconds?: number;
   durationSeconds?: number;
+  preset?: "city-sunshine";
+  requestKey?: string;
+  voice?: "female" | "male";
+  speed?: number;
+  sentences?: string[];
   missingShots?: string[];
 }
 

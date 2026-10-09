@@ -11,6 +11,7 @@ import { type DeploymentWorkerRequest, type ExecutorProcessRequest, type Resolve
 import { unixJson } from "../projects/wire.js";
 import { CampfireService } from "./campfire.js";
 import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
+import { PlatformCampfireGateway } from "./campfire-gateway.js";
 
 const SOCKET = "/run/daoyin-resources/control.sock";
 const EXECUTOR = "/run/daoyin-resource-executor/control.sock";
@@ -121,7 +122,9 @@ async function localCall(socket: string, path: string, input: unknown, signal?: 
 function executor(input: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return localCall(EXECUTOR, "/execute", input, signal);
 }
-const campfire = new CampfireService(repository, content, executor, runtimeImages);
+const mediaGateway = process.env.HARNESS_MEDIA_PLATFORM_URL && process.env.HARNESS_MEDIA_SERVICE_TOKEN
+  ? new PlatformCampfireGateway(process.env.HARNESS_MEDIA_PLATFORM_URL, process.env.HARNESS_MEDIA_SERVICE_TOKEN) : undefined;
+const campfire = new CampfireService(repository, content, executor, runtimeImages, mediaGateway);
 function builder(input: { workspaceId: string; dockerfile: string; context: string; timeoutMs: number }, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return localCall(BUILDER, "/build", input, signal);
 }

@@ -51,9 +51,12 @@ await build({ entryPoints: entries, bundle: true, platform: "node", format: "esm
   outdir: output, outExtension: { ".js": ".mjs" }, plugins: [committedSource] });
 const policy = await import(`${output}/policy.mjs`);
 await writeFile(`${output}/tool-schemas.json`, JSON.stringify(Object.entries(policy.RESOURCE_DEFINITIONS).map(([name, value]) => ({ name, ...value })), null, 2));
-await writeFile(`${output}/schema.sql`, await readFile("packages/server-cloud/src/resources/schema.sql"));
+await writeFile(`${output}/schema.sql`, git("show", `${revision}:packages/server-cloud/src/resources/schema.sql`));
+const mediaFiles = ["music/city-sunshine.mp3", "music/LICENSE-CC0.txt", "music/PROVENANCE.md"];
+await mkdir(`${output}/music`, { recursive: true });
+for (const name of mediaFiles) await writeFile(`${output}/${name}`, execFileSync("git", ["show", `${revision}:packages/server-cloud/src/resources/${name}`], { maxBuffer: 16 * 1024 * 1024 }));
 const files = {};
-for (const name of ["service.mjs", "executor.mjs", "migrate.mjs", "egress.mjs", "builder.mjs", "deployment.mjs", "policy.mjs", "tool-schemas.json", "schema.sql"]) {
+for (const name of ["service.mjs", "executor.mjs", "migrate.mjs", "egress.mjs", "builder.mjs", "deployment.mjs", "policy.mjs", "tool-schemas.json", "schema.sql", ...mediaFiles]) {
   files[name] = createHash("sha256").update(await readFile(`${output}/${name}`)).digest("hex");
 }
 const manifest = { sourceRevision: revision,
