@@ -4,6 +4,7 @@ import { resourceCall } from "./tools.js";
 
 /** Only server-owned identifiers enter the trusted prompt; resource text stays tool data. */
 export async function attachedWorkspaceContext(identity: ExecutionIdentity, sessionId: string, signal: AbortSignal): Promise<string> {
+  if (!identity.allowedTools.includes("resource_list")) return "No general workspace access is granted. Use only the provided account-scoped capability tools; for native campfire media use resource_campfire_list to discover real asset IDs.";
   const result = await resourceCall<{ attached?: unknown }>(identity, { action: "resource_list", sessionId }, signal);
   if (!Array.isArray(result.attached)) throw new CloudError(503, "RESOURCE_CONTEXT_UNAVAILABLE", "无法读取当前会话工作区。未开始本轮工作区操作。");
   const ids = result.attached.filter((item: unknown): item is { kind: string; id: string } =>

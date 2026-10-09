@@ -27,6 +27,9 @@ import { EvaluationClient } from "./evaluation-client.js";
 import { AdminWorkspace } from "./AdminWorkspace.js";
 import { canShowAdmin, requestedAdminView } from "./admin-access.js";
 import { keepReadyAfterBackgroundFailure } from "./connection-state.js";
+import { CampfirePicker } from "./CampfirePicker.js";
+import { CampfireResults } from "./CampfireResults.js";
+import type { CampfireSelection } from "./campfire-client.js";
 
 const APPLICATION = "saishi" as const;
 const entryUrl = new URL(window.location.href);
@@ -53,7 +56,8 @@ function referenceLine(reference: StoryReference): string {
 }
 
 function visibleUserMessage(message: string): string {
-  return message.replace(/\[已上传参考(图片|视频)，文件名：([^，\]]+)，素材 ID：[^\]]+\]/gu, "参考$1：$2")
+  return message.replace(/\[营火内置剪辑；店铺资料 ID：res_[a-f0-9]{24}(?:；参考视频 ID：res_[a-f0-9]{24})?\]/gu, "营火 · 实拍剪辑")
+    .replace(/\[已上传参考(图片|视频)，文件名：([^，\]]+)，素材 ID：[^\]]+\]/gu, "参考$1：$2")
     .replace(/\[已上传参考(图片|视频)，素材 ID：[^\]]+\]/gu, "已添加参考$1").trim();
 }
 
@@ -88,6 +92,8 @@ export function App(): React.JSX.Element {
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [references, setReferences] = useState<StoryReference[]>([]);
+  const [campfire, setCampfire] = useState<CampfireSelection>();
+  const [campfireOpen, setCampfireOpen] = useState(false);
   const [sendingMessage, setSendingMessage] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -249,13 +255,13 @@ export function App(): React.JSX.Element {
       try { await client.disconnectApplication(); } catch (cause) { if (!(cause instanceof WorkbenchError && cause.status === 401)) throw cause; }
       // Match the platform's legacy user-store sign-out contract; never read the token.
       window.localStorage.removeItem("athletereel_token");
-      accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSessions([]); setRuns([]); setEvents([]); setSelected(""); setDraft(""); setReferences([]); setPhase("expired");
+      accountEpoch.current++; setAccount(undefined); setSettingsOpen(false); setSessions([]); setRuns([]); setEvents([]); setSelected(""); setDraft(""); setReferences([]); setCampfire(undefined); setCampfireOpen(false); setPhase("expired");
       window.location.replace("/");
     } catch (cause) { loggingOut.current = false; throw cause; }
   }
 
   function choose(id: string): void {
-    setSelected(id); setDraft(""); setReferences([]); setError(""); setSidebar(false); setView("chat");
+    setSelected(id); setDraft(""); setReferences([]); setCampfire(undefined); setCampfireOpen(false); setError(""); setSidebar(false); setView("chat");
     window.history.replaceState(null,"",window.location.pathname);
     if (!id) try { storage.removeItem(SELECTED); } catch { /* Optional selection history. */ }
   }
@@ -283,13 +289,16 @@ export function App(): React.JSX.Element {
   }
   function usePlugin(id: string, focusComposer = true): void {
     if (pluginBusy) return;
-    void id; setView("chat"); setSidebar(false); setError("");
+    if (id === "yinghuo" && client.allowedTools.includes("resource_campfire_list")) setCampfireOpen(true);
+    setView("chat"); setSidebar(false); setError("");
     if (focusComposer) window.requestAnimationFrame(() => document.getElementById("message")?.focus());
   }
   async function send(message?: string, sessionTitle?: string): Promise<void> {
     const visibleMessage = message === undefined ? draft.trim() : visibleUserMessage(message);
-    const submittedMessage = references.length
+    const attachedMessage = references.length
       ? `${message ?? visibleMessage}\n\n${references.map(referenceLine).join("\n")}` : message ?? visibleMessage;
+    const submittedMessage = message === undefined && campfire ? `[营火内置剪辑；店铺资料 ID：${campfire.shopId}${campfire.referenceId ? `；参考视频 ID：${campfire.referenceId}` : ""}]\n${attachedMessage}` : attachedMessage;
+    if (submittedMessage.length > 10000) { setError("问题和素材说明过长，请缩短后再发送。"); return; }
     if (uploading || !visibleMessage || submission.current || sessionMutation.current || active || phase !== "ready" || loading) return;
     if (session?.archivedAt) { setError("请先恢复已归档的会话，或新建会话。"); return; }
     if (!plugin?.profileId) { setError("当前会话的插件尚未支持，请新建会话并选择可用插件。"); return; }
@@ -376,6 +385,7 @@ export function App(): React.JSX.Element {
               <div className="markdown">{turn.text && !hasCreatedStoryVideo(events, turn.run.id) && !storyProductionIds(events, turn.run.id).length && <MarkdownMessage text={turn.text} />}</div>
               <StoryVideos key={`${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
               <StoryProductions key={`production:${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
+              <CampfireResults key={`campfire:${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
               {turn.images.length > 0 && <ImageGallery key={`${client.accountScope}:${turn.run.id}`} images={turn.images} accountScope={client.accountScope} />}
               {(turn.run.status === "running" || turn.run.status === "queued") && turn.activities.length === 0 && <p className="thinking" role="status"><span className="spinner" />{turn.run.status === "queued" ? "正在等待处理…" : "正在接收任务…"}</p>}
               {turn.sources.length > 0 && <details className="sources"><summary>参考资料 <span>{turn.sources.length}</span></summary>{turn.sources.map((source) => <details className="source" key={source.id}><summary>{source.title || "公开资料"}{source.location && <small>{source.location}</small>}</summary><p>{source.content}</p></details>)}</details>}
@@ -397,12 +407,14 @@ export function App(): React.JSX.Element {
           <label htmlFor="message" className="sr-only">发送给 Harness 的问题</label>
           <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={2} disabled={phase !== "ready" || submitting || !!pending || !!managing || !!session?.archivedAt} placeholder="描述你的问题…" onKeyDown={(event) => { if (isSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing }, preferences)) { event.preventDefault(); void send(); } }} />
           {references.length > 0 && <div className="composer-attachments" aria-label="待发送参考素材">{references.map(reference => <span key={reference.id}><WorkbenchIcon name={reference.mimeType === "video/mp4" ? "story" : "image"} /><b>{reference.name}</b><small>{formatFileSize(reference.size)}</small><button type="button" aria-label={`移除附件：${reference.name}`} onClick={() => setReferences(items => items.filter(item => item.id !== reference.id))}>×</button></span>)}</div>}
-          <div className="composer-controls"><div className="composer-plugins"><StoryUpload key={client.accountScope} client={client} disabled={pluginBusy || !!managing || !!session?.archivedAt} remaining={5 - references.length} onBusy={setUploading} onUploaded={reference => { if (selectedRef.current === selected) setReferences(items => items.some(item => item.id === reference.id) ? items : [...items, reference]); }} />{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={uploading || !draft.trim() || phase !== "ready" || loading || !!pending || !!managing || !!session?.archivedAt}><WorkbenchIcon name="arrow" /></button>}</div>
+          {campfire && <div className="composer-attachments" aria-label="已选择营火能力"><span><WorkbenchIcon name="story" /><b>营火 · {campfire.shopTitle}</b>{campfire.referenceTitle && <small>参考：{campfire.referenceTitle}</small>}<button type="button" aria-label="移除营火能力选择" disabled={pluginBusy} onClick={() => setCampfire(undefined)}>×</button></span></div>}
+          <div className="composer-controls"><div className="composer-plugins"><StoryUpload key={client.accountScope} client={client} disabled={pluginBusy || !!managing || !!session?.archivedAt} remaining={5 - references.length} onBusy={setUploading} {...(campfire ? { campfireShopId: campfire.shopId } : {})} {...(client.allowedTools.includes("resource_campfire_list") ? { onCampfire: () => setCampfireOpen(true) } : {})} onUploaded={reference => { if (selectedRef.current === selected) setReferences(items => items.some(item => item.id === reference.id) ? items : [...items, reference]); }} />{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={uploading || !draft.trim() || phase !== "ready" || loading || !!pending || !!managing || !!session?.archivedAt}><WorkbenchIcon name="arrow" /></button>}</div>
         </form>
         <p className="composer-note">已接入插件自动可用；付费生成使用当前账号额度</p>
         <div className="sr-only" role="status">{submitting ? "正在提交问题" : active ? "任务进行中" : turns.length ? "回答已更新" : ""}</div>
       </div>
     </main>
+    {campfireOpen && phase === "ready" && <CampfirePicker key={client.accountScope} client={client} onClose={() => setCampfireOpen(false)} onSelect={selection => { setCampfire(selection); setCampfireOpen(false); document.getElementById("message")?.focus(); }} />}
     {settingsOpen && <SettingsDialog preferences={preferences} onChange={savePreferences} onClose={closeSettings} saveError={preferenceError} />}
     {videoInteraction && <VideoCreationDialog key={videoInteraction.interactionId} interaction={videoInteraction}
       busy={interactionBusy} error={interactionError}

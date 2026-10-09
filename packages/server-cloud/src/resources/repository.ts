@@ -106,6 +106,51 @@ function source(value: WorkspaceSource): WorkspaceSource {
 export class ResourceRepository {
   public constructor(private readonly pool: Pool, private readonly content: ContentStore) {}
 
+  /** Capability-owned manifests are immutable resource facts, scoped like every other resource. */
+  public async createBusiness(identity: ExecutionIdentity, title: string, eventType: string, payload: JsonValue): Promise<string> {
+    const resourceId = `res_${randomBytes(12).toString("hex")}`;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("INSERT INTO harness_resources(id,owner_key,kind,title,capabilities) VALUES($1,$2,'business',$3,$4)",
+        [resourceId, ownerKey(identity), title.slice(0, 120), JSON.stringify(["campfire.media"])]);
+      await client.query("INSERT INTO harness_resource_events(owner_key,resource_id,event_type,payload) VALUES($1,$2,$3,$4)",
+        [ownerKey(identity), resourceId, eventType, JSON.stringify(payload)]);
+      await client.query("COMMIT");
+      return resourceId;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  public async businessFacts(identity: ExecutionIdentity, resourceId: string): Promise<Array<{ eventType: string; payload: JsonValue }>> {
+    await this.get(identity, resourceId);
+    return (await this.pool.query<{ eventType: string; payload: JsonValue }>(
+      `SELECT event_type AS "eventType",payload FROM harness_resource_events
+       WHERE owner_key=$1 AND resource_id=$2 AND event_type LIKE 'campfire.%' ORDER BY sequence`,
+      [ownerKey(identity), resourceId])).rows;
+  }
+
+  public async businessManifests(identity: ExecutionIdentity): Promise<Array<{ id: string; title: string; eventType: string; payload: JsonValue }>> {
+    return (await this.pool.query<{ id: string; title: string; eventType: string; payload: JsonValue }>(
+      `SELECT r.id,r.title,e.event_type AS "eventType",e.payload FROM harness_resources r
+       JOIN LATERAL (SELECT event_type,payload FROM harness_resource_events WHERE resource_id=r.id
+         AND owner_key=r.owner_key AND event_type IN ('campfire.media.ready','campfire.profile.ready','campfire.render.completed')
+         ORDER BY sequence DESC LIMIT 1) e ON true WHERE r.owner_key=$1 ORDER BY r.created_at DESC,r.id LIMIT 1000`,
+      [ownerKey(identity)])).rows;
+  }
+
+  public async serializeBusiness<T>(identity: ExecutionIdentity, resourceId: string, operation: () => Promise<T>): Promise<T> {
+    await this.get(identity, resourceId);
+    const client = await this.pool.connect();
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [resourceId]);
+      return await operation();
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [resourceId]).catch(() => undefined);
+      client.release();
+    }
+  }
+
   public async serializeWorkspace<T>(workspaceId: string, operation: () => Promise<T>): Promise<T> {
     assertResourceId(workspaceId, "wsp"); const client = await this.pool.connect();
     try {

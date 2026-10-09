@@ -1,4 +1,5 @@
 import type { DeploymentSpec, RuntimeSpec, WorkspaceEntry, WorkspaceSource } from "@daoyin/harness-contracts";
+import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
 
 export const RESOURCE_TOOL_NAMES = [
   "resource_list", "resource_attach", "resource_detach",
@@ -8,6 +9,7 @@ export const RESOURCE_TOOL_NAMES = [
   "process_run", "process_start", "process_read", "process_write", "process_stop", "process_list",
   "artifact_create", "artifact_read", "artifact_list",
   "deployment_create", "deployment_status", "deployment_rollback",
+  ...Object.keys(CAMPFIRE_DEFINITIONS) as Array<keyof typeof CAMPFIRE_DEFINITIONS>,
 ] as const;
 
 export type ResourceToolName = typeof RESOURCE_TOOL_NAMES[number];
@@ -59,6 +61,15 @@ export interface ResourceControlRequest {
   message?: string;
   revision?: string;
   endpoint?: string;
+  shopId?: string;
+  referenceId?: string;
+  role?: "shop_image" | "shop_video" | "shop_document" | "reference_video";
+  size?: number;
+  index?: number;
+  offset?: number;
+  aspectRatio?: "9:16" | "16:9" | "1:1";
+  segments?: Array<{ assetId: string; startSeconds: number; durationSeconds: number; caption?: string }>;
+  missingShots?: string[];
 }
 
 export interface ExecutorFileEntry {

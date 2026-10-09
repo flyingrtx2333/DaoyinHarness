@@ -8,6 +8,7 @@ export interface ContentStore {
   put(content: Uint8Array): Promise<{ digest: string; size: number }>;
   read(digest: string, maximumBytes?: number): Promise<Buffer>;
   has(digest: string): Promise<boolean>;
+  readRange?(digest: string, offset: number, length: number): Promise<Buffer>;
 }
 
 const MAX_BLOB_BYTES = 128 * 1024 * 1024;
@@ -103,5 +104,18 @@ export class FileContentStore implements ContentStore {
   public async has(digest: string): Promise<boolean> {
     try { return (await stat(blobPath(this.#root, digest))).isFile(); }
     catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return false; throw error; }
+  }
+
+  public async readRange(digest: string, offset: number, length: number): Promise<Buffer> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 1_000_000) throw new Error("Invalid bounded content range.");
+    const handle = await open(blobPath(this.#root, digest), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.size > MAX_BLOB_BYTES || offset > info.size) throw new Error("Content range is unavailable.");
+      const bytes = Buffer.alloc(Math.min(length, info.size - offset));
+      const read = await handle.read(bytes, 0, bytes.length, offset);
+      if (read.bytesRead !== bytes.length) throw new Error("Content range changed during the read.");
+      return bytes;
+    } finally { await handle.close(); }
   }
 }

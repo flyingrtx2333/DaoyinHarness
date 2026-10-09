@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkbenchClient } from "./client.js";
 import "./asset-library.css";
+import { CampfireLibrary } from "./CampfireLibrary.js";
 
 const categories = { all: "全部", website: "网站", character: "角色图", scene: "场景图", storyboard: "分镜图", video: "视频" };
 type Category = keyof typeof categories;
@@ -118,6 +119,7 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
   const empty = !busy && websites.length === 0 && (data?.items.length ?? 0) === 0;
   return <section className="asset-library" aria-label="资产库">
     <header className="asset-toolbar"><h1>资产</h1><button type="button" disabled={!ready || busy} onClick={() => setRefresh(v => v + 1)}>刷新</button></header>
+    {client.allowedTools.includes("resource_campfire_list") && <CampfireLibrary client={client} ready={ready} />}
     <div className="asset-filters" aria-label="资产分类">{(Object.keys(categories) as Category[]).map(key => <button key={key} type="button" aria-pressed={category === key}
       onClick={() => { setCategory(key); setOffset(0); }}>{categories[key]}</button>)}</div>
     {!ready ? <div role="status"><p>请连接道引账号后查看资产。</p><button type="button" onClick={onConnect}>连接账号</button></div> : <>

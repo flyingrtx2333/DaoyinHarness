@@ -5,6 +5,8 @@ import type { CloudToolBinding } from "../app.js";
 import { CloudError } from "../repository.js";
 import { unixJson } from "../projects/wire.js";
 import { RESOURCE_TOOL_NAMES, type ResourceControlRequest, type ResourceToolName } from "./contracts.js";
+import { CAMPFIRE_DEFINITIONS, CAMPFIRE_UI_ACTIONS, CAMPFIRE_INSTRUCTIONS } from "./campfire-contract.js";
+import { validateStoryInput } from "../story-profile.js";
 
 const object = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({ type: "object", additionalProperties: false, properties, required });
 const id = { type: "string", pattern: "^(?:res|wsp|snp|art|dep|prc)_[a-f0-9]{24}$" };
@@ -33,6 +35,7 @@ const deploymentSpec = object({
 }, ["version", "kind", "command", "transport", "health", "environment", "resourceIds"]);
 
 export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { description: string; mutating: boolean; inputSchema: Record<string, unknown> }>> = {
+  ...CAMPFIRE_DEFINITIONS,
   resource_list: { description: "Discover real resource IDs available to the account and attached to this session. Use the attached workspace IDs for file, Git and process calls; never guess them.", mutating: false, inputSchema: object({ sessionId: { type: "string", maxLength: 160 } }) },
   resource_attach: { description: "Attach an owned resource to the current session.", mutating: true, inputSchema: object({ resourceId: id }, ["resourceId"]) },
   resource_detach: { description: "Detach a resource from the current session without deleting it.", mutating: true, inputSchema: object({ resourceId: id }, ["resourceId"]) },
@@ -92,12 +95,14 @@ export async function cancelResourceRun(identity: ExecutionIdentity, runId: stri
 }
 
 function explicitHighRisk(message: string, name: ResourceToolName): boolean {
+  if (name === "resource_campfire_render") return /(?:制作|剪辑|重剪|生成成片|render)/iu.test(message) && !/(?:只读|先看方案|不要.{0,8}(?:制作|剪辑|生成)|禁止.{0,8}(?:制作|剪辑|生成))/u.test(message);
   if (name === "deployment_create") return /(?:发布|部署|上线|deploy|publish)/iu.test(message) && !/(?:不要|禁止|暂不|先不).{0,12}(?:发布|部署|上线)/u.test(message);
   if (name === "deployment_rollback") return /(?:回滚|恢复到.{0,20}版本|rollback)/iu.test(message) && !/(?:不要|禁止|暂不|先不).{0,12}(?:回滚|恢复)/u.test(message);
   return true;
 }
 
 function basicInput(name: ResourceToolName, input: Record<string, unknown>): boolean {
+  if (Object.hasOwn(CAMPFIRE_DEFINITIONS, name)) return validateStoryInput(RESOURCE_DEFINITIONS[name].inputSchema, input);
   if (name.startsWith("file_") || name.startsWith("git_") || name.startsWith("process_") || name.startsWith("workspace_")) {
     if (name !== "workspace_create" && typeof input.workspaceId !== "string") return false;
   }
@@ -139,11 +144,12 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
   const blockedProcessWorkspaces = new Map<string, string>();
   const deploymentMutationsEnabled = process.env.HARNESS_DEPLOYMENT_EXECUTOR_ENABLED === "1";
   return RESOURCE_TOOL_NAMES.filter(name => identity.allowedTools.includes(name) &&
+    !CAMPFIRE_UI_ACTIONS.has(name) &&
     (deploymentMutationsEnabled || !["deployment_create", "deployment_rollback"].includes(name))).map(name => {
     const descriptor = RESOURCE_DEFINITIONS[name];
     return {
       definition: {
-        name, description: descriptor.description, category: "extension", mutating: descriptor.mutating,
+        name, description: descriptor.description + (name === "resource_campfire_list" ? ` ${CAMPFIRE_INSTRUCTIONS}` : ""), category: "extension", mutating: descriptor.mutating,
         inputSchema: descriptor.inputSchema as JsonValue,
         async execute(input, signal) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");
@@ -161,6 +167,10 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             // registry still hides all other remote errors and arbitrary text.
             if (signal?.aborted) throw error;
             if (!(error instanceof CloudError)) throw error;
+            if (error.code.startsWith("CAMPFIRE_")) {
+              await ensureActive(identity, signal);
+              return { ok: false, code: error.code, message: error.message, retryable: false };
+            }
             if (Object.hasOwn(RESOURCE_INPUT_FAILURE_MESSAGES, error.code)) {
               await ensureActive(identity, signal);
               return { ok: false, code: error.code, message: RESOURCE_INPUT_FAILURE_MESSAGES[error.code]!, retryable: false };

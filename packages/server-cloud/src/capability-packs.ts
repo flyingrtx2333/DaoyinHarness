@@ -6,6 +6,9 @@ interface Group {
   match(name: string): boolean;
 }
 const groups: readonly Group[] = [
+  { id: "campfire.media", title: "营火 · 实拍剪辑", summary: "使用 Harness 店铺资料和真实素材，参考视频结构，保存计划并剪辑成片；缺镜头先询问。", risk: "write",
+    intents: ["营火", "店铺视频", "参考视频", "实拍重剪", "剪辑素材"], examples: ["营火：用本店实拍素材参考这个视频制作短片", "先分析参考视频并给出剪辑方案"],
+    match: (name) => name.startsWith("resource_campfire_") },
   { id: "resource.catalog", title: "资源与工作区", summary: "列出、挂载和创建通用资源或工作区。", risk: "write",
     intents: ["查看资源", "挂载工作区", "创建工作区", "导入代码仓库"], examples: ["列出当前资源", "从这个 Git 仓库创建工作区"],
     match: (name) => ["resource_list", "resource_attach", "resource_detach", "workspace_create", "workspace_inspect"].includes(name) },
@@ -177,4 +180,3 @@ export function explicitHighRiskPacks(
   }
   return [...result];
 }
-

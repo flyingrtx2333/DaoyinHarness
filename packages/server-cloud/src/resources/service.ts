@@ -9,6 +9,8 @@ import { ResourceError, ResourceRepository } from "./repository.js";
 import { assertRuntimeSpec } from "./runtime-policy.js";
 import { type DeploymentWorkerRequest, type ExecutorProcessRequest, type ResolvedSecret, type ResourceControlRequest, RESOURCE_TOOL_NAMES } from "./contracts.js";
 import { unixJson } from "../projects/wire.js";
+import { CampfireService } from "./campfire.js";
+import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
 
 const SOCKET = "/run/daoyin-resources/control.sock";
 const EXECUTOR = "/run/daoyin-resource-executor/control.sock";
@@ -32,7 +34,9 @@ const repository = new ResourceRepository(pool, content);
 function identity(input: ResourceControlRequest): ExecutionIdentity {
   assertExecutionIdentity(input.authorization);
   const value = input.authorization;
-  if (!allEnabled && !allowed.has(value.actorUserId)) throw new ResourceError("RESOURCE_NOT_ENABLED", "General cloud resources are not enabled for this account.", 403);
+  const nativeMedia = Object.hasOwn(CAMPFIRE_DEFINITIONS, input.action) && value.space.kind !== "public" &&
+    value.permissions.includes("agent.use") && value.allowedTools.includes(input.action);
+  if (!nativeMedia && !allEnabled && !allowed.has(value.actorUserId)) throw new ResourceError("RESOURCE_NOT_ENABLED", "General cloud resources are not enabled for this account.", 403);
   return value;
 }
 
@@ -117,6 +121,7 @@ async function localCall(socket: string, path: string, input: unknown, signal?: 
 function executor(input: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return localCall(EXECUTOR, "/execute", input, signal);
 }
+const campfire = new CampfireService(repository, content, executor, runtimeImages);
 function builder(input: { workspaceId: string; dockerfile: string; context: string; timeoutMs: number }, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return localCall(BUILDER, "/build", input, signal);
 }
@@ -157,6 +162,10 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
   if (request.action === "readiness") return { ready: true, executor: await executor({ action: "readiness" }, signal),
     ...(process.env.HARNESS_DEPLOYMENT_EXECUTOR_ENABLED === "1" ? { deployer: await deployer({ action: "readiness" }, signal) } : {}) };
   const auth = identity(request);
+  if (Object.hasOwn(CAMPFIRE_DEFINITIONS, request.action)) {
+    if (!auth.permissions.includes("agent.use") || !auth.allowedTools.includes(request.action)) throw new ResourceError("CAMPFIRE_ACCESS_DENIED", "当前账号无法使用此营火操作。", 403);
+    return campfire.call(auth, request, signal);
+  }
   if (request.action === "cancel_run") {
     const runId = required(request.sourceRun, "sourceRun"); const stopped: string[] = []; const failed: string[] = [];
     for (const process of await repository.runningProcessesForRun(auth, runId)) {
