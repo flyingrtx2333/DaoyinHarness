@@ -393,7 +393,8 @@ export class AgentEngine {
         if (finalStep) tools = [];
         const outcomeInstruction = this.#remainingModelCalls === undefined ? "" :
           "只有最终普通回答才在正文末尾另起独立一行添加任务结果标记，从 [[task_outcome:completed]]、[[task_outcome:partial]]、[[task_outcome:blocked]] 中选择且仅添加一种；不要输出竖线或多个标记。" +
-          "completed 表示你判断用户目标已完成（不涉及任务动作的普通问答也使用 completed）；partial 表示仍有未完成事项，例如预算收尾；blocked 表示有具体阻碍而无法继续。" +
+          "completed 表示你判断用户目标已完成（不涉及任务动作的普通问答也使用 completed）；partial 表示仍有未完成事项，包括调用、步骤或时间预算结束；blocked 表示已有观察确认缺少必要依据、权限或其他执行条件。" +
+          "仅因本轮预算结束而停止时使用 partial；若已有独立于预算的必要条件缺失证据，使用 blocked 并说明具体阻碍。" +
           "此标记仅是你的结果报告，不替代工具证据或实际验收。工具调用附带的正文不得添加此标记。";
         const budgetNotice = `\n\n可信运行预算：当前本 Agent 包括本次请求在内最多还可使用 ${remaining} 次模型调用；` +
           `本次请求之后最多还可使用 ${remaining - 1} 次。` +

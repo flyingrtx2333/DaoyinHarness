@@ -41,6 +41,9 @@ model calls, tool access or user transcript event. Retain the existing cloud
 outcome declaration; missing reports
 remain unknown and self-reported completed still requires independent evidence.
 Do not infer task success from prose or manufacture a completed declaration.
+Define budget-only termination as partial; blocked requires observed missing
+prerequisites, permission or another condition independent of the turn budget.
+This applies to every task and does not label unknown tool outcomes as success.
 
 Keep the shared call, tool, time and cost limits. Reuse observed information and
 combine independent safe reads when useful; do not force sequential tool calls
