@@ -1,35 +1,28 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { WorkbenchClient } from "./client.js";
-import { campfireAsset, campfireBlob, type CampfireAsset } from "./campfire-client.js";
+import { campfireAsset, type CampfireAsset } from "./campfire-client.js";
 
 function InlineCampfireVideo({ client, asset }: { client: WorkbenchClient; asset: CampfireAsset }): React.JSX.Element {
   const container = useRef<HTMLElement>(null);
   const [url, setUrl] = useState(""); const [error, setError] = useState(""); const [attempt, setAttempt] = useState(0);
   const scope = client.accountScope;
   useEffect(() => {
-    const controller = new AbortController(); let objectUrl = ""; let started = false;
     setUrl(""); setError("");
-    const load = (): void => {
-      if (started || controller.signal.aborted) return;
-      started = true;
-      void campfireBlob(client, asset, controller.signal).then(blob => {
-        if (controller.signal.aborted || client.accountScope !== scope) return;
-        objectUrl = URL.createObjectURL(blob); setUrl(objectUrl);
-      }).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "成片读取失败，请重试。"); });
-    };
-    // Read immutable account media only when its player approaches the viewport.
     const observer = new IntersectionObserver(entries => {
-      if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); load(); }
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      observer.disconnect();
+      try { setUrl(client.mediaUrl(asset.id)); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : "成片无法读取。"); }
     }, { rootMargin: "200px" });
     if (container.current) observer.observe(container.current);
-    return () => { observer.disconnect(); controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [client, scope, asset.id, asset.size, asset.mediaType, attempt]);
+    return () => observer.disconnect();
+  }, [client, scope, asset.id, attempt]);
   return <section ref={container} className="campfire-result" aria-label={asset.title}>
-    <video src={url || undefined} controls playsInline preload="metadata" aria-label={asset.title} />
+    <video src={url || undefined} controls playsInline preload="metadata" aria-label={asset.title} onError={() => setError("成片读取未完成，请重试；若账号已变化，请重新登录。")} />
     {!url && !error && <p role="status">正在读取成片…</p>}
     {error && <><p role="alert">{error}</p><button type="button" onClick={() => setAttempt(value => value + 1)}>重新读取成片</button></>}
-    <div className="asset-control"><span>{asset.title}</span>{url && <a href={url} download={asset.title.endsWith(".mp4") ? asset.title : asset.title + ".mp4"}>下载成片</a>}</div>
+    <div className="asset-control"><span>{asset.title}</span>{url && <a href={client.mediaUrl(asset.id, true)} download={asset.title.endsWith(".mp4") ? asset.title : asset.title + ".mp4"}>下载成片</a>}</div>
     {!!asset.generatedSegments?.length && <p className="asset-library-note">此历史成片包含 AI 演绎片段，画面内已标记来源。</p>}
   </section>;
 }

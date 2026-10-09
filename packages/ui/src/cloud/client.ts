@@ -57,6 +57,10 @@ export class WorkbenchClient {
   readonly #base: string;
   #receiptKey: string;
   readonly #receipts = new Map<string, PendingRequest>();
+  public mediaUrl(resourceId: string, download = false): string {
+    if (!/^res_[a-f0-9]{24}$/u.test(resourceId) || !/^[a-f0-9]{64}$/u.test(this.#accountScope)) throw new WorkbenchError("请重新连接当前账号后查看素材。");
+    return `${this.#base}/resources/media/${resourceId}?accountScope=${this.#accountScope}${download ? "&download=1" : ""}`;
+  }
   public get accountScope(): string { return this.#accountScope; }
   public get account(): AccountProfile | undefined { return this.#account; }
   public get allowedTools(): readonly string[] { return this.#allowedTools; }
