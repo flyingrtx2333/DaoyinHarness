@@ -84,7 +84,7 @@ export function campfireAudioFilter(duration: number, audio: CampfireAudio, narr
   const inputs = [narrationInput === undefined ? "[camerabed]" : "[camera]"];
   if (narrationInput !== undefined) {
     const branches = musicInput === undefined ? "asplit=2[narration][camerasidechain]" : "asplit=3[narration][camerasidechain][musicsidechain]";
-    filters.push(`[${narrationInput}:a]aresample=48000,apad,atrim=duration=${duration},loudnorm=I=-16:TP=-2:LRA=7,${branches}`);
+    filters.push(`[${narrationInput}:a]aresample=48000,apad,atrim=duration=${duration},loudnorm=I=-16:TP=-2:LRA=7,aresample=48000,${branches}`);
     filters.push("[camerabed][camerasidechain]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[camera]");
     inputs.push("[narration]");
   }
