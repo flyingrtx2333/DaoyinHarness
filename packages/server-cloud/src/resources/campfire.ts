@@ -284,7 +284,7 @@ export class CampfireService {
         const plan = facts.find(item => item.eventType === "campfire.plan.saved")?.payload;
         if (!plan) fail("CAMPFIRE_PLAN_REQUIRED", "请先保存真实素材剪辑计划。", 409);
         const completed = facts.find(item => item.eventType === "campfire.render.result");
-        if (completed) return { summary: "原成片已保存", asset: await this.#manifest(auth, text(completed.payload, "assetId")), reused: true };
+        if (completed) return { summary: "制作已完成，原成片可直接预览", completed: true, asset: await this.#manifest(auth, text(completed.payload, "assetId")), reused: true };
         if (facts.some(item => item.eventType === "campfire.render.started")) fail("CAMPFIRE_ORIGINAL_RENDER_EXISTS", "原计划已有剪辑记录，请查询原状态；修改时保存新计划，不重复执行。", 409);
         if (!Array.isArray(plan.missingShots) || plan.missingShots.length) fail("CAMPFIRE_MISSING_SHOTS", "计划仍有缺失镜头。请用现有素材调整方案，或等待上传实拍；不能生成或补镜头。", 409);
         await this.#append(auth, planId, "campfire.render.started", { startedAt: new Date().toISOString() }, request);
@@ -332,7 +332,7 @@ export class CampfireService {
           const asset: Data = { title: plan.title!, role: "output_video", shopId: plan.shopId!, mediaType: "video/mp4", size: output.size, digest: output.blobHash, durationSeconds: actualDuration, width, height, fps: 30, renderVersion: 2, audio: audio as unknown as JsonValue, generatedSegments: generatedIndices, planId, workspaceId, snapshotId: snapshot.id, createdAt: new Date().toISOString() };
           const assetId = await this.repository.createBusiness(auth, text(plan, "title"), "campfire.render.completed", asset);
           await this.#append(auth, planId, "campfire.render.result", { assetId, durationSeconds: actualDuration }, request);
-          return { summary: "剪辑成片已保存，可在素材库预览", asset: { ...asset, id: assetId }, untrusted: true };
+          return { summary: "制作已完成，成片可直接预览", completed: true, asset: { ...asset, id: assetId }, untrusted: true };
         } catch (error) {
           await this.#append(auth, planId, "campfire.render.failed", { code: error instanceof ResourceError ? error.code : "CAMPFIRE_RENDER_FAILED", cancelled: signal.aborted }, request);
           throw error;
