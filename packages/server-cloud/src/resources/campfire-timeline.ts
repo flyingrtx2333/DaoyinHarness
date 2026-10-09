@@ -47,11 +47,17 @@ export function campfireCaptions(segments: CampfireSegment[], width: number, hei
   for (const cue of timeline) {
     const chars = [...cue.text].map(char => /[\p{Cc}{}\\<>]/u.test(char) ? " " : char).join("").trim();
     const all = [...chars];
-    const pages: string[] = [];
-    for (let index = 0; index < all.length; index += lineLength * 2) {
-      const page = all.slice(index, index + lineLength * 2);
-      pages.push(page.length > lineLength ? `${page.slice(0, lineLength).join("")}\\N${page.slice(lineLength).join("")}` : page.join(""));
+    const lines: string[] = [];
+    for (let index = 0; index < all.length;) {
+      let end = Math.min(index + lineLength, all.length);
+      // Avoid stranded Chinese punctuation without exceeding the caption width.
+      while (end > index + 1 && end < all.length &&
+        (/[，。！？；：、,.!?;:）】》」』”’]/u.test(all[end]!) || /[（【《「『“‘]/u.test(all[end - 1]!))) end--;
+      lines.push(all.slice(index, end).join(""));
+      index = end;
     }
+    const pages: string[] = [];
+    for (let index = 0; index < lines.length; index += 2) pages.push(lines.slice(index, index + 2).join("\\N"));
     pages.forEach((page, index) => cues.push(`Dialogue: 0,${timestamp(cue.startSeconds + cue.durationSeconds * index / pages.length)},${timestamp(cue.startSeconds + cue.durationSeconds * (index + 1) / pages.length)},Default,,0,0,0,,${page}`));
   }
   return header + cues.join("\n") + "\n";
