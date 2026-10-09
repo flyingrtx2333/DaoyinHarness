@@ -140,6 +140,16 @@ function invalidWorkspacePath(name: ResourceToolName, input: Record<string, unkn
   });
 }
 
+const CAMPFIRE_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  resource_campfire_list: "查询营火素材",
+  resource_campfire_inspect: "查看真实素材",
+  resource_campfire_narrate: "生成并测量旁白",
+  resource_campfire_music: "选择背景音乐",
+  resource_campfire_plan: "保存剪辑方案",
+  resource_campfire_render: "制作营火成片",
+  resource_campfire_status: "查询制作状态",
+};
+
 export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, ensureActive: (identity: ExecutionIdentity, signal?: AbortSignal) => Promise<void>): CloudToolBinding[] {
   if (identity.space.kind === "public") return [];
   const blockedProcessWorkspaces = new Map<string, string>();
@@ -152,6 +162,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
       definition: {
         name, description: descriptor.description + (name === "resource_campfire_list" ? ` ${CAMPFIRE_INSTRUCTIONS}` : ""), category: "extension", mutating: descriptor.mutating,
         inputSchema: descriptor.inputSchema as JsonValue,
+        ...(CAMPFIRE_DISPLAY_NAMES[name] ? { displayName: CAMPFIRE_DISPLAY_NAMES[name], auditInput: () => ({}) } : {}),
         async execute(input, signal) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");
           await ensureActive(identity, signal);
