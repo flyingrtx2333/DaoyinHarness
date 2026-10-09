@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkbenchClient } from "./client.js";
 import "./asset-library.css";
 import { CampfireLibrary } from "./CampfireLibrary.js";
@@ -78,7 +78,14 @@ export function videoPreviewSource(url: string): string {
 const statuses: Record<string, string> = { SUCCEEDED: "生成完成", DRAFT: "草稿", LOCKED: "已锁定", STALE: "已过期", FAILED: "失败", READY: "已就绪" };
 
 export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchClient; ready: boolean; onConnect: () => void }): React.JSX.Element {
-  const [category, setCategory] = useState<Category>("all");
+  const [collection, setCollection] = useState<"shop" | "generated">("shop");
+  const [mediaFilter, setMediaFilter] = useState<"all" | "image" | "video">("all");
+  const [search, setSearch] = useState(""); const [query, setQuery] = useState("");
+  const [view, setView] = useState<"masonry" | "list">("masonry");
+  const [uploadRequest, setUploadRequest] = useState(0);
+  const [nativeCount, setNativeCount] = useState({ count: 0, more: false });
+  const onNativeCount = useCallback((count: number, more: boolean) => setNativeCount({ count, more }), []);
+  const category: Category = mediaFilter === "video" ? "video" : "all";
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [data, setData] = useState<{ items: Asset[]; total: number }>();
@@ -89,16 +96,14 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
 
   useEffect(() => {
     const controller = new AbortController();
-    if (!ready) return () => controller.abort();
+    if (!ready || collection !== "generated") { setData(undefined); setWebsites([]); setErrors([]); setBusy(false); return () => controller.abort(); }
     setBusy(true); setErrors([]); setData(undefined); setWebsites([]);
-    const storyRequest = category === "website"
-      ? Promise.resolve({ items: [] as Asset[], total: 0 })
-      : client.storyAssets(category, offset, controller.signal).then(response => {
+    const storyRequest = client.storyAssets(category, offset, controller.signal).then(response => {
         const result = isRecord(response.result) ? response.result : response;
         if (!Array.isArray(result.items) || typeof result.total !== "number") throw new Error("素材列表暂不可用，请刷新重试。");
         return { items: result.items.map(item => parseAsset(item)), total: result.total };
       });
-    const websiteRequest = client.allowedTools.includes("project_list") && (category === "all" || category === "website")
+    const websiteRequest = client.allowedTools.includes("project_list") && category === "all"
       ? client.project<{ projects: PublishedProject[] }>({ action: "list" }).then(result => result.projects.flatMap(project => {
         const url = publishedProjectUrl(project);
         return url ? [{ project, url }] : [];
@@ -108,24 +113,24 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
       if (controller.signal.aborted) return;
       const failures: string[] = [];
       if (storyResult.status === "fulfilled") setData(storyResult.value);
-      else failures.push("原有图片/视频素材暂时无法加载，请重试。营火素材可单独使用。");
+      else failures.push("项目素材加载失败，请重试。");
       if (websiteResult.status === "fulfilled") setWebsites(websiteResult.value);
       else failures.push("已发布网站暂时无法加载，请重试。");
       setErrors([...new Set(failures)]);
     }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
-  }, [client, ready, category, offset, refresh]);
+  }, [client, ready, collection, category, offset, refresh]);
 
   const empty = !busy && errors.length === 0 && websites.length === 0 && (data?.items.length ?? 0) === 0;
   const mediaCards = [
-    websites.map(({ project, url }) => <article className="asset-item website-item" key={project.id}>
+    websites.filter(({ project }) => mediaFilter === "all" && project.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(({ project, url }) => <article className="asset-item website-item" key={project.id}>
           <a className="asset-preview website-preview" href={url} target="_blank" rel="noreferrer" aria-label={`进入网站 ${project.title}`}>
             <iframe src={url} title={`${project.title} 网站缩略图`} sandbox="allow-scripts allow-same-origin" loading="lazy" tabIndex={-1} aria-hidden="true" />
             <span className="website-open">进入网站</span>
           </a>
           <div className="asset-meta"><h2 title={project.title}>{project.title}</h2><p>网站 · 已发布</p><p className="asset-project" title={url}>{project.slug}.demo.daoyintech.com</p></div>
         </article>),
-    data?.items.map(item => <article className="asset-item" key={item.id}>
+    data?.items.filter(item => (mediaFilter === "all" || item.mediaType === mediaFilter) && item.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(item => <article className="asset-item" key={item.id}>
         <button type="button" className="asset-preview" onClick={() => setSelected(item)} aria-label={`预览 ${item.title}`}>
           <AssetThumbnail asset={item} />
         </button>
@@ -135,14 +140,22 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
   ];
   return <section className="asset-library" aria-label="资产库">
     <header className="asset-toolbar"><h1>素材库</h1><button type="button" disabled={!ready || busy} onClick={() => setRefresh(v => v + 1)}>刷新</button></header>
-    <div className="asset-filters" aria-label="资产分类">{(Object.keys(categories) as Category[]).map(key => <button key={key} type="button" aria-pressed={category === key}
-      onClick={() => { setCategory(key); setOffset(0); }}>{categories[key]}</button>)}</div>
+    <div className="asset-toolbar asset-collections">
+      <div className="asset-tabs" aria-label="素材来源">{([["shop", "店铺素材"], ["generated", "已生成内容"]] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={collection === key} onClick={() => { setCollection(key); setOffset(0); }}>{label}</button>)}</div>
+      <div className="asset-actions"><span role="status">{nativeCount.count + mediaCards.flat().length}{nativeCount.more ? "+" : ""} 项</span>{client.allowedTools.includes("resource_campfire_list") && <button className="asset-primary" type="button" disabled={!ready} onClick={() => setUploadRequest(value => value + 1)}>上传素材</button>}</div>
+    </div>
+    <div className="asset-toolbar asset-browse">
+      <div className="asset-filters" aria-label="素材类型">{([["all", "全部"], ["image", "图片"], ["video", "视频"]] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={mediaFilter === key} onClick={() => { setMediaFilter(key); setOffset(0); }}>{label}</button>)}</div>
+      <div className="asset-browse-actions"><form className="asset-search" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); }}><input aria-label="搜索素材" placeholder="搜索素材" value={search} onChange={event => { setSearch(event.target.value); if (!event.target.value) setQuery(""); }} /><button type="submit">搜索</button></form>
+        <div className="asset-view" aria-label="素材视图"><button type="button" aria-label="瀑布流视图" aria-pressed={view === "masonry"} onClick={() => setView("masonry")}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button><button type="button" aria-label="列表视图" aria-pressed={view === "list"} onClick={() => setView("list")}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h13M8 12h13M8 19h13M3 5h1M3 12h1M3 19h1"/></svg></button></div>
+      </div>
+    </div>
     {!ready ? <div role="status"><p>请连接道引账号后查看资产。</p><button type="button" onClick={onConnect}>连接账号</button></div> : <>
       {busy && <p role="status">正在加载资产…</p>}
       {errors.map(message => <p role="alert" key={message}>{message} <button type="button" onClick={() => setRefresh(v => v + 1)}>重试加载</button></p>)}
       {empty && !client.allowedTools.includes("resource_campfire_list") && <p role="status">暂无{category === "all" ? "资产" : categories[category]}。</p>}
-      {client.allowedTools.includes("resource_campfire_list") ? <CampfireLibrary client={client} ready={ready} refreshKey={refresh} category={category}>{mediaCards}</CampfireLibrary> : <div className="asset-masonry">{mediaCards}</div>}
-      {category !== "website" && data && data.total > 0 && <footer className="asset-pagination" aria-label="项目素材分页"><span role="status">项目素材 {data.total} 项</span><button type="button"
+      {client.allowedTools.includes("resource_campfire_list") ? <CampfireLibrary client={client} ready={ready} refreshKey={refresh} collection={collection} mediaFilter={mediaFilter} query={query} view={view} uploadRequest={uploadRequest} onCountChange={onNativeCount}>{mediaCards}</CampfireLibrary> : <div className={`asset-${view}`}>{mediaCards}</div>}
+      {collection === "generated" && data && data.total > 0 && <footer className="asset-pagination" aria-label="项目素材分页"><span role="status">项目素材 {data.total} 项</span><button type="button"
         disabled={busy || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 24))}>上一页</button>
         <button type="button" disabled={busy || offset + 24 >= data.total} onClick={() => setOffset(v => v + 24)}>下一页</button></footer>}
     </>}
