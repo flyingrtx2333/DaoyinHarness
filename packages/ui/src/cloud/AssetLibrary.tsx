@@ -117,32 +117,32 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
   }, [client, ready, category, offset, refresh]);
 
   const empty = !busy && errors.length === 0 && websites.length === 0 && (data?.items.length ?? 0) === 0;
-  return <section className="asset-library" aria-label="资产库">
-    <header className="asset-toolbar"><h1>资产</h1><button type="button" disabled={!ready || busy} onClick={() => setRefresh(v => v + 1)}>刷新</button></header>
-    {client.allowedTools.includes("resource_campfire_list") && <CampfireLibrary client={client} ready={ready} />}
-    <div className="asset-filters" aria-label="资产分类">{(Object.keys(categories) as Category[]).map(key => <button key={key} type="button" aria-pressed={category === key}
-      onClick={() => { setCategory(key); setOffset(0); }}>{categories[key]}</button>)}</div>
-    {!ready ? <div role="status"><p>请连接道引账号后查看资产。</p><button type="button" onClick={onConnect}>连接账号</button></div> : <>
-      {busy && <p role="status">正在加载资产…</p>}
-      {errors.map(message => <p role="alert" key={message}>{message} <button type="button" onClick={() => setRefresh(v => v + 1)}>重试加载</button></p>)}
-      {empty && <p role="status">暂无{category === "all" ? "资产" : categories[category]}。</p>}
-      {websites.length > 0 && <div className="asset-grid website-grid" aria-label="已发布网站">
-        {websites.map(({ project, url }) => <article className="asset-item website-item" key={project.id}>
+  const mediaCards = [
+    websites.map(({ project, url }) => <article className="asset-item website-item" key={project.id}>
           <a className="asset-preview website-preview" href={url} target="_blank" rel="noreferrer" aria-label={`进入网站 ${project.title}`}>
             <iframe src={url} title={`${project.title} 网站缩略图`} sandbox="allow-scripts allow-same-origin" loading="lazy" tabIndex={-1} aria-hidden="true" />
             <span className="website-open">进入网站</span>
           </a>
           <div className="asset-meta"><h2 title={project.title}>{project.title}</h2><p>网站 · 已发布</p><p className="asset-project" title={url}>{project.slug}.demo.daoyintech.com</p></div>
-        </article>)}
-      </div>}
-      <div className="asset-grid">{data?.items.map(item => <article className="asset-item" key={item.id}>
+        </article>),
+    data?.items.map(item => <article className="asset-item" key={item.id}>
         <button type="button" className="asset-preview" onClick={() => setSelected(item)} aria-label={`预览 ${item.title}`}>
           <AssetThumbnail asset={item} />
         </button>
         <div className="asset-meta"><h2 title={item.title}>{item.title}</h2><p>{categories[item.category]} · {statuses[item.status] || item.status || "处理中"}</p>
           {item.project && <p className="asset-project" title={item.project}>{item.project}</p>}</div>
-      </article>)}</div>
-      {category !== "website" && data && data.total > 0 && <footer className="asset-pagination"><span role="status">共 {data.total} 项素材</span><button type="button"
+      </article>) ?? [],
+  ];
+  return <section className="asset-library" aria-label="资产库">
+    <header className="asset-toolbar"><h1>素材库</h1><button type="button" disabled={!ready || busy} onClick={() => setRefresh(v => v + 1)}>刷新</button></header>
+    <div className="asset-filters" aria-label="资产分类">{(Object.keys(categories) as Category[]).map(key => <button key={key} type="button" aria-pressed={category === key}
+      onClick={() => { setCategory(key); setOffset(0); }}>{categories[key]}</button>)}</div>
+    {!ready ? <div role="status"><p>请连接道引账号后查看资产。</p><button type="button" onClick={onConnect}>连接账号</button></div> : <>
+      {busy && <p role="status">正在加载资产…</p>}
+      {errors.map(message => <p role="alert" key={message}>{message} <button type="button" onClick={() => setRefresh(v => v + 1)}>重试加载</button></p>)}
+      {empty && !client.allowedTools.includes("resource_campfire_list") && <p role="status">暂无{category === "all" ? "资产" : categories[category]}。</p>}
+      {client.allowedTools.includes("resource_campfire_list") ? <CampfireLibrary client={client} ready={ready} refreshKey={refresh} category={category}>{mediaCards}</CampfireLibrary> : <div className="asset-masonry">{mediaCards}</div>}
+      {category !== "website" && data && data.total > 0 && <footer className="asset-pagination" aria-label="项目素材分页"><span role="status">项目素材 {data.total} 项</span><button type="button"
         disabled={busy || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 24))}>上一页</button>
         <button type="button" disabled={busy || offset + 24 >= data.total} onClick={() => setOffset(v => v + 24)}>下一页</button></footer>}
     </>}
