@@ -276,7 +276,6 @@ button.primary:hover:enabled { background: #174bcb; }
   .composer-controls .plugin-close { min-width: var(--ui-touch-target); min-height: var(--ui-touch-target); }
   .plugin-picker { max-width: calc(100vw - 64px); }
   .activity-line-copy { display: grid; gap: 1px; }
-  .activity-title, .activity-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .activity-details { margin-left: 20px; }
 }
 @media (max-height: 700px) {
