@@ -15,9 +15,9 @@ export interface CampfirePageOptions { shopId?: string; filterRole?: CampfireRol
 export function mergeCampfireAssets(previous: CampfireAsset[], incoming: CampfireAsset[]): CampfireAsset[] {
   return [...new Map([...previous, ...incoming].map(item => [item.id, item])).values()];
 }
-export async function campfireList(client: WorkbenchClient, options: CampfirePageOptions = {}): Promise<{ items: CampfireAsset[]; nextCursor: string | null }> {
+export async function campfireList(client: WorkbenchClient, options: CampfirePageOptions = {}, signal?: AbortSignal): Promise<{ items: CampfireAsset[]; nextCursor: string | null }> {
   const epoch = client.accountScope;
-  const result = await client.resource<{ items: unknown[]; hasMore?: boolean; nextCursor?: string | null }>({ action: "resource_campfire_list", ...options });
+  const result = await client.resource<{ items: unknown[]; hasMore?: boolean; nextCursor?: string | null }>({ action: "resource_campfire_list", ...options }, signal);
   if (epoch !== client.accountScope) throw new Error("账号已变化，请刷新当前账号素材。");
   if (result.hasMore && typeof result.nextCursor !== "string") throw new Error("素材分页未完成，请刷新后重试。");
   return { items: result.items.map(campfireAsset), nextCursor: result.hasMore ? result.nextCursor! : null };
