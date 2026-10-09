@@ -73,7 +73,7 @@ export class CampfireService {
     if (text(asset, "mediaType") === "text/plain") return { ...asset, content: (await this.content.read(text(asset, "digest"), 40000)).toString("utf8") };
     const requestedStart = request.startSeconds ?? null;
     const requestedDuration = request.durationSeconds ?? null;
-    const prior = (await this.#facts(auth, text(asset, "id"))).findLast(item => item.eventType === "campfire.media.inspected" && item.payload.analysisVersion === 2 && item.payload.requestedStart === requestedStart && item.payload.requestedDuration === requestedDuration);
+    const prior = (await this.#facts(auth, text(asset, "id"))).findLast(item => item.eventType === "campfire.media.inspected" && item.payload.analysisVersion === 3 && item.payload.requestedStart === requestedStart && item.payload.requestedDuration === requestedDuration);
     if (prior) return { ...asset, ...prior.payload };
     const workspaceId = await this.#workspace(auth, request, [asset]);
     const path = `${text(asset, "id")}.${this.#extension(text(asset, "mediaType"))}`;
@@ -83,7 +83,7 @@ export class CampfireService {
     if (text(asset, "mediaType").startsWith("audio/")) {
       const duration = Number(probe.format?.duration);
       if (!probe.streams?.some(stream => stream.codec_type === "audio") || !Number.isFinite(duration) || duration <= 0 || duration > 3600) fail("CAMPFIRE_AUDIO_INVALID", "音轨没有可用音频，或时长超出1小时限制。", 422);
-      const data: Data = { analysisVersion: 2, requestedStart, requestedDuration, durationSeconds: duration, hasAudio: true };
+      const data: Data = { analysisVersion: 3, requestedStart, requestedDuration, durationSeconds: duration, hasAudio: true };
       await this.#append(auth, text(asset, "id"), "campfire.media.inspected", data, request);
       return { ...asset, ...data };
     }
@@ -98,24 +98,34 @@ export class CampfireService {
     if (isVideo && (windowStart >= duration || windowDuration > duration - windowStart + 0.05))
       fail("CAMPFIRE_WINDOW_INVALID", `视频真实总长${duration}秒；当前起点${windowStart}秒，请求分析${windowDuration}秒。该起点最多可分析${Number(Math.max(0, duration - windowStart).toFixed(6))}秒。请按此范围调整窗口，或省略时间窗口查看完整素材，不必反复猜测时长。`);
     const windowArgs = isVideo ? ["-ss", String(windowStart), "-t", String(Math.min(windowDuration, duration - windowStart))] : [];
-    const filter = isVideo ? `fps=1/${Math.max(windowDuration / 6, 0.01)},scale=160:160:force_original_aspect_ratio=decrease,pad=160:160:(ow-iw)/2:(oh-ih)/2,tile=3x2` : "scale=320:320:force_original_aspect_ratio=decrease";
-    await this.#process(workspaceId, "/usr/bin/ffmpeg", ["-v", "error", "-nostdin", "-y", ...windowArgs, "-i", path, "-vf", filter, "-frames:v", "1", "-q:v", "25", "frames.jpg"], request, signal);
-    const exported = await this.executor({ action: "workspace_prepare", operation: "snapshot", workspaceId }, signal);
-    const frame = (exported.entries as WorkspaceEntry[]).find(entry => entry.path === "frames.jpg");
-    if (!frame || frame.kind !== "file" || frame.size > 14000) fail("CAMPFIRE_FRAME_INVALID", "抽样画面未能保存，未分析画面内容。", 422);
-    const data: Data = { analysisVersion: 2, requestedStart, requestedDuration, durationSeconds: duration, width: video.width, height: video.height, hasAudio: Boolean(probe.streams?.some(stream => stream.codec_type === "audio")),
-      ...(isVideo ? { windowStartSeconds: windowStart, windowDurationSeconds: windowDuration, sampleTimesSeconds: Array.from({ length: 6 }, (_, index) => Number((windowStart + index * windowDuration / 6).toFixed(3))) } : {}),
-      sampledFrames: isVideo ? 6 : 1, visualEvidence: { mimeType: "image/jpeg", dataBase64: (await this.content.read(frame.blobHash, 14000)).toString("base64") } };
+    let sampleTargets = Array.from({ length: 6 }, (_, index) => index * windowDuration / 6);
+    const referenceAnalysis: Data = {};
     if (isVideo && asset.role === "reference_video") {
       const cuts = await this.#process(workspaceId, "/usr/bin/ffmpeg", ["-v", "info", "-nostdin", ...windowArgs, "-i", path, "-vf", "select=gt(scene\\,0.35),showinfo", "-an", "-f", "null", "-"], request, signal);
       const detected = [...String(cuts.stderr).matchAll(/pts_time:([0-9.]+)/gu)].map(match => Number(match[1]) + windowStart).filter(time => Number.isFinite(time) && time > windowStart && time < windowStart + windowDuration);
       const unique = [...new Set(detected)].sort((a, b) => a - b);
-      data.cutTimesSeconds = unique.slice(0, 80);
       const boundaries = [windowStart, ...unique.slice(0, 80), windowStart + windowDuration];
-      data.shotIntervals = boundaries.slice(0, -1).map((start, index) => ({ startSeconds: start, endSeconds: boundaries[index + 1]!, durationSeconds: Number((boundaries[index + 1]! - start).toFixed(3)) }));
-      data.cutDetection = "画面变化阈值 0.35 的启发式切点，不代表逐镜头语义识别";
-      data.cutTimesTruncated = unique.length > 80;
+      const intervals = boundaries.slice(0, -1).map((start, index) => ({ startSeconds: start, endSeconds: boundaries[index + 1]!, durationSeconds: Number((boundaries[index + 1]! - start).toFixed(3)) }));
+      const candidates = intervals.filter(interval => interval.durationSeconds >= 0.5);
+      if (candidates.length >= 6) sampleTargets = Array.from({ length: 6 }, (_, index) => {
+        const interval = candidates[Math.round(index * (candidates.length - 1) / 5)]!;
+        return (interval.startSeconds + interval.endSeconds) / 2 - windowStart;
+      });
+      Object.assign(referenceAnalysis, { cutTimesSeconds: unique.slice(0, 80), shotIntervals: intervals,
+        cutDetection: "画面变化阈值 0.35 的启发式候选切点，不代表逐镜头语义识别", cutTimesTruncated: unique.length > 80,
+        sampleStrategy: candidates.length >= 6 ? "六个分布于窗口的候选镜头中点；非全部镜头，空缺须按时间窗口继续查看" : "窗口内六个等距目标时间；候选切点不足以覆盖六个镜头" });
     }
+    const selection = sampleTargets.map((target, index) => `${index === 0 ? "isnan(prev_selected_t)" : `lt(prev_selected_t,${target})`}*gte(t,${target})`).join("+");
+    const filter = isVideo ? `select='${selection}',showinfo,scale=160:160:force_original_aspect_ratio=decrease,pad=160:160:(ow-iw)/2:(oh-ih)/2,tile=3x2` : "scale=320:320:force_original_aspect_ratio=decrease";
+    const sampled = await this.#process(workspaceId, "/usr/bin/ffmpeg", ["-v", isVideo ? "info" : "error", "-nostdin", "-y", ...windowArgs, "-i", path, "-vf", filter, "-frames:v", "1", "-q:v", "25", "frames.jpg"], request, signal);
+    const sampleTimes = isVideo ? [...String(sampled.stderr).matchAll(/pts_time:([0-9.]+)/gu)].map(match => Number((Number(match[1]) + windowStart).toFixed(6))) : [];
+    if (isVideo && sampleTimes.length !== 6) fail("CAMPFIRE_FRAME_INVALID", "未能取得六个实际视频帧，请选择更长的分析窗口。", 422);
+    const exported = await this.executor({ action: "workspace_prepare", operation: "snapshot", workspaceId }, signal);
+    const frame = (exported.entries as WorkspaceEntry[]).find(entry => entry.path === "frames.jpg");
+    if (!frame || frame.kind !== "file" || frame.size > 14000) fail("CAMPFIRE_FRAME_INVALID", "抽样画面未能保存，未分析画面内容。", 422);
+    const data: Data = { analysisVersion: 3, requestedStart, requestedDuration, durationSeconds: duration, width: video.width, height: video.height, hasAudio: Boolean(probe.streams?.some(stream => stream.codec_type === "audio")),
+      ...(isVideo ? { windowStartSeconds: windowStart, windowDurationSeconds: windowDuration, sampleTimesSeconds: sampleTimes, sampleOrder: "从左到右、从上到下；时间来自实际解码帧" } : {}), ...referenceAnalysis,
+      sampledFrames: isVideo ? 6 : 1, visualEvidence: { mimeType: "image/jpeg", dataBase64: (await this.content.read(frame.blobHash, 14000)).toString("base64") } };
     await this.#append(auth, text(asset, "id"), "campfire.media.inspected", data, request);
     return { ...asset, ...data };
   }
