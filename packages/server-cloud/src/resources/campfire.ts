@@ -64,10 +64,14 @@ export class CampfireService {
       ["480p", "720p", "1080p"].includes(text(quote, "resolution")) && /^[a-f0-9]{64}$/u.test(text(quote, "pricingDigest")) &&
       estimated !== undefined && reserve !== undefined && reserve >= estimated;
   }
+  #publicSupplementQuote(input: Data, quote: Data, id: string): Data {
+    const { reserveCredits, ...value } = quote;
+    return { ...input, ...value, id, requiredBalanceCredits: reserveCredits!, balanceReserved: false };
+  }
   async #supplementState(auth: ExecutionIdentity, id: string, request: ResourceControlRequest, signal: AbortSignal): Promise<Data> {
     const { input, quote, facts } = await this.#supplementQuote(auth, id);
     if (facts.some(item => item.eventType === "campfire.media.ready")) return { summary: "已读取本店AI演绎素材", asset: await this.#manifest(auth, id), status: "succeeded", reused: true, untrusted: true };
-    if (!facts.some(item => item.eventType === "campfire.supplement.started")) return { summary: "补镜头尚未提交生成", status: facts.some(item => item.eventType === "campfire.supplement.approved") ? "approved" : "awaiting_confirmation", quote: { ...input, ...quote, id }, untrusted: true };
+    if (!facts.some(item => item.eventType === "campfire.supplement.started")) return { summary: "补镜头仅报价和额度预检查，未冻结积分、未提交生成", status: facts.some(item => item.eventType === "campfire.supplement.approved") ? "approved" : "awaiting_confirmation", quote: this.#publicSupplementQuote(input, quote, id), untrusted: true };
     if (!this.gateway) fail("CAMPFIRE_VIDEO_UNAVAILABLE", "主平台补镜头网关尚未配置。", 503);
     const state = await this.gateway.video(auth, { operation: "status", requestId: id }, signal);
     if (state.requestId !== id || !["processing", "queued", "running", "succeeded", "failed", "cancelled", "expired"].includes(text(state, "status"))) fail("CAMPFIRE_VIDEO_RESULT_INVALID", "补镜头状态回执无效，未标记成功。", 502);
@@ -188,7 +192,7 @@ export class CampfireService {
       if (!this.#videoQuoteValid(quote)) fail("CAMPFIRE_VIDEO_RESULT_INVALID", "补镜头报价回执无效，未提交生成。", 502);
       const saved = { ...quote, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() };
       await this.#append(auth, id, "campfire.supplement.quoted", saved, request);
-      return { summary: "AI演绎补镜头方案与报价已保存，等待用户确认", quote: { ...data, ...saved, id }, requiresConfirmation: true, untrusted: true };
+      return { summary: "AI演绎补镜头方案与报价已保存；仅额度预检查，未冻结积分、未提交生成，等待用户确认", quote: this.#publicSupplementQuote(data, saved, id), requiresConfirmation: true, untrusted: true };
     }
     if (request.action === "resource_media_supplement_approve" || request.action === "resource_campfire_supplement" || request.action === "resource_campfire_supplement_status") {
       const id = idOf(request);
