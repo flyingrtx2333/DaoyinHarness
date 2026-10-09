@@ -48,7 +48,13 @@ validated reply and immutable `turn.completed` event carry optional
 `taskOutcome`; missing older declarations become `unknown`. A completed turn
 still means the reply finished. A model-reported task outcome is not verified
 business success, official SWE grading or permission to repeat external writes.
-Historical context retains this distinction. No database migration or existing
+Historical context retains this distinction. For tool-free closing requests, the
+provider adapter projects existing tool requests and receipts into explicitly
+quoted text records. This preserves the actual evidence while removing protocol
+tool-call messages that an observed provider still continued despite
+`tool_choice=none`. Ordinary tool-enabled requests are unchanged; an unexpected
+new tool call is still rejected. Safe timing facts also enter the scoped usage
+record because success-level application logs may be disabled. No database migration or existing
 event rewriting is required.
 
 ## Acceptance
