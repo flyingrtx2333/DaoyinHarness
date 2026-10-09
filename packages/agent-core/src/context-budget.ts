@@ -17,6 +17,8 @@ export interface ModelContextBudget {
   maxToolResultCharacters?: number;
   /** Last reserved request: quote validated observations without executable assistant examples. */
   observationOnly?: boolean;
+  /** Derived final-phase request, placed after observations and counted in the same bounds. */
+  closingInstruction?: string;
 }
 
 function observationBatch(group: readonly ModelConversationItem[]): ModelConversationItem {
@@ -94,7 +96,8 @@ export function boundModelContext(input: ModelContextBudget): ModelConversationI
     const receipt: ModelConversationItem[] = input.runtimeNote ? [{ role: "system", content: input.runtimeNote }] : [];
     const observations = input.observationOnly ? batches.map(observationBatch) : batches.flat();
     const derivedNote = note === undefined ? [] : [input.observationOnly ? { ...note, role: "user" as const } : note];
-    return [input.systemMessage, ...receipt, ...history, user, ...derivedNote, ...observations];
+    const closure: ModelConversationItem[] = input.closingInstruction ? [{ role: "user", content: input.closingInstruction }] : [];
+    return [input.systemMessage, ...receipt, ...history, user, ...derivedNote, ...observations, ...closure];
   };
   const fits = (messages: readonly ModelConversationItem[]): boolean => messages.length <= input.maxMessages &&
     JSON.stringify(messages).length + input.overheadCharacters <= input.maxCharacters;

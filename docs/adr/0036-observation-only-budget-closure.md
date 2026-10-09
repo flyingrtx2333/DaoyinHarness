@@ -10,6 +10,9 @@ requests offered no tools. The provider returned ordinary text resembling the
 adapter's assistant-role tool-history records, including new operations that
 never ran, and omitted the task-outcome declaration. A finished turn was not a
 finished task. This is a general closure problem, not a benchmark-specific rule.
+A subsequent ordinary file task succeeded, but a bounded file task still returned
+unevaluated tool markup after the observation projection. System instructions
+alone did not reliably switch that request from execution to result reporting.
 
 ## Decision
 
@@ -30,7 +33,12 @@ longer send protocol tool messages to it.
 
 Closure instructions ask for the user's requested deliverable, actual completed
 work, verification and unfinished work. Proposed operations must not appear as
-executed receipts. Retain the existing cloud outcome declaration; missing reports
+executed receipts. Put a derived runtime phase-switch request after all retained
+observations, including the result declaration contract, so the last input asks
+for a result report rather than continuation from tool data. Count this request
+in the same message/character limits and context-rejection recovery; it adds no
+model calls, tool access or user transcript event. Retain the existing cloud
+outcome declaration; missing reports
 remain unknown and self-reported completed still requires independent evidence.
 Do not infer task success from prose or manufacture a completed declaration.
 
