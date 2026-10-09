@@ -9,7 +9,7 @@ import { verifyCloudLongTasks } from './verify-cloud-long-task-live.mjs';
 const revision = process.argv[process.argv.indexOf('--expected-revision') + 1];
 const closureOnly = process.argv.includes('--closure-only');
 if (!process.argv.includes('--run')) {
-  console.log(JSON.stringify({ status: 'prepared-not-executed', scenarios: ['csv', 'budget-closure'], maxSharedCalls: 24 }));
+  console.log(JSON.stringify({ status: 'prepared-not-executed', scenarios: closureOnly ? ['budget-closure'] : ['csv', 'budget-closure'], maxSharedCalls: closureOnly ? 12 : 24 }));
   process.exit(0);
 }
 if (!process.argv.includes('--expected-revision') || !/^[a-f0-9]{40}$/u.test(revision ?? '')) throw new Error('Exact runtime revision required.');
