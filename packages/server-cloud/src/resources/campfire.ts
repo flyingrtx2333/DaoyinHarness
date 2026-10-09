@@ -267,13 +267,22 @@ export class CampfireService {
       if (!segments.length) fail("CAMPFIRE_PLAN_EMPTY", "剪辑计划至少需要一个真实素材片段。");
       const plannedDuration = segments.reduce((sum, item) => sum + item.durationSeconds, 0);
       if (plannedDuration > 180) fail("CAMPFIRE_PLAN_TOO_LONG", "成片长度不超过180秒。");
-      for (const segment of segments) {
+      const invalidRanges: string[] = [];
+      for (const [index, segment] of segments.entries()) {
         const asset = await this.#manifest(auth, segment.assetId);
         if (asset.shopId !== request.shopId || !["shop_video", "shop_image"].includes(text(asset, "role"))) fail("CAMPFIRE_REFERENCE_NOT_FOOTAGE", "成片只能使用所选店铺的实拍图片或视频，不能使用参考视频或其他店铺素材。", 403);
         const inspected = (await this.#facts(auth, segment.assetId)).findLast(item => item.eventType === "campfire.media.inspected");
         if (!inspected) fail("CAMPFIRE_INSPECT_REQUIRED", "请先实际读取每个待用素材的时长和抽样画面。", 409);
-        if (asset.mediaType === "video/mp4" && segment.startSeconds + segment.durationSeconds > Number(inspected.payload.durationSeconds) + 0.05 || asset.mediaType !== "video/mp4" && segment.startSeconds !== 0) fail("CAMPFIRE_SEGMENT_RANGE_INVALID", "剪辑片段超出真实素材时长。");
+        if (asset.mediaType === "video/mp4") {
+          const sourceDuration = Number(inspected.payload.durationSeconds);
+          if (segment.startSeconds + segment.durationSeconds > sourceDuration + 0.05) {
+            invalidRanges.push(`镜头${index + 1} ${segment.assetId}：真实总长${sourceDuration}秒，当前从${segment.startSeconds}秒取${segment.durationSeconds}秒；保持起点时最多取${Number(Math.max(0, sourceDuration - segment.startSeconds).toFixed(6))}秒`);
+          }
+        } else if (segment.startSeconds !== 0) {
+          invalidRanges.push(`镜头${index + 1} ${segment.assetId}：图片起点必须为0秒，当前为${segment.startSeconds}秒`);
+        }
       }
+      if (invalidRanges.length) fail("CAMPFIRE_SEGMENT_RANGE_INVALID", `计划未保存，旧成片保留。${invalidRanges.join("；")}。请直接根据上述真实范围修正全部越界镜头后保存新计划；无需重复inspect已检查素材。`);
       for (const [key, role] of [["narrationId", "narration_audio"], ["musicId", "background_music"]] as const) {
         const id = request.audio?.[key];
         if (!id) continue;
