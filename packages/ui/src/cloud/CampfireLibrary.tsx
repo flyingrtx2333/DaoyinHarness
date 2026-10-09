@@ -1,16 +1,18 @@
 import { Children, useEffect, useRef, useState } from "react";
+import { CampfireShopManager } from "./CampfireShopManager.js";
 import type { WorkbenchClient } from "./client.js";
-import { CAMPFIRE_LABELS, campfireAssetLabel, campfireBlob, campfireList, campfireProfile, campfireReadProfile, mergeCampfireAssets, campfireUpload, type CampfireAsset, type CampfireRole } from "./campfire-client.js";
+import { CAMPFIRE_LABELS, campfireAssetLabel, campfireBlob, campfireList, mergeCampfireAssets, campfireUpload, type CampfireAsset, type CampfireRole } from "./campfire-client.js";
 
-export function CampfireLibrary({ client, ready, refreshKey = 0, collection, mediaFilter, query, view, uploadRequest, onCountChange, children }: { client: WorkbenchClient; ready: boolean; refreshKey?: number; collection: "shop" | "generated"; mediaFilter: "all" | "image" | "video"; query: string; view: "masonry" | "list"; uploadRequest: number; onCountChange: (count: number, more: boolean) => void; children?: React.ReactNode }): React.JSX.Element {
+export function CampfireLibrary({ client, ready, refreshKey = 0, collection, mediaFilter, query, view, uploadRequest, manageRequest, onCountChange, children }: { client: WorkbenchClient; ready: boolean; refreshKey?: number; collection: "shop" | "generated"; mediaFilter: "all" | "image" | "video"; query: string; view: "masonry" | "list"; uploadRequest: number; manageRequest: number; onCountChange: (count: number, more: boolean) => void; children?: React.ReactNode }): React.JSX.Element {
   const [showUpload, setShowUpload] = useState(false);
   const lastUploadRequest = useRef(uploadRequest);
   useEffect(() => { if (uploadRequest !== lastUploadRequest.current) { lastUploadRequest.current = uploadRequest; setShowUpload(true); } }, [uploadRequest]);
   const [items, setItems] = useState<CampfireAsset[]>([]);
   const [shopId, setShopId] = useState("");
   const [role, setRole] = useState<Exclude<CampfireRole, "shop_profile" | "output_video">>("shop_video");
-  const [title, setTitle] = useState(""); const [content, setContent] = useState("");
-  const [showProfile, setShowProfile] = useState(false); const [editing, setEditing] = useState<CampfireAsset>();
+  const [manager, setManager] = useState<string>();
+  const lastManageRequest = useRef(manageRequest);
+  useEffect(() => { if (manageRequest !== lastManageRequest.current) { lastManageRequest.current = manageRequest; setManager(shopId); } }, [manageRequest, shopId]);
   const [shops, setShops] = useState<CampfireAsset[]>([]); const [shopCursor, setShopCursor] = useState<string | null>(null); const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false); const [progress, setProgress] = useState<number>(); const [error, setError] = useState("");
   const [selected, setSelected] = useState<CampfireAsset>(); const fileInput = useRef<HTMLInputElement>(null);
@@ -37,22 +39,7 @@ export function CampfireLibrary({ client, ready, refreshKey = 0, collection, med
     finally { if (scope === client.accountScope) setBusy(false); }
   }
   useEffect(() => { if (ready) void refresh(); }, [client, ready, scope, refreshKey]);
-  useEffect(() => { setItems([]); setShops([]); setShopId(""); setSelected(undefined); setEditing(undefined); setShowProfile(false); setTitle(""); setContent(""); }, [scope]);
-  async function editProfile(asset: CampfireAsset): Promise<void> {
-    setBusy(true); setError("");
-    try { const latest = await campfireReadProfile(client, asset.id); if (scope !== client.accountScope) return; setEditing(latest); setTitle(latest.title); setContent(latest.content ?? ""); setShowProfile(true); setShowUpload(true); }
-    catch (cause) { if (scope === client.accountScope) setError(cause instanceof Error ? cause.message : "店铺资料读取失败。"); }
-    finally { if (scope === client.accountScope) setBusy(false); }
-  }
-  async function saveProfile(event: React.FormEvent): Promise<void> {
-    event.preventDefault(); if (!title.trim() || !content.trim() || busy) return; setBusy(true); setError("");
-    try {
-      const asset = await campfireProfile(client, title.trim(), content.trim(), editing);
-      if (scope !== client.accountScope) return;
-      setItems(current => mergeCampfireAssets([asset], current.filter(item => item.id !== asset.id))); setShops(current => mergeCampfireAssets([asset], current.filter(item => item.id !== asset.id))); setEditing(undefined); setShopId(asset.id); setTitle(""); setContent(""); setShowProfile(false);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "店铺资料未保存。"); }
-    finally { setBusy(false); }
-  }
+  useEffect(() => { setItems([]); setShops([]); setShopId(""); setSelected(undefined); setManager(undefined); }, [scope]);
   async function upload(files: File[]): Promise<void> {
     setBusy(true); setError("");
     try {
@@ -66,17 +53,11 @@ export function CampfireLibrary({ client, ready, refreshKey = 0, collection, med
     finally { setBusy(false); setProgress(undefined); }
   }
   return <section className="campfire-library" aria-label="营火素材库">
-    {showUpload && <UploadDialog busy={busy} onClose={() => { setShowUpload(false); setShowProfile(false); }}>
-    {showProfile && <form className="asset-form" onSubmit={event => { void saveProfile(event); }}>
-      <label>店铺名称<input value={title} onChange={event => setTitle(event.target.value)} maxLength={120} required disabled={busy} /></label>
-      <label>店铺资料<textarea value={content} onChange={event => setContent(event.target.value)} maxLength={10000} rows={5} required disabled={busy} placeholder="地址、特色、商品与宣传信息" /></label>
-      <button type="submit" disabled={busy}>{editing ? "保存资料修改" : "保存店铺资料"}</button><button type="button" disabled={busy} onClick={() => { setShowProfile(false); setEditing(undefined); setTitle(""); setContent(""); }}>取消编辑</button>
-    </form>}
+    {showUpload && <UploadDialog busy={busy} onClose={() => { setShowUpload(false); }}>
     <div className="asset-upload-controls">
-      <label className="asset-control">店铺<select aria-label="营火素材所属店铺" value={shopId} onChange={event => setShopId(event.target.value)} disabled={busy}><option value="">全部店铺</option>{shops.map(shop => <option key={shop.id} value={shop.id}>{shop.title}</option>)}</select></label>
-      <button type="button" disabled={!ready || busy} onClick={() => { setEditing(undefined); setTitle(""); setContent(""); setShowProfile(true); }}>添加店铺资料</button>
+      <label className="asset-control">店铺<select aria-label="营火素材所属店铺" value={shopId} onChange={event => setShopId(event.target.value)} disabled={busy}><option value="">选择店铺</option>{shops.map(shop => <option key={shop.id} value={shop.id}>{shop.title}</option>)}</select></label>
+      <button type="button" disabled={!ready || busy} onClick={() => setManager(shopId)}>管理店铺</button>
       {shopCursor && <button type="button" disabled={busy} onClick={() => { void loadMore(true); }}>加载更多店铺</button>}
-      {shopId && <button type="button" disabled={busy || !ready} onClick={() => { const shop = shops.find(item => item.id === shopId); if (shop) void editProfile(shop); }}>修改当前店铺资料</button>}
       <label className="asset-control">上传类型<select aria-label="营火素材用途" value={role} onChange={event => setRole(event.target.value as typeof role)} disabled={busy}>{(["shop_image", "shop_video", "shop_document", "reference_video", "narration_audio", "background_music"] as const).map(key => <option key={key} value={key}>{CAMPFIRE_LABELS[key]}</option>)}</select></label>
       <input ref={fileInput} className="composer-file-input" aria-label="上传营火素材" type="file" multiple disabled={busy || !ready || !shopId && role !== "reference_video"}
         accept={role === "shop_image" ? "image/jpeg,image/png,image/webp" : role === "shop_document" ? ".txt,.md" : role === "narration_audio" || role === "background_music" ? ".mp3,.wav,.m4a" : "video/mp4"}
@@ -90,9 +71,10 @@ export function CampfireLibrary({ client, ready, refreshKey = 0, collection, med
     {!busy && !visibleItems.length && !Children.toArray(children).length && <p role="status">暂无素材</p>}
     <div className={`asset-${view}`} aria-label={view === "masonry" ? "全部素材瀑布流" : "全部素材列表"}>{visibleItems.map(item => <article className={`asset-item${item.mediaType.startsWith("image/") || item.mediaType === "video/mp4" ? "" : " asset-text-item"}`} key={item.id}>
       <button type="button" className="asset-preview" aria-label={`预览营火素材 ${item.title}`} onClick={() => setSelected(item)}><CampfireThumbnail client={client} asset={item} /></button>
-      <div className="asset-meta"><h2 title={item.title}>{item.title}</h2><p>{campfireAssetLabel(item)}{item.durationSeconds ? ` · ${Math.round(item.durationSeconds)}秒` : ""}</p>{item.role === "shop_profile" && <button type="button" disabled={busy || !ready} onClick={() => { void editProfile(item); }}>修改资料</button>}</div>
+      <div className="asset-meta"><h2 title={item.title}>{item.title}</h2><p>{campfireAssetLabel(item)}{item.durationSeconds ? ` · ${Math.round(item.durationSeconds)}秒` : ""}</p>{item.role === "shop_profile" && <button type="button" disabled={busy || !ready} onClick={() => { setManager(item.id); }}>修改资料</button>}</div>
     </article>)}{children}</div>
     {nextCursor && <button type="button" disabled={busy} onClick={() => { void loadMore(); }}>加载更多素材</button>}
+    {manager !== undefined && <CampfireShopManager key={scope} client={client} initialShopId={manager} onClose={() => setManager(undefined)} useLabel="上传本店素材" onChanged={asset => { setItems(current => mergeCampfireAssets([asset], current.filter(item => item.id !== asset.id))); setShops(current => mergeCampfireAssets([asset], current.filter(item => item.id !== asset.id))); setShopId(asset.id); }} onUse={asset => { setShopId(asset.id); setShowUpload(true); setManager(undefined); }} />}
     {selected && <CampfirePreview client={client} asset={selected} onClose={() => setSelected(undefined)} />}
   </section>;
 }

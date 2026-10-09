@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CampfireThumbnail, CampfirePreview } from "./CampfireLibrary.js";
+import { CampfireShopManager } from "./CampfireShopManager.js";
 import { WorkbenchIcon } from "./WorkbenchIcon.js";
 import type { WorkbenchClient } from "./client.js";
 import { campfireList, mergeCampfireAssets, campfireUpload, type CampfireAsset, type CampfireSelection } from "./campfire-client.js";
@@ -7,6 +8,7 @@ import { campfireList, mergeCampfireAssets, campfireUpload, type CampfireAsset, 
 export function CampfirePicker({ client, initialSelection, initialRequirements, onSelect, onClose }: { client: WorkbenchClient; initialSelection?: CampfireSelection; initialRequirements: string; onSelect: (selection: CampfireSelection) => void; onClose: () => void }): React.JSX.Element {
   const dialog = useRef<HTMLDialogElement>(null); const input = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<CampfireAsset[]>([]); const [shopId, setShopId] = useState(initialSelection?.shopId ?? ""); const [referenceId, setReferenceId] = useState(initialSelection?.referenceId ?? "");
+  const [managerOpen, setManagerOpen] = useState(false);
   const [requirements, setRequirements] = useState(initialRequirements); const [preview, setPreview] = useState<CampfireAsset>();
   const [shopCursor, setShopCursor] = useState<string | null>(null); const [referenceCursor, setReferenceCursor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false); const [loadingShops, setLoadingShops] = useState(true); const [loadingReferences, setLoadingReferences] = useState(true);
@@ -54,8 +56,9 @@ export function CampfirePicker({ client, initialSelection, initialRequirements, 
       <div className="campfire-picker-body">
         <div className="asset-form campfire-picker-form">
           <label>店铺<select aria-label="选择营火店铺" value={shopId} disabled={busy || loadingShops} onChange={event => setShopId(event.target.value)}><option value="">{loadingShops ? "正在加载店铺…" : "选择店铺资料"}</option>{shops.map(shop => <option key={shop.id} value={shop.id}>{shop.title}</option>)}</select></label>
+          <button type="button" disabled={busy} onClick={() => setManagerOpen(true)}>管理店铺</button>
           {shopCursor && <button type="button" disabled={busy} onClick={() => { void loadMore("shop_profile"); }}>加载更多店铺</button>}
-          {!loadingShops && !shops.length && !error && <p>请先在素材库添加店铺资料与实拍素材。</p>}
+          {!loadingShops && !shops.length && !error && <p>点击管理店铺，添加店铺资料。</p>}
           <label>制作要求<textarea aria-label="制作要求" rows={6} maxLength={2000} value={requirements} disabled={busy} placeholder="描述想要的风格、时长和重点…" onChange={event => setRequirements(event.target.value)} /><span className="campfire-requirements-count">{requirements.length}/2000</span></label>
           <label className="campfire-no-reference"><input type="radio" name="campfire-reference-mode" checked={!referenceId} disabled={busy} onChange={event => { if (event.target.checked) setReferenceId(""); }} />不使用参考视频</label>
         </div>
@@ -78,6 +81,7 @@ export function CampfirePicker({ client, initialSelection, initialRequirements, 
       {error && <div className="campfire-picker-error"><p role="alert">{error}</p><button type="button" disabled={busy || loadingShops || loadingReferences} onClick={() => setReload(current => current + 1)}>重新加载素材</button></div>}
       <footer className="campfire-picker-footer"><div className="campfire-picked-summary" aria-live="polite">{selectedReference ? <><span>已选择 1 个参考视频</span><b title={selectedReference.title}>{selectedReference.title}</b><button type="button" aria-label="移除已选参考视频" disabled={busy} onClick={() => setReferenceId("")}>×</button></> : <span>不使用参考视频</span>}</div><button type="button" className="primary" disabled={busy || !selectedShop || !!referenceId && !selectedReference} onClick={() => { if (selectedShop) onSelect({ shopId, shopTitle: selectedShop.title, ...(selectedReference ? { referenceId: selectedReference.id, referenceTitle: selectedReference.title } : {}), ...(requirements.trim() ? { requirements: requirements.trim() } : {}) }); }}>使用营火能力</button></footer>
     </dialog>
+    {managerOpen && <CampfireShopManager key={client.accountScope} client={client} initialShopId={shopId} onClose={() => setManagerOpen(false)} useLabel="使用此店铺" onChanged={asset => { setItems(current => mergeCampfireAssets([asset], current.filter(item => item.id !== asset.id))); }} onUse={asset => { setItems(current => mergeCampfireAssets([asset], current.filter(item => item.id !== asset.id))); setShopId(asset.id); setManagerOpen(false); }} />}
     {preview && <CampfirePreview client={client} asset={preview} onClose={() => setPreview(undefined)} />}
   </>;
 }

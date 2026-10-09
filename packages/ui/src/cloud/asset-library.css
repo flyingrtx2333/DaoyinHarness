@@ -4,7 +4,7 @@
 .asset-toolbar h1 { font-size:var(--ui-font-title); margin:0; }
 .asset-toolbar h2 { font-size:var(--ui-font-section); margin:0; flex:1; min-width:0; overflow-wrap:anywhere; }
 .asset-library button,.asset-dialog button,.asset-download { min-height:var(--ui-control-height); font-size:var(--ui-font-control); border:1px solid var(--ui-line); border-radius:var(--ui-radius-control); padding:var(--ui-space-2) var(--ui-space-3); background:white; color:var(--ui-ink); cursor:pointer; }
-.asset-library button:disabled { opacity:.55; cursor:default; }
+.asset-library button:disabled,.asset-dialog button:disabled { opacity:.55; cursor:default; }
 .asset-library button:focus-visible,.asset-dialog button:focus-visible,.asset-download:focus-visible { outline:2px solid var(--ui-accent); outline-offset:2px; }
 .asset-download { display:inline-flex; align-items:center; justify-content:center; gap:var(--ui-space-2); box-sizing:border-box; color:var(--ui-accent); background:var(--ui-accent-soft); text-decoration:none; font-weight:500; transition:background 160ms ease,border-color 160ms ease; }
 .asset-download:hover { background:color-mix(in srgb,var(--ui-accent) 12%,white); border-color:var(--ui-accent); }
@@ -147,3 +147,19 @@
 .website-preview:hover .website-open,.website-preview:focus-visible .website-open{opacity:1;transform:none}
 .website-item .asset-project{font-size:12px}
 @media(max-width:640px){.website-open{opacity:1;transform:none}}
+
+.campfire-shop-manager { max-width:760px; }
+.campfire-shop-layout { display:grid; grid-template-columns:200px minmax(0,1fr); gap:var(--ui-space-4); }
+.campfire-shop-list { display:flex; flex-direction:column; gap:var(--ui-space-2); min-width:0; }
+.campfire-shop-list button { text-align:left; overflow-wrap:anywhere; }
+.campfire-shop-list button[aria-pressed=true] { background:var(--ui-accent-soft); color:var(--ui-accent); border-color:var(--ui-accent); }
+.campfire-shop-form { margin:0; min-width:0; }
+.campfire-shop-form h3 { margin:0; font-size:var(--ui-font-section); }
+.campfire-shop-form textarea { resize:vertical; min-height:160px; max-height:40dvh; }
+.campfire-shop-actions { display:flex; flex-wrap:wrap; gap:var(--ui-space-2); }
+@media (max-width:640px) {
+  .campfire-shop-layout { grid-template-columns:minmax(0,1fr); }
+  .campfire-shop-list { max-height:180px; overflow:auto; }
+  .campfire-shop-form input,.campfire-shop-form textarea { font-size:16px; }
+  .asset-actions { flex-wrap:wrap; }
+}

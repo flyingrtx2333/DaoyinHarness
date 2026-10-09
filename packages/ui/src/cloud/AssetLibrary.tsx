@@ -83,6 +83,7 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
   const [search, setSearch] = useState(""); const [query, setQuery] = useState("");
   const [view, setView] = useState<"masonry" | "list">("masonry");
   const [uploadRequest, setUploadRequest] = useState(0);
+  const [manageRequest, setManageRequest] = useState(0);
   const [nativeCount, setNativeCount] = useState({ count: 0, more: false });
   const onNativeCount = useCallback((count: number, more: boolean) => setNativeCount({ count, more }), []);
   const category: Category = mediaFilter === "video" ? "video" : "all";
@@ -142,7 +143,7 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
     <header className="asset-toolbar"><h1>素材库</h1><button type="button" disabled={!ready || busy} onClick={() => setRefresh(v => v + 1)}>刷新</button></header>
     <div className="asset-toolbar asset-collections">
       <div className="asset-tabs" aria-label="素材来源">{([["shop", "店铺素材"], ["generated", "已生成内容"]] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={collection === key} onClick={() => { setCollection(key); setOffset(0); }}>{label}</button>)}</div>
-      <div className="asset-actions"><span role="status">{nativeCount.count + mediaCards.flat().length}{nativeCount.more ? "+" : ""} 项</span>{client.allowedTools.includes("resource_campfire_list") && <button className="asset-primary" type="button" disabled={!ready} onClick={() => setUploadRequest(value => value + 1)}>上传素材</button>}</div>
+      <div className="asset-actions"><span role="status">{nativeCount.count + mediaCards.flat().length}{nativeCount.more ? "+" : ""} 项</span>{client.allowedTools.includes("resource_campfire_list") && <><button type="button" disabled={!ready} onClick={() => setManageRequest(value => value + 1)}>店铺管理</button><button className="asset-primary" type="button" disabled={!ready} onClick={() => setUploadRequest(value => value + 1)}>上传素材</button></>}</div>
     </div>
     <div className="asset-toolbar asset-browse">
       <div className="asset-filters" aria-label="素材类型">{([["all", "全部"], ["image", "图片"], ["video", "视频"]] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={mediaFilter === key} onClick={() => { setMediaFilter(key); setOffset(0); }}>{label}</button>)}</div>
@@ -154,7 +155,7 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
       {busy && <p role="status">正在加载资产…</p>}
       {errors.map(message => <p role="alert" key={message}>{message} <button type="button" onClick={() => setRefresh(v => v + 1)}>重试加载</button></p>)}
       {empty && !client.allowedTools.includes("resource_campfire_list") && <p role="status">暂无{category === "all" ? "资产" : categories[category]}。</p>}
-      {client.allowedTools.includes("resource_campfire_list") ? <CampfireLibrary client={client} ready={ready} refreshKey={refresh} collection={collection} mediaFilter={mediaFilter} query={query} view={view} uploadRequest={uploadRequest} onCountChange={onNativeCount}>{mediaCards}</CampfireLibrary> : <div className={`asset-${view}`}>{mediaCards}</div>}
+      {client.allowedTools.includes("resource_campfire_list") ? <CampfireLibrary client={client} ready={ready} refreshKey={refresh} collection={collection} mediaFilter={mediaFilter} query={query} view={view} uploadRequest={uploadRequest} manageRequest={manageRequest} onCountChange={onNativeCount}>{mediaCards}</CampfireLibrary> : <div className={`asset-${view}`}>{mediaCards}</div>}
       {collection === "generated" && data && data.total > 0 && <footer className="asset-pagination" aria-label="项目素材分页"><span role="status">项目素材 {data.total} 项</span><button type="button"
         disabled={busy || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 24))}>上一页</button>
         <button type="button" disabled={busy || offset + 24 >= data.total} onClick={() => setOffset(v => v + 24)}>下一页</button></footer>}
