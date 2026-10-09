@@ -56,7 +56,7 @@ export async function campfireBlob(client: WorkbenchClient, asset: CampfireAsset
     signal?.throwIfAborted();
     if (epoch !== client.accountScope) throw new Error("账号已变化，请重新查看当前账号素材。");
     const offset = index * chunkSize;
-    const result = await client.resource<{ contentBase64: string; nextOffset: number; size: number; done: boolean; mediaType: string }>({ action: "resource_media_read", resourceId: asset.id, offset });
+    const result = await client.resource<{ contentBase64: string; nextOffset: number; size: number; done: boolean; mediaType: string }>({ action: "resource_media_read", resourceId: asset.id, offset }, signal);
     signal?.throwIfAborted();
     if (epoch !== client.accountScope) throw new Error("账号已变化，请重新查看当前账号素材。");
     const raw = atob(result.contentBase64); const bytes = new Uint8Array(raw.length); for (let index = 0; index < raw.length; index++) bytes[index] = raw.charCodeAt(index);

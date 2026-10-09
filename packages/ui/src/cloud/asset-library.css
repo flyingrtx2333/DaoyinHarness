@@ -15,7 +15,11 @@
 .asset-control select { width:auto; max-width:100%; }
 .asset-library-note { font-size:var(--ui-font-control); color:var(--ui-muted); line-height:1.6; }
 .asset-document { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; }
-.campfire-results { display:flex; flex-wrap:wrap; gap:var(--ui-space-2); margin-top:var(--ui-space-3); }
+.campfire-results { display:flex; flex-wrap:wrap; min-width:0; gap:var(--ui-space-3); margin-top:var(--ui-space-3); }
+.campfire-result { width:min(100%,480px); min-width:0; }
+.campfire-result video { display:block; width:100%; max-height:480px; object-fit:contain; border-radius:var(--ui-radius-card); background:#10141c; }
+.campfire-result .asset-control { margin-top:var(--ui-space-2); overflow-wrap:anywhere; }
+.campfire-result .asset-control span { min-width:0; }
 .campfire-supplement { min-width:0; margin-top:var(--ui-space-3); overflow-wrap:anywhere; }
 .campfire-supplement h3 { margin:0; font-size:var(--ui-font-section); }
 .campfire-supplement p { margin:0; }
