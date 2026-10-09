@@ -96,7 +96,7 @@ export async function cancelResourceRun(identity: ExecutionIdentity, runId: stri
 
 function explicitHighRisk(message: string, name: ResourceToolName): boolean {
   if (name === "resource_campfire_narrate") return /(?:配音|旁白|口播|制作.{0,12}(?:视频|成片))/u.test(message) && !/(?:只读|先看方案|不要.{0,8}(?:配音|旁白|口播|制作)|禁止.{0,8}(?:配音|旁白|口播|制作))/u.test(message);
-  if (name === "resource_campfire_render") return /(?:制作|剪辑|重剪|生成成片|render)/iu.test(message) && !/(?:只读|先看方案|不要.{0,8}(?:制作|剪辑|生成)|禁止.{0,8}(?:制作|剪辑|生成))/u.test(message);
+  if (name === "resource_campfire_render") return /(?:制作|剪辑|重剪|生成(?:成片|视频|影片)|render)/iu.test(message) && !/(?:只读|先看方案|(?:不要|禁止|暂不|先不)[^，。；;\n]{0,8}(?:制作|剪辑|重剪|render|生成(?:成片|视频|影片)))/iu.test(message);
   if (name === "deployment_create") return /(?:发布|部署|上线|deploy|publish)/iu.test(message) && !/(?:不要|禁止|暂不|先不).{0,12}(?:发布|部署|上线)/u.test(message);
   if (name === "deployment_rollback") return /(?:回滚|恢复到.{0,20}版本|rollback)/iu.test(message) && !/(?:不要|禁止|暂不|先不).{0,12}(?:回滚|恢复)/u.test(message);
   return true;
