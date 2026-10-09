@@ -1,6 +1,6 @@
 # 营火能力接入
 
-2026-10-09：三个仓库的接入代码已实现，正在执行已授权的协同发布；真实模型验收待账号登录和安全资源具备后进行。发布最终状态以本文件末尾记录为准。
+2026-10-09：三个仓库的接入代码已提交、推送并完成已授权的协同发布；真实模型验收待账号登录和安全资源具备后进行。精确版本和证据边界见末尾发布记录。
 
 ## 可用范围
 
@@ -35,15 +35,15 @@
 | 主平台 | `AGENT_YINGHUO_ENABLED=1`、`YINGHUO_AGENT_URL=https://yinghuo.daoyintech.com`、`YINGHUO_HARNESS_SERVICE_TOKEN` |
 | 营火 | `YINGHUO_HARNESS_ENABLED=1`、`YINGHUO_HARNESS_PLATFORM_URL=https://www.daoyintech.com`、相同的 `YINGHUO_HARNESS_SERVICE_TOKEN`；保留现有 phone 登录 |
 
-服务密钥使用独立随机值，与 `AGENT_APP_SERVICE_TOKEN`、营火访问口令、账号密钥和知识库密钥隔离。营火连接表 SQL 为 `yinghuo-app/migrations/20261009_harness_accounts.sql`，应用到现有 **phone-auth 数据库**，不改动旧用户、成员关系、凭证或客户素材。本轮未应用 SQL、未写生产配置。
+服务密钥使用独立随机值，与 `AGENT_APP_SERVICE_TOKEN`、营火访问口令、账号密钥和知识库密钥隔离。营火连接表 SQL 为 `yinghuo-app/migrations/20261009_harness_accounts.sql`，应用到现有 **phone-auth 数据库**，不改动旧用户、成员关系、凭证或客户素材。本次已显式应用 SQL 并写入服务端配置；连接密钥未进入浏览器构建。
 
-本次在独立 Linux 服务器使用固定 Node 22 完成发布检查；Windows 连接不可用，未进行 Windows 验证。分别提交、推送三个仓库的精确修订。保留原镜像、发布目录、环境和路由作为回退依据。预计更新主平台共享 API 容器、营火 API 与静态 UI，以及 Harness runtime 与静态 UI；无需重启营火渲染 worker、数据库或其他业务服务。主平台与 API 单实例切换可能短暂中断，不能宣称零中断。
+本次在独立 Linux 服务器使用固定 Node 22 完成发布检查；Windows 连接不可用，未进行 Windows 验证。三个仓库的功能提交均已推送。保留原镜像、发布目录、环境和路由作为回退依据。已更新主平台共享 API 容器、营火 API 与静态 UI，以及 Harness runtime 与静态 UI；营火渲染 worker、数据库及其他业务服务未重启。主平台与 API 单实例切换可能短暂中断，不能宣称零中断。
 
 本轮核对的营火 `index.js`、`phone-auth.js`、MCP client，以及主平台 `agent_app_access.py`、`harness_agent_bridge.py`、`agent_apps.py` 的原始 Git 版本与实际运行文件 hash 一致；其他文件及模板 overlay 不因此视为一致。主平台运行目录 `/www/wwwroot/daoyintech/backend` 不是可用 Git checkout，发布必须按实际镜像来源保留 overlay，不能把它当作完整源码权威。
 
 ## 本轮检查与待验收
 
-macOS / Node v26.8.1：Harness server-cloud 与 UI 的局部 TypeScript 检查、改动文件 ESLint、营火 UI TypeScript 检查、营火服务 JS 语法、主平台 Python AST 语法和三个仓库 diff 检查通过。它们是静态检查，不能替代要求的 Node 22／Windows 发布检查或真实模型行为证据；没有运行模拟、预制响应或旧测试套件。
+macOS / Node v26.8.1：Harness server-cloud 与 UI 的局部 TypeScript 检查、改动文件 ESLint、营火 UI TypeScript 检查、营火服务 JS 语法、主平台 Python AST 语法和三个仓库 diff 检查通过。它们是静态检查，不能替代真实模型行为证据；本次固定 Node 22 的独立 Linux 检查见下方记录；没有运行模拟、预制响应或旧测试套件。
 
 营火 UI 的局部 ESLint 仍有既有 `react-hooks/set-state-in-effect` 错误，位于原有评测权限 effect 的 `setCanEvaluate(false)`；本轮新增 effect 的依赖警告已修正，不扩展修改评测页面。
 
@@ -60,3 +60,16 @@ macOS / Node v26.8.1：Harness server-cloud 与 UI 的局部 TypeScript 检查�
 ## 发布检查
 
 2026-10-09：独立 Linux / Node 22.23.2 的 Harness server-cloud 与 UI 局部类型检查通过。只包含本次营火改动的源文件参与检查，未混入同时进行的 Agent 核心工作。Windows MCP 连接连续返回内部错误，未声称完成 Windows 验证。
+
+## 发布结果（2026-10-09）
+
+- Harness 功能提交 `883434e5ebcb65b02ee7be0e1df05d30ba7d797f`，已包含在运行与公开 UI 的 `f828bb0f319792478e3b4575944c661d92b90341` 中。该后续提交属于同时进行的模型期限修复，未回退这项修复；本次 UI 切换未重启 runtime。
+- 主平台桥接源为 `624d302a12dea5e4557976222b39506a824463c9`；营火桥接和 UI 源为 `17de6ba22cb82c3ce7589009403e35364839a604`。
+- 主平台使用线上当前 `model-deadlines-8b34415a1c3b` 镜像的派生镜像，保留模型修复与模板等既有 overlay，只覆盖六个桥接文件。营火 API 保留实际旧发布目录 `app-20261005-836875b` 的业务代码与依赖，只覆盖四个桥接文件；UI 从已推送的营火 Git 对象在 Linux / Node 22.23.2 构建。
+- 主平台运行配置已启用真实营火目录，实际进程返回 14 个工具定义；这属于目录检查，不是 Agent 执行证据。两端独立服务密钥匹配，静态构建未含此密钥。
+- 营火服务端访问同机主平台使用 `http://127.0.0.1:6087`，主平台调用营火使用公开 HTTPS 地址。新增 phone-auth 连接表结构已核对，现有用户数量未变化，未迁移旧用户、凭证或客户资源。
+- 主平台健康 200，营火公开入口 200，未登录 session 401；公开 Harness 修订、HTML 和资源 hash 通过，营火渲染后的 HTML 及新 JS/CSS hash 通过。初次发布校验误把原始 HTML 与营火已改写相对路径的响应比较，已自动恢复两个 API；修正校验后重新发布通过，保留失败与回退记录。
+- 本次切换保护检查确认其他 Docker 容器及服务状态不变，营火渲染进程未重启。主平台旧镜像、Compose 组合与营火旧发布目录保留，可回退。
+- Safari 实际访问了两端公开登录页面，选择了道引已有账号密码登录方式；两端均无可用登录。没有执行真实模型、双登录连接、账号隔离、付费制作或导出验收，没有执行模拟测试；登录后插件桌面／窄屏交互仍未验收。
+
+服务器发布记录：`/root/DaoyinHarness/.cache/yinghuo-release/deployment-report.json` 与 `ui-deployment-report.json`；首轮回退记录为 `deployment-report-attempt1.json`。记录不包含服务密钥；含密钥的服务配置只保存在服务器受限文件中。
