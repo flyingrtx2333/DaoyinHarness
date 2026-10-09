@@ -270,9 +270,9 @@ export class CampfireService {
         if (!inspected) fail("CAMPFIRE_INSPECT_REQUIRED", "请先读取待用音轨的实际时长。", 409);
         if (key === "narrationId" && Number(inspected.payload.durationSeconds) > plannedDuration + 0.1) fail("CAMPFIRE_NARRATION_TOO_LONG", "真实旁白长于剪辑时间轴，请延长镜头或修改旁白；不能截断口播。", 409);
       }
-      const plan: Data = { title: request.title!, shopId: request.shopId!, shopProfile: { title: shop.title!, content: shop.content!, version: shop.version ?? 1 }, referenceId: request.referenceId ?? null, aspectRatio: request.aspectRatio!, segments: segments as unknown as JsonValue, audio: request.audio ? request.audio as unknown as JsonValue : {}, missingShots: request.missingShots!, renderVersion: 2, createdAt: new Date().toISOString() };
+      const plan: Data = { title: request.title!, shopId: request.shopId!, shopProfile: { title: shop.title!, content: shop.content!, version: shop.version ?? 1 }, referenceId: request.referenceId ?? null, aspectRatio: request.aspectRatio!, durationSeconds: Number(plannedDuration.toFixed(6)), segments: segments as unknown as JsonValue, audio: request.audio ? request.audio as unknown as JsonValue : {}, missingShots: request.missingShots!, renderVersion: 2, createdAt: new Date().toISOString() };
       const id = await this.repository.createBusiness(auth, request.title!, "campfire.plan.saved", plan);
-      return { summary: request.missingShots!.length ? "计划已保存，素材不足；请调整现有素材方案或上传实拍" : "剪辑计划已保存", plan: { ...plan, id }, canRender: request.missingShots!.length === 0, untrusted: true };
+      return { summary: `剪辑计划已保存：${segments.length}个镜头，总长${plan.durationSeconds}秒${request.missingShots!.length ? "；素材不足，请调整现有素材方案或上传实拍" : ""}`, plan: { ...plan, id }, canRender: request.missingShots!.length === 0, untrusted: true };
     }
     if (request.action === "resource_campfire_status") {
       return { summary: "已读取营火计划实际状态", resourceId: idOf(request), facts: await this.#facts(auth, idOf(request)) };
