@@ -49,7 +49,7 @@ export function registerResourceRoutes(app: FastifyInstance, options: {
         reply.code(206).header("Content-Range", `bytes ${start}-${end}/${size}`);
       }
       reply.header("Accept-Ranges", "bytes").header("Content-Length", end - start + 1).type(mediaType);
-      if (request.method === "HEAD") { cleanup(); return reply.send(); }
+      if (request.method === "HEAD") { cleanup(); return reply.send(Readable.from([])); }
       let validatedAt = Date.now();
       async function* stream(): AsyncGenerator<Buffer> {
         try {
