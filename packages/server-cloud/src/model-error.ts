@@ -23,6 +23,9 @@ export function structuredModelError(payload: unknown): CloudError | undefined {
   if (candidates.some((candidate) => typeof candidate.code === "string" && CONTEXT_ERROR_CODES.has(candidate.code))) {
     return new CloudError(400, "MODEL_CONTEXT_TOO_LARGE", "模型上下文超过服务允许的长度，请缩小读取范围后重试。");
   }
+  if (candidates.some((candidate) => candidate.code === "MODEL_TOOL_INVALID")) {
+    return new CloudError(502, "MODEL_TOOL_INVALID", "模型返回的工具调用不符合本次请求，已拒绝执行；此前完成的操作已保留。");
+  }
   return undefined;
 }
 
