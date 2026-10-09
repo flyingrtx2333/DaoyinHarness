@@ -31,7 +31,6 @@ export function CampfirePicker({ client, onSelect, onClose }: { client: Workbenc
   }
   return <dialog ref={dialog} className="asset-dialog" aria-label="选择营火能力与参考视频" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <header className="asset-toolbar"><h2>营火 · 实拍剪辑</h2><button type="button" disabled={busy} onClick={onClose}>关闭</button></header>
-    <p>用本店实拍素材重剪，参考视频只用于镜头和节奏。缺镜头时先询问是否补充。</p>
     <div className="asset-form">
       <label>店铺<select aria-label="选择营火店铺" value={shopId} disabled={busy} onChange={event => setShopId(event.target.value)}><option value="">选择店铺资料</option>{shops.map(shop => <option key={shop.id} value={shop.id}>{shop.title}</option>)}</select></label>
       {shopCursor && <button type="button" disabled={busy} onClick={() => { void loadMore("shop_profile"); }}>加载更多店铺</button>}
