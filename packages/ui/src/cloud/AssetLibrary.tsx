@@ -98,7 +98,7 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
         if (!Array.isArray(result.items) || typeof result.total !== "number") throw new Error("素材列表暂不可用，请刷新重试。");
         return { items: result.items.map(item => parseAsset(item)), total: result.total };
       });
-    const websiteRequest = category === "all" || category === "website"
+    const websiteRequest = client.allowedTools.includes("project_list") && (category === "all" || category === "website")
       ? client.project<{ projects: PublishedProject[] }>({ action: "list" }).then(result => result.projects.flatMap(project => {
         const url = publishedProjectUrl(project);
         return url ? [{ project, url }] : [];
@@ -108,15 +108,15 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
       if (controller.signal.aborted) return;
       const failures: string[] = [];
       if (storyResult.status === "fulfilled") setData(storyResult.value);
-      else failures.push(storyResult.reason instanceof Error ? storyResult.reason.message : "素材加载失败，请重试。");
+      else failures.push("原有图片/视频素材暂时无法加载，请重试。营火素材可单独使用。");
       if (websiteResult.status === "fulfilled") setWebsites(websiteResult.value);
-      else failures.push(websiteResult.reason instanceof Error ? websiteResult.reason.message : "网站加载失败，请重试。");
+      else failures.push("已发布网站暂时无法加载，请重试。");
       setErrors([...new Set(failures)]);
     }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
   }, [client, ready, category, offset, refresh]);
 
-  const empty = !busy && websites.length === 0 && (data?.items.length ?? 0) === 0;
+  const empty = !busy && errors.length === 0 && websites.length === 0 && (data?.items.length ?? 0) === 0;
   return <section className="asset-library" aria-label="资产库">
     <header className="asset-toolbar"><h1>资产</h1><button type="button" disabled={!ready || busy} onClick={() => setRefresh(v => v + 1)}>刷新</button></header>
     {client.allowedTools.includes("resource_campfire_list") && <CampfireLibrary client={client} ready={ready} />}
