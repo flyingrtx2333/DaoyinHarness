@@ -11,7 +11,6 @@ import { type DeploymentWorkerRequest, type ExecutorProcessRequest, type Resolve
 import { unixJson } from "../projects/wire.js";
 import { CampfireService } from "./campfire.js";
 import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
-import { PlatformCampfireGateway } from "./campfire-gateway.js";
 
 const SOCKET = "/run/daoyin-resources/control.sock";
 const EXECUTOR = "/run/daoyin-resource-executor/control.sock";
@@ -122,9 +121,7 @@ async function localCall(socket: string, path: string, input: unknown, signal?: 
 function executor(input: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return localCall(EXECUTOR, "/execute", input, signal);
 }
-const mediaGateway = process.env.HARNESS_MEDIA_PLATFORM_URL && process.env.HARNESS_MEDIA_SERVICE_TOKEN
-  ? new PlatformCampfireGateway(process.env.HARNESS_MEDIA_PLATFORM_URL, process.env.HARNESS_MEDIA_SERVICE_TOKEN) : undefined;
-const campfire = new CampfireService(repository, content, executor, runtimeImages, mediaGateway);
+const campfire = new CampfireService(repository, content, executor, runtimeImages);
 function builder(input: { workspaceId: string; dockerfile: string; context: string; timeoutMs: number }, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return localCall(BUILDER, "/build", input, signal);
 }
@@ -165,6 +162,7 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
   if (request.action === "readiness") return { ready: true, executor: await executor({ action: "readiness" }, signal),
     ...(process.env.HARNESS_DEPLOYMENT_EXECUTOR_ENABLED === "1" ? { deployer: await deployer({ action: "readiness" }, signal) } : {}) };
   const auth = identity(request);
+  if (["resource_media_supplement_approve", "resource_campfire_supplement_quote", "resource_campfire_supplement", "resource_campfire_supplement_status", "resource_campfire_narrate"].includes(request.action)) throw new ResourceError("CAMPFIRE_EXISTING_FOOTAGE_ONLY", "营火只剪辑已有素材，AI补镜头、报价和新配音生成已停用；请使用已有音视频或上传实拍。", 409);
   if (Object.hasOwn(CAMPFIRE_DEFINITIONS, request.action)) {
     if (!auth.permissions.includes("agent.use") || !auth.allowedTools.includes(request.action)) throw new ResourceError("CAMPFIRE_ACCESS_DENIED", "当前账号无法使用此营火操作。", 403);
     return campfire.call(auth, request, signal);
