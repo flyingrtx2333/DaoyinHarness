@@ -212,9 +212,29 @@ button.primary:hover:enabled { background: #174bcb; }
 .turn { display: flex; flex-direction: column; }
 .user-message { align-self: flex-end; width: fit-content; max-width: min(78%, 640px); margin: 0 0 var(--ui-space-5) auto; padding: var(--ui-space-3) var(--ui-space-4); border-radius: var(--ui-radius-card); background: #f1f4fa; }
 .message-meta { display: flex; align-items: center; gap: var(--ui-space-2); color: var(--ui-muted); font-size: var(--ui-font-caption); line-height: 1.2; }
+.user-message:has(.campfire-message-card) { max-width:min(100%,640px); }
 .user-message .message-meta { justify-content: flex-end; }
 .message-label, .message-time { font-size: inherit; color: inherit; font-variant-numeric: tabular-nums; }
 .user-message p { margin-top: var(--ui-space-1); }
+.campfire-message-card { width:320px; max-width:100%; margin-top:var(--ui-space-3); padding:var(--ui-card-padding); border:1px solid var(--ui-line); border-radius:var(--ui-radius-card); background:white; }
+.campfire-message-card header { display:flex; align-items:center; gap:var(--ui-space-2); }
+.campfire-message-icon { display:grid; place-items:center; width:36px; height:36px; flex-shrink:0; border-radius:var(--ui-radius-control); color:var(--ui-accent); background:var(--ui-accent-soft); }
+.campfire-message-icon .workbench-icon { width:20px; height:20px; }
+.campfire-message-card header>div { display:grid; min-width:0; }
+.campfire-message-card b { font-size:var(--ui-font-control); font-weight:600; overflow-wrap:anywhere; }
+.campfire-message-card small,.campfire-message-no-reference { font-size:var(--ui-font-caption); color:var(--ui-muted); }
+.campfire-message-badge { white-space:nowrap; flex-shrink:0; margin-left:auto; padding:var(--ui-space-1) var(--ui-space-2); border-radius:var(--ui-radius-control); color:var(--ui-accent); background:var(--ui-accent-soft); font-size:var(--ui-font-caption); }
+.campfire-message-shop { display:flex; align-items:center; gap:var(--ui-space-3); width:100%; margin-top:var(--ui-space-3); padding:var(--ui-space-2) 0; border:0; border-radius:0; border-top:1px solid var(--ui-line); background:transparent; text-align:left; }
+.campfire-message-shop>span { color:var(--ui-muted); font-size:var(--ui-font-caption); flex-shrink:0; }
+.campfire-message-reference { display:flex; align-items:center; gap:var(--ui-space-2); width:100%; padding:var(--ui-space-2); border:1px solid var(--ui-line); border-radius:var(--ui-radius-control); text-align:left; }
+.campfire-message-thumbnail { display:grid; place-items:center; flex-shrink:0; width:44px; height:56px; overflow:hidden; border-radius:var(--ui-radius-control); background:var(--ui-accent-soft); color:var(--ui-accent); }
+.campfire-message-thumbnail .asset-thumbnail { max-height:56px; }
+.campfire-message-thumbnail .asset-thumbnail img { max-height:56px; object-fit:contain; }
+.campfire-message-thumbnail .asset-play>span { width:24px; height:24px; }
+.campfire-message-thumbnail .asset-play>span::after { margin:7px 0 0 10px; border-top-width:5px; border-bottom-width:5px; border-left-width:7px; }
+.campfire-message-reference-copy { display:grid; min-width:0; }
+.campfire-message-reference-copy b { display:-webkit-box; overflow:hidden; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.campfire-message-no-reference { display:block; padding:var(--ui-space-2) 0 0; }
 .assistant-message { align-self: flex-start; width: min(100%, var(--ui-reading-width)); }
 .assistant-label { gap: var(--ui-space-2); margin-bottom: var(--ui-space-3); font-size: var(--ui-font-body); }
 .assistant-label .run-status { margin-left: 0; }

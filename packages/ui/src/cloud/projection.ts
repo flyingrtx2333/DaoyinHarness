@@ -1,4 +1,5 @@
 import type { AgentEvent } from "@daoyin/harness-protocol";
+import { readableCampfireText } from "./campfire-message.js";
 import type { CloudRun } from "./client.js";
 
 export interface PublicSource { id: string; title: string; location: string; content: string }
@@ -204,7 +205,7 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
         id: `commentary_${event.eventSeq}`,
         kind: "commentary",
         status: "completed",
-        text: event.payload.text,
+        text: readableCampfireText(event.payload.text),
         startedAt: event.occurredAt,
         finishedAt: event.occurredAt,
         detailSummary: event.payload.source === "model" ? "主模型公开说明" :

@@ -30,6 +30,8 @@ import { keepReadyAfterBackgroundFailure } from "./connection-state.js";
 import { CampfirePicker } from "./CampfirePicker.js";
 import { CampfireResults } from "./CampfireResults.js";
 import { CampfireSupplements } from "./CampfireSupplements.js";
+import { CampfireMessage } from "./CampfireMessage.js";
+import { parseCampfireMessage, readableCampfireText } from "./campfire-message.js";
 import type { CampfireSelection } from "./campfire-client.js";
 
 const APPLICATION = "saishi" as const;
@@ -57,9 +59,15 @@ function referenceLine(reference: StoryReference): string {
 }
 
 function visibleUserMessage(message: string): string {
-  return message.replace(/\[营火内置剪辑；店铺资料 ID：res_[a-f0-9]{24}(?:；参考视频 ID：res_[a-f0-9]{24})?\]/gu, "营火 · 实拍剪辑")
+  return readableCampfireText(message)
     .replace(/\[已上传参考(图片|视频)，文件名：([^，\]]+)，素材 ID：[^\]]+\]/gu, "参考$1：$2")
     .replace(/\[已上传参考(图片|视频)，素材 ID：[^\]]+\]/gu, "已添加参考$1").trim();
+}
+
+function SubmittedMessage({ client, message }: { client: WorkbenchClient; message: string }): React.JSX.Element {
+  const selection = parseCampfireMessage(message);
+  const body = visibleUserMessage(selection?.body ?? message);
+  return <>{selection && <CampfireMessage client={client} selection={selection} />}{body && <p>{body}</p>}</>;
 }
 
 function MessageTime({ value }: { value: string }): React.JSX.Element | null {
@@ -396,7 +404,7 @@ export function App(): React.JSX.Element {
           {phase === "ready" && loading && !sendingMessage && <p className="connection-message" role="status">正在恢复会话…</p>}
           {phase === "ready" && !loading && !sendingMessage && turns.length === 0 && <section className="empty-state"><span className="empty-mark" aria-hidden="true"><HarnessLogo /></span><h2>今天，想完成什么？</h2><div className="suggestions">{[{ label: "生成口播视频", text: "我想新生成一段女声普通话口播视频", icon: "story" as const }, { label: "查看我的赛事", text: "列出我当前账号的赛事", icon: "pin" as const }, { label: "了解道引产品", text: "道引科技有哪些产品？", icon: "book" as const }].map(({ label, text, icon }) => <button key={text} onClick={() => { setDraft(text); document.getElementById("message")?.focus(); }}><WorkbenchIcon name={icon} />{label}<WorkbenchIcon name="chevron" /></button>)}</div></section>}
           {turns.map((turn) => <article className="turn" key={turn.run.id} aria-label="一轮对话">
-            <div className="user-message"><div className="message-meta"><span className="message-label">你</span><MessageTime value={turn.run.createdAt} /></div><p>{visibleUserMessage(turn.run.userMessage)}</p></div>
+            <div className="user-message"><div className="message-meta"><span className="message-label">你</span><MessageTime value={turn.run.createdAt} /></div><SubmittedMessage key={`${client.accountScope}:${turn.run.id}`} client={client} message={turn.run.userMessage} /></div>
             <div className="assistant-message"><div className="assistant-label"><span className="mini-mark" aria-hidden="true"><HarnessLogo /></span><span>Harness</span><span className="run-status">{statusText[turn.run.status]}</span><MessageTime value={turn.assistantOccurredAt} /></div>
               {turn.activities.length > 0 && <ToolActivity activities={turn.activities} />}
               <div className="markdown">{turn.text && !hasCreatedStoryVideo(events, turn.run.id) && !storyProductionIds(events, turn.run.id).length && <MarkdownMessage text={turn.text} />}</div>
