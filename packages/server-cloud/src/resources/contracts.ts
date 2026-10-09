@@ -1,5 +1,6 @@
 import type { DeploymentSpec, RuntimeSpec, WorkspaceEntry, WorkspaceSource } from "@daoyin/harness-contracts";
 import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
+import type { CampfireAudio, CampfireSegment } from "./campfire-timeline.js";
 
 export const RESOURCE_TOOL_NAMES = [
   "resource_list", "resource_attach", "resource_detach",
@@ -63,12 +64,15 @@ export interface ResourceControlRequest {
   endpoint?: string;
   shopId?: string;
   referenceId?: string;
-  role?: "shop_image" | "shop_video" | "shop_document" | "reference_video";
+  role?: "shop_image" | "shop_video" | "shop_document" | "reference_video" | "narration_audio" | "background_music";
   size?: number;
   index?: number;
   offset?: number;
   aspectRatio?: "9:16" | "16:9" | "1:1";
-  segments?: Array<{ assetId: string; startSeconds: number; durationSeconds: number; caption?: string }>;
+  segments?: CampfireSegment[];
+  audio?: CampfireAudio;
+  startSeconds?: number;
+  durationSeconds?: number;
   missingShots?: string[];
 }
 
