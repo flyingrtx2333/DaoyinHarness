@@ -19,7 +19,7 @@ export interface CampfireCaption { startSeconds: number; durationSeconds: number
 export function campfireDimensions(aspectRatio: string): [number, number] {
   return aspectRatio === "16:9" ? [1920, 1080] : aspectRatio === "1:1" ? [1080, 1080] : [1080, 1920];
 }
-export function campfireVideoFilter(segment: CampfireSegment, width: number, height: number, image: boolean): string {
+export function campfireVideoFilter(segment: CampfireSegment, width: number, height: number): string {
   const size = `${width}:${height}`;
   let filter: string;
   if (segment.framing === "crop") {
@@ -29,7 +29,11 @@ export function campfireVideoFilter(segment: CampfireSegment, width: number, hei
   } else {
     filter = `[0:v]split=2[background][foreground];[background]scale=${size}:force_original_aspect_ratio=increase,crop=${size},gblur=sigma=24[blurred];[foreground]scale=${size}:force_original_aspect_ratio=decrease[sharp];[blurred][sharp]overlay=(W-w)/2:(H-h)/2`;
   }
-  if (image && segment.motion === "push-in") filter += `,zoompan=z='min(zoom+0.0005,1.08)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=${width}x${height}:fps=30`;
+  if (segment.motion === "push-in") {
+    // Frame-based progress applies equally to moving footage and looped images.
+    const lastFrame = Math.max(1, Math.ceil(segment.durationSeconds * 30) - 1);
+    filter += `,fps=30,zoompan=z='min(1+0.08*on/${lastFrame},1.08)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=${width}x${height}:fps=30`;
+  }
   return `${filter},setsar=1,fps=30,format=yuv420p[video]`;
 }
 function timestamp(seconds: number): string {

@@ -302,7 +302,7 @@ export class CampfireService {
             const inspected = (await this.#facts(auth, segment.assetId)).findLast(item => item.eventType === "campfire.media.inspected")!.payload;
             const args = ["-v", "error", "-nostdin", "-y", ...(asset.mediaType === "video/mp4" ? ["-ss", String(segment.startSeconds)] : ["-loop", "1"]), "-i", `${segment.assetId}.${this.#extension(text(asset, "mediaType"))}`];
             if (!inspected.hasAudio) args.push("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo");
-            args.push("-t", String(segment.durationSeconds), "-map", "[video]", "-map", inspected.hasAudio ? "0:a:0" : "1:a:0", "-filter_complex", campfireVideoFilter(segment, width, height, asset.mediaType !== "video/mp4"), "-af", "apad,aresample=48000", "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-ar", "48000", "-ac", "2", `clip-${index}.mp4`);
+            args.push("-t", String(segment.durationSeconds), "-map", "[video]", "-map", inspected.hasAudio ? "0:a:0" : "1:a:0", "-filter_complex", campfireVideoFilter(segment, width, height), "-af", "apad,aresample=48000", "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-ar", "48000", "-ac", "2", `clip-${index}.mp4`);
             await this.#process(workspaceId, "/usr/bin/ffmpeg", args, request, signal);
             elapsed += segment.durationSeconds;
             await this.#append(auth, planId, "campfire.render.progress", { stage: "shots", completed: index + 1, total: segments.length }, request);
