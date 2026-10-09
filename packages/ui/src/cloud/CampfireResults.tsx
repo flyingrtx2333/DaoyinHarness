@@ -30,10 +30,10 @@ function InlineCampfireVideo({ client, asset }: { client: WorkbenchClient; asset
 export function CampfireResults({ client, events, runId }: { client: WorkbenchClient; events: AgentEvent[]; runId: string }): React.JSX.Element | null {
   const assets = new Map<string, CampfireAsset>();
   for (const event of events) {
-    if (event.turnId !== runId || event.type !== "tool.completed" || event.payload.toolName !== "resource_campfire_render") continue;
+    if (event.turnId !== runId || event.type !== "tool.completed" || !["resource_campfire_render", "resource_campfire_inspect"].includes(String(event.payload.toolName))) continue;
     const result = event.payload.evidence.result;
     if (!result || typeof result !== "object" || Array.isArray(result) || !("asset" in result)) continue;
-    try { const asset = campfireAsset(result.asset); if (asset.role === "output_video" && asset.mediaType === "video/mp4") assets.set(asset.id, asset); } catch { /* Only validated, persisted render receipts produce a preview. */ }
+    try { const asset = campfireAsset(result.asset); if (asset.role === "output_video" && asset.mediaType === "video/mp4") assets.set(asset.id, asset); } catch { /* Only validated output manifests from successful tools produce a preview. */ }
   }
   if (!assets.size) return null;
   return <div className="campfire-results">{[...assets.values()].map(asset => <InlineCampfireVideo key={`${client.accountScope}:${asset.id}`} client={client} asset={asset} />)}</div>;
