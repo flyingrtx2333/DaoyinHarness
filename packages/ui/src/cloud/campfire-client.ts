@@ -1,7 +1,7 @@
 import type { WorkbenchClient } from "./client.js";
 
 export type CampfireRole = "shop_profile" | "shop_document" | "shop_image" | "shop_video" | "reference_video" | "narration_audio" | "background_music" | "output_video";
-export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number }
+export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number; version?: number }
 export interface CampfireSelection { shopId: string; shopTitle: string; referenceId?: string; referenceTitle?: string }
 export const CAMPFIRE_LABELS: Record<CampfireRole, string> = { shop_profile: "店铺资料", shop_document: "店铺文档", shop_image: "实拍图片", shop_video: "实拍视频", reference_video: "参考视频", narration_audio: "旁白音轨", background_music: "背景音乐", output_video: "剪辑成片" };
 const roles = Object.keys(CAMPFIRE_LABELS);
@@ -10,12 +10,25 @@ export function campfireAsset(value: unknown): CampfireAsset {
       !("title" in value) || typeof value.title !== "string" || !("role" in value) || !roles.includes(String(value.role)) || !("mediaType" in value) || typeof value.mediaType !== "string") throw new Error("营火素材数据无效。");
   return value as CampfireAsset;
 }
-export async function campfireList(client: WorkbenchClient): Promise<{ items: CampfireAsset[]; hasMore: boolean }> {
-  const result = await client.resource<{ items: unknown[]; hasMore?: boolean }>({ action: "resource_campfire_list" });
-  return { items: result.items.map(campfireAsset), hasMore: result.hasMore === true };
+export interface CampfirePageOptions { shopId?: string; filterRole?: CampfireRole; pageCursor?: string; limit?: number }
+export function mergeCampfireAssets(previous: CampfireAsset[], incoming: CampfireAsset[]): CampfireAsset[] {
+  return [...new Map([...previous, ...incoming].map(item => [item.id, item])).values()];
 }
-export async function campfireProfile(client: WorkbenchClient, title: string, content: string): Promise<CampfireAsset> {
-  return campfireAsset((await client.resource<{ asset: unknown }>({ action: "resource_media_profile", title, content })).asset);
+export async function campfireList(client: WorkbenchClient, options: CampfirePageOptions = {}): Promise<{ items: CampfireAsset[]; nextCursor: string | null }> {
+  const epoch = client.accountScope;
+  const result = await client.resource<{ items: unknown[]; hasMore?: boolean; nextCursor?: string | null }>({ action: "resource_campfire_list", ...options });
+  if (epoch !== client.accountScope) throw new Error("账号已变化，请刷新当前账号素材。");
+  if (result.hasMore && typeof result.nextCursor !== "string") throw new Error("素材分页未完成，请刷新后重试。");
+  return { items: result.items.map(campfireAsset), nextCursor: result.hasMore ? result.nextCursor! : null };
+}
+export async function campfireProfile(client: WorkbenchClient, title: string, content: string, previous?: CampfireAsset): Promise<CampfireAsset> {
+  return campfireAsset((await client.resource<{ asset: unknown }>({ action: "resource_media_profile", title, content, ...(previous ? { resourceId: previous.id, expectedVersion: previous.version ?? 1 } : {}) })).asset);
+}
+export async function campfireReadProfile(client: WorkbenchClient, resourceId: string): Promise<CampfireAsset> {
+  const epoch = client.accountScope;
+  const result = campfireAsset((await client.resource<{ asset: unknown }>({ action: "resource_campfire_inspect", resourceId })).asset);
+  if (epoch !== client.accountScope || result.role !== "shop_profile") throw new Error("店铺资料已变化，请刷新后重试。");
+  return result;
 }
 export async function campfireUpload(client: WorkbenchClient, file: File, role: Exclude<CampfireRole, "shop_profile" | "output_video">, shopId?: string, onProgress?: (percent: number) => void): Promise<CampfireAsset> {
   const mediaType = role === "shop_document" && /\.(?:txt|md)$/iu.test(file.name) ? "text/plain" : file.type === "audio/x-wav" ? "audio/wav" : file.type === "audio/x-m4a" ? "audio/mp4" : file.type;

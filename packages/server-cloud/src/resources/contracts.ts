@@ -64,6 +64,10 @@ export interface ResourceControlRequest {
   revision?: string;
   endpoint?: string;
   shopId?: string;
+  pageCursor?: string;
+  limit?: number;
+  filterRole?: "shop_profile" | "shop_image" | "shop_video" | "shop_document" | "reference_video" | "narration_audio" | "background_music" | "output_video";
+  expectedVersion?: number;
   referenceId?: string;
   role?: "shop_image" | "shop_video" | "shop_document" | "reference_video" | "narration_audio" | "background_music";
   size?: number;

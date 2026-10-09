@@ -170,17 +170,45 @@ export class CampfireService {
       });
     }
     if (request.action === "resource_media_profile") {
-      const asset: Data = { title: request.title!, content: request.content!, role: "shop_profile", mediaType: "text/plain", size: Buffer.byteLength(request.content!), createdAt: new Date().toISOString() };
+      if (Boolean(request.resourceId) !== Boolean(request.expectedVersion)) fail("CAMPFIRE_PROFILE_VERSION_REQUIRED", "修改资料须提供店铺ID和当前版本，请先刷新店铺资料。");
+      if (!request.title!.trim() || !request.content!.trim()) fail("CAMPFIRE_PROFILE_EMPTY", "店铺名称和真实资料不能为空。");
+      if (request.resourceId) return this.repository.serializeBusiness(auth, request.resourceId, async () => {
+        const previous = await this.#manifest(auth, request.resourceId!);
+        if (previous.role !== "shop_profile") fail("CAMPFIRE_SHOP_INVALID", "只能修改当前账号的店铺资料。");
+        const version = Number(previous.version ?? 1);
+        if (version === request.expectedVersion! + 1 && previous.title === request.title && previous.content === request.content) return { asset: previous, reused: true, untrusted: true };
+        if (version !== request.expectedVersion) fail("CAMPFIRE_PROFILE_CONFLICT", "店铺资料已被修改。本次内容未保存，请刷新资料后再编辑。", 409);
+        const asset: Data & { title: string; version: number } = { ...previous, title: request.title!, content: request.content!, size: Buffer.byteLength(request.content!), version: version + 1, updatedAt: new Date().toISOString() };
+        delete asset.id;
+        await this.repository.appendProfileVersion(auth, request.resourceId!, asset);
+        return { asset: { ...asset, id: request.resourceId! }, untrusted: true };
+      });
+      const asset: Data = { title: request.title!, content: request.content!, role: "shop_profile", mediaType: "text/plain", size: Buffer.byteLength(request.content!), version: 1, createdAt: new Date().toISOString() };
       const id = await this.repository.createBusiness(auth, request.title!, "campfire.profile.ready", asset);
       return { asset: { ...asset, id } };
     }
     if (request.action === "resource_campfire_list") {
-      const items = (await this.repository.businessManifests(auth)).map((row): Data => {
+      const limit = request.limit ?? 100;
+      let before: { createdAt: string; id: string } | undefined;
+      if (request.shopId && (await this.#manifest(auth, request.shopId)).role !== "shop_profile") fail("CAMPFIRE_SHOP_INVALID", "请选择本店资料。");
+      if (request.pageCursor) {
+        try {
+          const decoded: unknown = JSON.parse(Buffer.from(request.pageCursor, "base64url").toString("utf8"));
+          if (!record(decoded) || Object.keys(decoded).length !== 4 || typeof decoded.createdAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(decoded.createdAt) || !Number.isFinite(Date.parse(decoded.createdAt)) || typeof decoded.id !== "string" || !/^res_[a-f0-9]{24}$/u.test(decoded.id) || decoded.shopId !== (request.shopId ?? null) || decoded.filterRole !== (request.filterRole ?? null)) throw new Error("Invalid page cursor");
+          before = { createdAt: decoded.createdAt, id: decoded.id };
+        } catch { fail("CAMPFIRE_CURSOR_INVALID", "分页位置无效或筛选条件已变化，请刷新素材列表。"); }
+      }
+      const rows = await this.repository.businessManifests(auth, { limit, ...(request.shopId ? { shopId: request.shopId } : {}), ...(request.filterRole ? { filterRole: request.filterRole } : {}), ...(before ? { before } : {}) });
+      const hasMore = rows.length > limit;
+      const page = rows.slice(0, limit);
+      const last = page.at(-1);
+      const nextCursor = hasMore && last ? Buffer.from(JSON.stringify({ createdAt: last.createdAt, id: last.id, shopId: request.shopId ?? null, filterRole: request.filterRole ?? null })).toString("base64url") : null;
+      const items = page.map((row): Data => {
         const data = record(row.payload) ? row.payload : {};
         const metadata = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "content" && key !== "digest"));
         return { ...metadata, id: row.id };
-      }).filter(item => !request.shopId || item.id === request.shopId || item.shopId === request.shopId || item.role === "reference_video");
-      return { summary: "已读取 Harness 营火素材库", items: items.slice(0, 100), hasMore: items.length > 100, untrusted: true };
+      });
+      return { summary: "已读取 Harness 营火素材页", items, hasMore, nextCursor, untrusted: true };
     }
     if (request.action === "resource_media_read") {
       const asset = await this.#manifest(auth, idOf(request));
@@ -292,7 +320,7 @@ export class CampfireService {
         if (!inspected) fail("CAMPFIRE_INSPECT_REQUIRED", "请先读取待用音轨的实际时长。", 409);
         if (key === "narrationId" && Number(inspected.payload.durationSeconds) > plannedDuration + 0.1) fail("CAMPFIRE_NARRATION_TOO_LONG", "真实旁白长于剪辑时间轴，请延长镜头或修改旁白；不能截断口播。", 409);
       }
-      const plan: Data = { title: request.title!, shopId: request.shopId!, referenceId: request.referenceId ?? null, aspectRatio: request.aspectRatio!, segments: segments as unknown as JsonValue, audio: request.audio ? request.audio as unknown as JsonValue : {}, missingShots: request.missingShots!, renderVersion: 2, createdAt: new Date().toISOString() };
+      const plan: Data = { title: request.title!, shopId: request.shopId!, shopProfile: { title: shop.title!, content: shop.content!, version: shop.version ?? 1 }, referenceId: request.referenceId ?? null, aspectRatio: request.aspectRatio!, segments: segments as unknown as JsonValue, audio: request.audio ? request.audio as unknown as JsonValue : {}, missingShots: request.missingShots!, renderVersion: 2, createdAt: new Date().toISOString() };
       const id = await this.repository.createBusiness(auth, request.title!, "campfire.plan.saved", plan);
       return { summary: request.missingShots!.length ? "计划已保存，需先补齐缺失镜头" : "实拍剪辑计划已保存", plan: { ...plan, id }, canRender: request.missingShots!.length === 0, untrusted: true };
     }
