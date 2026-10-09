@@ -42,14 +42,24 @@ export function campfireCaptions(segments: CampfireSegment[], width: number, hei
   const lineLength = portrait ? 16 : 28;
   const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Noto Sans CJK SC,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,70,70,${portrait ? 160 : 80},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
   const cues: string[] = [];
+  const wordSegmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
   let elapsed = 0;
   const timeline = narrationCaptions ?? segments.map(segment => { const cue = { startSeconds: elapsed, durationSeconds: segment.durationSeconds, text: segment.caption ?? "" }; elapsed += segment.durationSeconds; return cue; });
   for (const cue of timeline) {
     const chars = [...cue.text].map(char => /[\p{Cc}{}\\<>]/u.test(char) ? " " : char).join("").trim();
     const all = [...chars];
+    let boundary = 0;
+    const wordEnds = [...wordSegmenter.segment(chars)].map(part => { boundary += [...part.segment].length; return boundary; });
     const lines: string[] = [];
     for (let index = 0; index < all.length;) {
       let end = Math.min(index + lineLength, all.length);
+      // Prefer a complete word, keeping long unbroken tokens bounded by the existing width.
+      if (end < all.length) {
+        const wordEnd = wordEnds.findLast(value => value > index && value <= end &&
+          !/[，。！？；：、,.!?;:）】》」』”’]/u.test(all[value] ?? "") &&
+          !/[（【《「『“‘]/u.test(all[value - 1] ?? ""));
+        if (wordEnd !== undefined && wordEnd - index >= Math.ceil(lineLength / 2)) end = wordEnd;
+      }
       // Avoid stranded Chinese punctuation without exceeding the caption width.
       while (end > index + 1 && end < all.length &&
         (/[，。！？；：、,.!?;:）】》」』”’]/u.test(all[end]!) || /[（【《「『“‘]/u.test(all[end - 1]!))) end--;
