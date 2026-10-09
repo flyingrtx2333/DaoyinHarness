@@ -84,6 +84,8 @@ export interface ResourceControlRequest {
   speed?: number;
   sentences?: string[];
   missingShots?: string[];
+  shotIndex?: number;
+  prompt?: string;
 }
 
 export interface ExecutorFileEntry {

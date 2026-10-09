@@ -1,10 +1,11 @@
 import type { WorkbenchClient } from "./client.js";
 
 export type CampfireRole = "shop_profile" | "shop_document" | "shop_image" | "shop_video" | "reference_video" | "narration_audio" | "background_music" | "output_video";
-export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number; version?: number }
+export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number; version?: number; origin?: "ai"; generated?: boolean; generatedSegments?: number[] }
 export interface CampfireSelection { shopId: string; shopTitle: string; referenceId?: string; referenceTitle?: string }
 export const CAMPFIRE_LABELS: Record<CampfireRole, string> = { shop_profile: "店铺资料", shop_document: "店铺文档", shop_image: "实拍图片", shop_video: "实拍视频", reference_video: "参考视频", narration_audio: "旁白音轨", background_music: "背景音乐", output_video: "剪辑成片" };
 const roles = Object.keys(CAMPFIRE_LABELS);
+export function campfireAssetLabel(asset: CampfireAsset): string { return asset.origin === "ai" ? "AI 演绎视频" : CAMPFIRE_LABELS[asset.role]; }
 export function campfireAsset(value: unknown): CampfireAsset {
   if (!value || typeof value !== "object" || !("id" in value) || typeof value.id !== "string" || !/^res_[a-f0-9]{24}$/u.test(value.id) ||
       !("title" in value) || typeof value.title !== "string" || !("role" in value) || !roles.includes(String(value.role)) || !("mediaType" in value) || typeof value.mediaType !== "string") throw new Error("营火素材数据无效。");

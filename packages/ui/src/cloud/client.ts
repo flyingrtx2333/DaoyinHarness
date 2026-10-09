@@ -79,12 +79,12 @@ export class WorkbenchClient {
     } catch { /* Invalid/unavailable storage is checked again before every billable submission. */ }
   }
 
-  async #request<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  async #request<T>(path: string, body?: unknown, signal?: AbortSignal, timeoutMs = 15_000): Promise<T> {
     const controller = new AbortController();
     const abort = (): void => controller.abort();
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) controller.abort();
-    const timer = setTimeout(abort, 15_000);
+    const timer = setTimeout(abort, timeoutMs);
     try {
       const response = await this.fetcher(this.#base + path, {
         method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", redirect: "error",
@@ -285,7 +285,10 @@ export class WorkbenchClient {
     return result.run;
   }
   public async project<T=Record<string,unknown>>(input: Record<string,unknown>): Promise<T> { return this.#request<T>("/projects/control",input); }
-  public async resource<T=Record<string,unknown>>(input: Record<string,unknown>): Promise<T> { return this.#request<T>("/resources/control",input); }
+  public async resource<T=Record<string,unknown>>(input: Record<string,unknown>, signal?: AbortSignal): Promise<T> {
+    const mediaTask = input.action === "resource_campfire_supplement" || input.action === "resource_campfire_supplement_status";
+    return this.#request<T>("/resources/control", input, signal, mediaTask ? 180_000 : 15_000);
+  }
   public projectConceptImage(projectId:string,conceptId:string):string{
     if(!/^prj_[a-f0-9]{24}$/u.test(projectId)||!/^uic_[a-f0-9]{24}$/u.test(conceptId)||!/^[a-f0-9]{64}$/u.test(this.#accountScope))
       throw new WorkbenchError("界面方案地址无效。");

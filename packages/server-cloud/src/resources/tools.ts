@@ -148,6 +148,9 @@ const CAMPFIRE_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   resource_campfire_plan: "保存剪辑方案",
   resource_campfire_render: "制作营火成片",
   resource_campfire_status: "查询制作状态",
+  resource_campfire_supplement_quote: "准备AI补镜头报价",
+  resource_campfire_supplement: "提交已确认的AI补镜头",
+  resource_campfire_supplement_status: "查询并保存AI补镜头",
 };
 
 export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, ensureActive: (identity: ExecutionIdentity, signal?: AbortSignal) => Promise<void>): CloudToolBinding[] {

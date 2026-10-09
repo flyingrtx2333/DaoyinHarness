@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkbenchClient } from "./client.js";
-import { CAMPFIRE_LABELS, campfireBlob, campfireList, campfireProfile, campfireReadProfile, mergeCampfireAssets, campfireUpload, type CampfireAsset, type CampfireRole } from "./campfire-client.js";
+import { CAMPFIRE_LABELS, campfireAssetLabel, campfireBlob, campfireList, campfireProfile, campfireReadProfile, mergeCampfireAssets, campfireUpload, type CampfireAsset, type CampfireRole } from "./campfire-client.js";
 
 export function CampfireLibrary({ client, ready }: { client: WorkbenchClient; ready: boolean }): React.JSX.Element {
   const [items, setItems] = useState<CampfireAsset[]>([]);
@@ -83,7 +83,7 @@ export function CampfireLibrary({ client, ready }: { client: WorkbenchClient; re
     {!busy && !items.length && <p role="status">暂无营火素材。先添加店铺资料，再上传实拍图片、视频或参考视频。</p>}
     <div className="asset-grid">{items.filter(item => !shopId || item.id === shopId || item.shopId === shopId || item.role === "reference_video").map(item => <article className="asset-item" key={item.id}>
       <button type="button" className="asset-preview" aria-label={`预览营火素材 ${item.title}`} onClick={() => setSelected(item)}><span className="asset-preview-fallback">{CAMPFIRE_LABELS[item.role]}</span></button>
-      <div className="asset-meta"><h2>{item.title}</h2><p>{CAMPFIRE_LABELS[item.role]}{item.size ? ` · ${(item.size / 1024 / 1024).toFixed(1)} MB` : ""}</p>{item.role === "shop_profile" && <button type="button" disabled={busy || !ready} onClick={() => { void editProfile(item); }}>修改店铺资料</button>}</div>
+      <div className="asset-meta"><h2>{item.title}</h2><p>{campfireAssetLabel(item)}{item.size ? ` · ${(item.size / 1024 / 1024).toFixed(1)} MB` : ""}</p>{item.role === "shop_profile" && <button type="button" disabled={busy || !ready} onClick={() => { void editProfile(item); }}>修改店铺资料</button>}</div>
     </article>)}</div>
     {nextCursor && <button type="button" disabled={busy} onClick={() => { void loadMore(); }}>加载更多营火素材</button>}
     {selected && <CampfirePreview client={client} asset={selected} onClose={() => setSelected(undefined)} />}
@@ -109,6 +109,8 @@ export function CampfirePreview({ client, asset, onClose }: { client: WorkbenchC
   }, [client, asset]);
   return <dialog ref={dialog} className="asset-dialog" aria-label={asset.title} onCancel={event => { event.preventDefault(); onClose(); }}>
     <header className="asset-toolbar"><h2>{asset.title}</h2><button type="button" onClick={onClose}>关闭</button></header>
+    {asset.origin === "ai" && <p>AI 演绎画面，不代表店铺真实现场。</p>}
+    {!!asset.generatedSegments?.length && <p>此成片包含 AI 演绎片段，画面内已标记来源。</p>}
     {error ? <p role="alert">{error}</p> : url ? asset.mediaType === "video/mp4" ? <video src={url} controls playsInline preload="metadata" /> : asset.mediaType.startsWith("audio/") ? <audio src={url} controls preload="metadata" /> : <img src={url} alt={asset.title} /> : text ? <pre className="asset-document">{text}</pre> : <p role="status">正在读取素材…</p>}
     {url && <a href={url} download={asset.title + (asset.mediaType === "video/mp4" && !asset.title.endsWith(".mp4") ? ".mp4" : "")}>下载素材</a>}
   </dialog>;

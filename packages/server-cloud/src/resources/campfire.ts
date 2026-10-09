@@ -8,7 +8,7 @@ import type { ContentStore } from "./content-store.js";
 import type { ExecutorProcessRequest, ResourceControlRequest } from "./contracts.js";
 import { ResourceError, type ResourceRepository } from "./repository.js";
 import { campfireAudioFilter, campfireCaptions, campfireDimensions, campfireVideoFilter, type CampfireAudio, type CampfireCaption, type CampfireSegment } from "./campfire-timeline.js";
-import type { CampfireMediaGateway } from "./campfire-gateway.js";
+import type { CampfireMediaGateway, CampfireVideoRequest } from "./campfire-gateway.js";
 
 type Data = Record<string, JsonValue>;
 const record = (value: unknown): value is Data => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -46,6 +46,49 @@ export class CampfireService {
   async #append(auth: ExecutionIdentity, id: string, eventType: string, payload: Data, request: ResourceControlRequest): Promise<void> {
     await this.repository.appendEvent(auth, { resourceId: id, eventType, payload,
       ...(request.sessionId ? { sessionId: request.sessionId } : {}), ...(request.sourceRun ? { runId: request.sourceRun } : {}) });
+  }
+  async #supplementQuote(auth: ExecutionIdentity, id: string): Promise<{ input: Data; quote: Data; facts: Array<{ eventType: string; payload: Data }> }> {
+    const facts = await this.#facts(auth, id);
+    const input = facts.find(item => item.eventType === "campfire.supplement.requested")?.payload;
+    const quote = facts.findLast(item => item.eventType === "campfire.supplement.quoted")?.payload;
+    if (!input || !quote) fail("CAMPFIRE_QUOTE_NOT_FOUND", "请选择已经保存的本账号补镜头报价。", 404);
+    return { input, quote, facts };
+  }
+  #videoQuoteValid(quote: Data): boolean {
+    return typeof quote.model === "string" && quote.model.length > 0 && quote.provider === "ark" && quote.currency === "CNY" &&
+      ["480p", "720p", "1080p"].includes(text(quote, "resolution")) && /^[a-f0-9]{64}$/u.test(text(quote, "pricingDigest")) &&
+      typeof quote.estimatedCredits === "number" && Number.isFinite(quote.estimatedCredits) && quote.estimatedCredits >= 0 &&
+      typeof quote.reserveCredits === "number" && Number.isFinite(quote.reserveCredits) && quote.reserveCredits >= quote.estimatedCredits;
+  }
+  async #supplementState(auth: ExecutionIdentity, id: string, request: ResourceControlRequest, signal: AbortSignal): Promise<Data> {
+    const { input, quote, facts } = await this.#supplementQuote(auth, id);
+    if (facts.some(item => item.eventType === "campfire.media.ready")) return { summary: "已读取本店AI演绎素材", asset: await this.#manifest(auth, id), status: "succeeded", reused: true, untrusted: true };
+    if (!facts.some(item => item.eventType === "campfire.supplement.started")) return { summary: "补镜头尚未提交生成", status: facts.some(item => item.eventType === "campfire.supplement.approved") ? "approved" : "awaiting_confirmation", quote: { ...input, ...quote, id }, untrusted: true };
+    if (!this.gateway) fail("CAMPFIRE_VIDEO_UNAVAILABLE", "主平台补镜头网关尚未配置。", 503);
+    const state = await this.gateway.video(auth, { operation: "status", requestId: id }, signal);
+    if (state.requestId !== id || !["processing", "queued", "running", "succeeded", "failed", "cancelled", "expired"].includes(text(state, "status"))) fail("CAMPFIRE_VIDEO_RESULT_INVALID", "补镜头状态回执无效，未标记成功。", 502);
+    if (state.status !== "succeeded") {
+      await this.#append(auth, id, "campfire.supplement.status", { status: state.status!, errorCode: state.errorCode ?? null }, request);
+      return { summary: ["failed", "cancelled", "expired"].includes(text(state, "status")) ? "原补镜头任务未完成，请查看原任务状态" : "补镜头仍在制作，请继续查询原任务", status: state.status!, resourceId: id, untrusted: true };
+    }
+    const chunks: Buffer[] = []; let offset = 0; let total: number | undefined;
+    for (;;) {
+      signal.throwIfAborted();
+      const part = await this.gateway.video(auth, { operation: "read", requestId: id, offset }, signal);
+      if (part.requestId !== id || part.mediaType !== "video/mp4" || typeof part.contentBase64 !== "string" || typeof part.totalBytes !== "number" || !Number.isInteger(part.totalBytes) || part.totalBytes < 1 || part.totalBytes > LIMIT || total !== undefined && part.totalBytes !== total) fail("CAMPFIRE_VIDEO_RESULT_INVALID", "补镜头下载回执无效，未标记成功。", 502);
+      total = part.totalBytes; const bytes = Buffer.from(part.contentBase64, "base64");
+      if (!bytes.length || bytes.length > CHUNK || bytes.toString("base64") !== part.contentBase64 || part.nextOffset !== offset + bytes.length || part.nextOffset > total || part.done !== (part.nextOffset === total)) fail("CAMPFIRE_VIDEO_RESULT_INVALID", "补镜头字节范围不完整，未标记成功。", 502);
+      chunks.push(bytes); offset += bytes.length; if (part.done) break;
+    }
+    const bytes = Buffer.concat(chunks);
+    if (!mediaHeaderMatches("video/mp4", bytes)) fail("CAMPFIRE_VIDEO_RESULT_INVALID", "补镜头未返回实际MP4，未标记成功。", 502);
+    const blob = await this.content.put(bytes);
+    const asset: Data = { title: input.title!, shopId: input.shopId!, role: "shop_video", mediaType: "video/mp4", size: blob.size, digest: blob.digest,
+      generated: true, origin: "ai", supplementQuoteId: id, sourcePlanId: input.planId!, missingShot: input.missingShot!,
+      model: quote.model!, provider: quote.provider!, createdAt: new Date().toISOString() };
+    const inspected = await this.#inspection(auth, request, { ...asset, id }, signal);
+    await this.#append(auth, id, "campfire.media.ready", { ...asset, durationSeconds: inspected.durationSeconds! }, request);
+    return { summary: "本店AI演绎补镜头已保存，请检查画面后保存新计划", asset: { ...asset, id, durationSeconds: inspected.durationSeconds! }, status: "succeeded", untrusted: true };
   }
   async #workspace(auth: ExecutionIdentity, request: ResourceControlRequest, assets: Data[]): Promise<string> {
     const digest = this.images.media?.digest;
@@ -127,6 +170,52 @@ export class CampfireService {
     const properties = schema.properties as Record<string, unknown>;
     const input = Object.fromEntries(Object.entries(request).filter(([key]) => Object.hasOwn(properties, key)));
     if (!validateStoryInput(schema, input)) fail("CAMPFIRE_INPUT_INVALID", "营火参数无效，未执行操作。");
+    if (request.action === "resource_campfire_supplement_quote") {
+      if (!this.gateway) fail("CAMPFIRE_VIDEO_UNAVAILABLE", "主平台补镜头网关尚未配置，未提交生成。", 503);
+      const plan = (await this.#facts(auth, idOf(request))).find(item => item.eventType === "campfire.plan.saved")?.payload;
+      const missing = plan && Array.isArray(plan.missingShots) ? plan.missingShots[request.shotIndex!] : undefined;
+      if (!plan || typeof missing !== "string" || !missing.trim()) fail("CAMPFIRE_MISSING_SHOT_INVALID", "请选择该计划中真实记录的一条缺失镜头。");
+      if (plan.aspectRatio !== "9:16" && plan.aspectRatio !== "16:9") fail("CAMPFIRE_VIDEO_ASPECT_INVALID", "补镜头目前支持9:16或16:9计划。");
+      if (!request.prompt!.trim()) fail("CAMPFIRE_INPUT_INVALID", "请描述需要补充的AI演绎画面。");
+      const data: Data = { title: `AI演绎 · ${missing}`.slice(0, 120), planId: request.resourceId!, shopId: plan.shopId!, missingShot: missing,
+        shotIndex: request.shotIndex!, prompt: request.prompt!.trim(), durationSeconds: request.durationSeconds!, aspectRatio: plan.aspectRatio };
+      const id = await this.repository.createBusiness(auth, text(data, "title"), "campfire.supplement.requested", data);
+      const quote = await this.gateway.video(auth, { operation: "quote", requestId: id, durationSeconds: request.durationSeconds! }, signal);
+      if (!this.#videoQuoteValid(quote)) fail("CAMPFIRE_VIDEO_RESULT_INVALID", "补镜头报价回执无效，未提交生成。", 502);
+      const saved = { ...quote, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() };
+      await this.#append(auth, id, "campfire.supplement.quoted", saved, request);
+      return { summary: "AI演绎补镜头方案与报价已保存，等待用户确认", quote: { ...data, ...saved, id }, requiresConfirmation: true, untrusted: true };
+    }
+    if (request.action === "resource_media_supplement_approve" || request.action === "resource_campfire_supplement" || request.action === "resource_campfire_supplement_status") {
+      const id = idOf(request);
+      return this.repository.serializeBusiness(auth, id, async () => {
+        const { input: original, quote, facts } = await this.#supplementQuote(auth, id);
+        if (request.action === "resource_campfire_supplement_status" || facts.some(item => item.eventType === "campfire.supplement.started")) return this.#supplementState(auth, id, request, signal);
+        const expiry = Date.parse(text(quote, "expiresAt"));
+        if (!Number.isFinite(expiry) || expiry <= Date.now()) fail("CAMPFIRE_QUOTE_EXPIRED", "补镜头报价已过期，请重新报价并确认。", 409);
+        if (!this.gateway) fail("CAMPFIRE_VIDEO_UNAVAILABLE", "主平台补镜头网关尚未配置。", 503);
+        if (request.action === "resource_media_supplement_approve") {
+          if (request.sourceRun) fail("CAMPFIRE_CONFIRMATION_REQUIRED", "AI补镜头须由用户在报价卡确认，模型不能代为确认。", 409);
+          const current = await this.gateway.video(auth, { operation: "quote", requestId: id, durationSeconds: Number(original.durationSeconds) }, signal);
+          if (current.pricingDigest !== quote.pricingDigest || current.model !== quote.model || current.resolution !== quote.resolution) fail("CAMPFIRE_QUOTE_CHANGED", "报价或规格已变化，请重新报价并确认。", 409);
+          if (!facts.some(item => item.eventType === "campfire.supplement.approved")) await this.#append(auth, id, "campfire.supplement.approved", { approvedAt: new Date().toISOString(), pricingDigest: quote.pricingDigest! }, request);
+          return { summary: "已确认这条AI演绎补镜头报价", resourceId: id, status: "approved" };
+        }
+        if (!facts.some(item => item.eventType === "campfire.supplement.approved" && item.payload.pricingDigest === quote.pricingDigest)) fail("CAMPFIRE_CONFIRMATION_REQUIRED", "AI补镜头尚未由用户确认，请先在报价卡确认，未提交生成。", 409);
+        const video: CampfireVideoRequest = { operation: "start", requestId: id, prompt: text(original, "prompt"), durationSeconds: Number(original.durationSeconds),
+          aspectRatio: original.aspectRatio as "9:16" | "16:9", model: text(quote, "model"), resolution: quote.resolution as "480p" | "720p" | "1080p", pricingDigest: text(quote, "pricingDigest") };
+        await this.#append(auth, id, "campfire.supplement.started", { startedAt: new Date().toISOString() }, request);
+        try {
+          const result = await this.gateway.video(auth, video, signal);
+          if (result.requestId !== id || typeof result.status !== "string") fail("CAMPFIRE_VIDEO_RESULT_INVALID", "补镜头提交回执无效，请查询原请求。", 502);
+          await this.#append(auth, id, "campfire.supplement.submitted", { status: result.status }, request);
+          return { summary: "AI演绎补镜头请求已提交，请查询原任务", resourceId: id, status: result.status, untrusted: true };
+        } catch (error) {
+          await this.#append(auth, id, "campfire.supplement.submission_uncertain", { code: error instanceof ResourceError ? error.code : "CAMPFIRE_VIDEO_GATEWAY_FAILED", cancelled: signal.aborted }, request);
+          throw error;
+        }
+      });
+    }
     if (request.action === "resource_media_begin") {
       if (request.shopId) {
         const shop = await this.#manifest(auth, request.shopId);
@@ -298,7 +387,7 @@ export class CampfireService {
       const invalidRanges: string[] = [];
       for (const [index, segment] of segments.entries()) {
         const asset = await this.#manifest(auth, segment.assetId);
-        if (asset.shopId !== request.shopId || !["shop_video", "shop_image"].includes(text(asset, "role"))) fail("CAMPFIRE_REFERENCE_NOT_FOOTAGE", "成片只能使用所选店铺的实拍图片或视频，不能使用参考视频或其他店铺素材。", 403);
+        if (asset.shopId !== request.shopId || !["shop_video", "shop_image"].includes(text(asset, "role"))) fail("CAMPFIRE_REFERENCE_NOT_FOOTAGE", "成片只能使用所选店铺的图片或视频，不能使用参考视频或其他店铺素材。", 403);
         const inspected = (await this.#facts(auth, segment.assetId)).findLast(item => item.eventType === "campfire.media.inspected");
         if (!inspected) fail("CAMPFIRE_INSPECT_REQUIRED", "请先实际读取每个待用素材的时长和抽样画面。", 409);
         if (asset.mediaType === "video/mp4") {
@@ -322,7 +411,7 @@ export class CampfireService {
       }
       const plan: Data = { title: request.title!, shopId: request.shopId!, shopProfile: { title: shop.title!, content: shop.content!, version: shop.version ?? 1 }, referenceId: request.referenceId ?? null, aspectRatio: request.aspectRatio!, segments: segments as unknown as JsonValue, audio: request.audio ? request.audio as unknown as JsonValue : {}, missingShots: request.missingShots!, renderVersion: 2, createdAt: new Date().toISOString() };
       const id = await this.repository.createBusiness(auth, request.title!, "campfire.plan.saved", plan);
-      return { summary: request.missingShots!.length ? "计划已保存，需先补齐缺失镜头" : "实拍剪辑计划已保存", plan: { ...plan, id }, canRender: request.missingShots!.length === 0, untrusted: true };
+      return { summary: request.missingShots!.length ? "计划已保存，需先补齐缺失镜头" : "剪辑计划已保存", plan: { ...plan, id }, canRender: request.missingShots!.length === 0, untrusted: true };
     }
     if (request.action === "resource_campfire_status") {
       return { summary: "已读取营火计划实际状态", resourceId: idOf(request), facts: await this.#facts(auth, idOf(request)) };
@@ -359,8 +448,9 @@ export class CampfireService {
           await this.executor({ action: "file", operation: "write", workspaceId, path: "clips.txt", content: segments.map((_, index) => `file 'clip-${index}.mp4'`).join("\n") }, signal);
           const narration = assets.find(item => item.id === audio.narrationId);
           const narrationCaptions = narration?.generated === true && Array.isArray(narration.captions) ? narration.captions as unknown as CampfireCaption[] : undefined;
-          const hasCaptions = Boolean(narrationCaptions?.length) || segments.some(segment => segment.caption?.trim());
-          if (hasCaptions) await this.executor({ action: "file", operation: "write", workspaceId, path: "captions.ass", content: campfireCaptions(segments, width, height, narrationCaptions) }, signal);
+          const generatedIndices = segments.flatMap((segment, index) => assets.find(item => item.id === segment.assetId)?.origin === "ai" ? [index] : []);
+          const hasCaptions = Boolean(narrationCaptions?.length) || segments.some(segment => segment.caption?.trim()) || generatedIndices.length > 0;
+          if (hasCaptions) await this.executor({ action: "file", operation: "write", workspaceId, path: "captions.ass", content: campfireCaptions(segments, width, height, narrationCaptions, generatedIndices) }, signal);
           const mixArgs = ["-v", "error", "-nostdin", "-y", "-f", "concat", "-safe", "1", "-i", "clips.txt"];
           let inputIndex = 1;
           let narrationInput: number | undefined; let musicInput: number | undefined;
@@ -377,10 +467,10 @@ export class CampfireService {
           const snapshot = await this.repository.recordSnapshot(auth, workspaceId, entries);
           const output = entries.find(entry => entry.path === "output.mp4");
           if (!output || output.kind !== "file" || output.size <= 0 || output.size > LIMIT) fail("CAMPFIRE_OUTPUT_INVALID", "成片未能保存或超出大小限制。", 422);
-          const asset: Data = { title: plan.title!, role: "output_video", shopId: plan.shopId!, mediaType: "video/mp4", size: output.size, digest: output.blobHash, durationSeconds: actualDuration, width, height, fps: 30, renderVersion: 2, audio: audio as unknown as JsonValue, planId, workspaceId, snapshotId: snapshot.id, createdAt: new Date().toISOString() };
+          const asset: Data = { title: plan.title!, role: "output_video", shopId: plan.shopId!, mediaType: "video/mp4", size: output.size, digest: output.blobHash, durationSeconds: actualDuration, width, height, fps: 30, renderVersion: 2, audio: audio as unknown as JsonValue, generatedSegments: generatedIndices, planId, workspaceId, snapshotId: snapshot.id, createdAt: new Date().toISOString() };
           const assetId = await this.repository.createBusiness(auth, text(plan, "title"), "campfire.render.completed", asset);
           await this.#append(auth, planId, "campfire.render.result", { assetId, durationSeconds: actualDuration }, request);
-          return { summary: "实拍剪辑成片已保存，可在素材库预览", asset: { ...asset, id: assetId }, untrusted: true };
+          return { summary: "剪辑成片已保存，可在素材库预览", asset: { ...asset, id: assetId }, untrusted: true };
         } catch (error) {
           await this.#append(auth, planId, "campfire.render.failed", { code: error instanceof ResourceError ? error.code : "CAMPFIRE_RENDER_FAILED", cancelled: signal.aborted }, request);
           throw error;

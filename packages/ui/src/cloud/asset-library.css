@@ -16,6 +16,9 @@
 .asset-library-note { font-size:var(--ui-font-control); color:var(--ui-muted); line-height:1.6; }
 .asset-document { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; }
 .campfire-results { display:flex; flex-wrap:wrap; gap:var(--ui-space-2); margin-top:var(--ui-space-3); }
+.campfire-supplement { min-width:0; margin-top:var(--ui-space-3); overflow-wrap:anywhere; }
+.campfire-supplement h3 { margin:0; font-size:var(--ui-font-section); }
+.campfire-supplement p { margin:0; }
 .asset-filters button[aria-pressed="true"] { color:var(--ui-accent); border-color:var(--ui-accent); background:var(--ui-accent-soft); }
 .asset-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr)); column-gap:var(--ui-grid-gap); row-gap:calc(var(--ui-grid-gap) + var(--ui-space-2)); }
 .asset-item { min-width:0; }

@@ -36,7 +36,7 @@ function timestamp(seconds: number): string {
   const cs = Math.round(seconds * 100);
   return `${Math.floor(cs / 360000)}:${String(Math.floor(cs / 6000) % 60).padStart(2, "0")}:${String(Math.floor(cs / 100) % 60).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`;
 }
-export function campfireCaptions(segments: CampfireSegment[], width: number, height: number, narrationCaptions?: CampfireCaption[]): string {
+export function campfireCaptions(segments: CampfireSegment[], width: number, height: number, narrationCaptions?: CampfireCaption[], generatedIndices: readonly number[] = []): string {
   const portrait = height > width;
   const fontSize = portrait ? 58 : 48;
   const lineLength = portrait ? 16 : 28;
@@ -59,6 +59,11 @@ export function campfireCaptions(segments: CampfireSegment[], width: number, hei
     const pages: string[] = [];
     for (let index = 0; index < lines.length; index += 2) pages.push(lines.slice(index, index + 2).join("\\N"));
     pages.forEach((page, index) => cues.push(`Dialogue: 0,${timestamp(cue.startSeconds + cue.durationSeconds * index / pages.length)},${timestamp(cue.startSeconds + cue.durationSeconds * (index + 1) / pages.length)},Default,,0,0,0,,${page}`));
+  }
+  let segmentStart = 0;
+  for (const [index, segment] of segments.entries()) {
+    if (generatedIndices.includes(index)) cues.push(`Dialogue: 1,${timestamp(segmentStart)},${timestamp(segmentStart + segment.durationSeconds)},Default,,0,0,0,,{\\an9\\pos(${width - 48},48)\\fs${portrait ? 36 : 30}}AI 演绎`);
+    segmentStart += segment.durationSeconds;
   }
   return header + cues.join("\n") + "\n";
 }

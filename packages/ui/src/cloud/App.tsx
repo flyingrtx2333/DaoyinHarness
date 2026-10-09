@@ -29,6 +29,7 @@ import { canShowAdmin, requestedAdminView } from "./admin-access.js";
 import { keepReadyAfterBackgroundFailure } from "./connection-state.js";
 import { CampfirePicker } from "./CampfirePicker.js";
 import { CampfireResults } from "./CampfireResults.js";
+import { CampfireSupplements } from "./CampfireSupplements.js";
 import type { CampfireSelection } from "./campfire-client.js";
 
 const APPLICATION = "saishi" as const;
@@ -386,6 +387,7 @@ export function App(): React.JSX.Element {
               <StoryVideos key={`${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
               <StoryProductions key={`production:${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
               <CampfireResults key={`campfire:${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} />
+              <CampfireSupplements key={`supplement:${client.accountScope}:${turn.run.id}`} events={events} runId={turn.run.id} client={client} onContinue={message => { setDraft(message); document.getElementById("message")?.focus(); }} />
               {turn.images.length > 0 && <ImageGallery key={`${client.accountScope}:${turn.run.id}`} images={turn.images} accountScope={client.accountScope} />}
               {(turn.run.status === "running" || turn.run.status === "queued") && turn.activities.length === 0 && <p className="thinking" role="status"><span className="spinner" />{turn.run.status === "queued" ? "正在等待处理…" : "正在接收任务…"}</p>}
               {turn.sources.length > 0 && <details className="sources"><summary>参考资料 <span>{turn.sources.length}</span></summary>{turn.sources.map((source) => <details className="source" key={source.id}><summary>{source.title || "公开资料"}{source.location && <small>{source.location}</small>}</summary><p>{source.content}</p></details>)}</details>}
