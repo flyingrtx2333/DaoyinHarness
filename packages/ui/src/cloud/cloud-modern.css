@@ -155,16 +155,16 @@ button.primary:hover:enabled { background: #174bcb; }
 .suggestions button { border-color: #dfe3ed; border-radius: var(--ui-radius-control); min-height: var(--ui-control-height); padding: 6px var(--ui-space-3); font-size: var(--ui-font-control); gap: var(--ui-space-2); background: #ffffff75; }
 .suggestions .workbench-icon { color: #7a849a; width: 18px; height: 18px; }
 .suggestions .workbench-icon:last-child { width: 16px; height: 16px; margin-left: 8px; color: #394456; }
-.composer-area { width: 100%; max-width: var(--ui-reading-width); padding: var(--ui-space-3) var(--ui-page-padding) var(--ui-space-4); flex-shrink: 0; }
-.composer { display: flex; flex-direction: column; padding: var(--ui-space-3); min-height: 128px; border-radius: var(--ui-radius-card); border-color: #dfe3ed; box-shadow: 0 8px 24px #25366408; }
-.composer:focus-within { border-color: #90adf4; box-shadow: 0 0 0 3px #3267eb08, 0 8px 24px #25366408; }
-.composer textarea { flex: 1; resize: none; min-height: 58px; padding: var(--ui-space-1) var(--ui-space-1) var(--ui-space-3); font-size: var(--ui-font-body); }
+.composer-area { width: 100%; max-width: 660px; padding: var(--ui-space-3) var(--ui-page-padding) var(--ui-space-4); flex-shrink: 0; }
+.composer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--ui-space-2); padding: var(--ui-space-2); min-height: 56px; border-radius: 28px; border-color: var(--ui-line); box-shadow: none; }
+.composer:focus-within { border-color: #90adf4; box-shadow: 0 0 0 3px #3267eb08; }
+.composer textarea { grid-column: 2; grid-row: 1; min-width: 0; resize: none; min-height: var(--ui-control-height); max-height: 180px; padding: 6px var(--ui-space-1); line-height: 24px; font-size: var(--ui-font-body); overflow-y: auto; }
 .composer textarea::placeholder { color: #8791a5; }
-.composer-controls { gap: 12px; }
-.composer-plugins { gap: var(--ui-space-2); }
+.composer-controls { display: contents; }
+.composer-plugins { grid-column: 1; grid-row: 1; align-self: end; gap: var(--ui-space-2); }
 .composer-add { position: relative; flex: 0 0 auto; }
 .composer-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-.composer-controls .composer-add-button { display: grid; place-items: center; width: var(--ui-control-height); min-width: var(--ui-control-height); height: var(--ui-control-height); padding: 0; border: 0; border-radius: var(--ui-radius-control); color: #4f5e74; background: transparent; }
+.composer-controls .composer-add-button { display: grid; place-items: center; width: var(--ui-control-height); min-width: var(--ui-control-height); height: var(--ui-control-height); padding: 0; border: 0; border-radius: var(--ui-radius-control); color: #4f5e74; background: var(--ui-accent-soft); }
 .composer-controls .composer-add-button:hover:enabled, .composer-controls .composer-add-button[aria-expanded=true] { color: var(--accent); background: #f2f5fa; }
 .composer-add-button .workbench-icon { width: 20px; height: 20px; }
 .composer-add-button .spinner { width: 16px; height: 16px; }
@@ -176,7 +176,7 @@ button.primary:hover:enabled { background: #174bcb; }
 .composer-add-menu b { font-size: var(--ui-font-caption); font-weight: 550; }
 .composer-add-menu small { overflow: hidden; color: var(--ui-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .composer-upload-error { position: absolute; left: 0; bottom: calc(100% + var(--ui-space-2)); width: max-content; max-width: min(360px, calc(100vw - 32px)); padding: 7px 9px; border: 1px solid #f1caca; border-radius: var(--ui-radius-control); color: #a33e3e; background: #fff8f8; font-size: var(--ui-font-caption); }
-.composer-attachments { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.composer-attachments { grid-column: 1 / -1; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
 .composer-attachments > span { min-width: 0; max-width: 240px; flex: 0 0 auto; display: grid; grid-template-columns: 15px minmax(0, 1fr) minmax(0, 80px) 18px; align-items: center; gap: 5px; padding: 6px 7px; border: 1px solid #dfe4ec; border-radius: var(--ui-radius-control); color: #566174; background: #f7f9fc; }
 .composer-attachments .workbench-icon { width: 14px; height: 14px; }
 .composer-attachments b { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
@@ -185,10 +185,10 @@ button.primary:hover:enabled { background: #174bcb; }
 .composer-attachments button:hover:enabled { color: #a33e3e; background: #fdecec; }
 .composer-controls .plugin-add { width: var(--ui-control-height); min-width: var(--ui-control-height); height: var(--ui-control-height); border: 0; color: #446294; background: transparent; border-radius: var(--ui-radius-control); }
 .composer-controls .plugin-add:hover:enabled, .composer-controls .plugin-add[aria-expanded=true] { background: #f6f8ff; }
-.composer-controls .send-button { display: grid; place-items: center; padding: 0; min-width: var(--ui-control-height); width: var(--ui-control-height); min-height: var(--ui-control-height); border-radius: var(--ui-radius-control); }
-.send-button .workbench-icon { width: 22px; height: 22px; }
+.composer-controls .send-button { grid-column: 3; grid-row: 1; align-self: end; display: grid; place-items: center; padding: 0; min-width: var(--ui-control-height); width: var(--ui-control-height); height: var(--ui-control-height); min-height: var(--ui-control-height); border-radius: 50%; }
+.send-button .workbench-icon { width: 22px; height: 22px; stroke-width: 2; }
 .send-button:disabled { opacity: .6; }
-.composer-controls .stop-button { display: grid; place-items: center; padding: 0; min-width: var(--ui-control-height); width: var(--ui-control-height); min-height: var(--ui-control-height); border-radius: var(--ui-radius-control); color: #a33e3e; border-color: #e8b9b9; background: #fff8f8; }
+.composer-controls .stop-button { grid-column: 3; grid-row: 1; align-self: end; display: grid; place-items: center; padding: 0; min-width: var(--ui-control-height); width: var(--ui-control-height); min-height: var(--ui-control-height); border-radius: var(--ui-radius-control); color: #a33e3e; border-color: #e8b9b9; background: #fff8f8; }
 .composer-controls .stop-button:hover:enabled { background: #fff0f0; }
 .stop-button .workbench-icon { width: 20px; height: 20px; }
 .composer-note { margin-top: var(--ui-space-2); color: var(--ui-muted); font-size: var(--ui-font-caption); }
@@ -272,7 +272,8 @@ button.primary:hover:enabled { background: #174bcb; }
   .suggestions .workbench-icon:last-child { margin-left: auto; }
   .composer-area { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
   .composer textarea { font-size: var(--ui-font-section); }
-  .composer-controls { gap: var(--ui-space-2); }
+  .composer textarea { min-height: var(--ui-touch-target); padding-top: 10px; padding-bottom: 10px; }
+  .composer-controls .composer-add-button, .composer-controls .send-button, .composer-controls .stop-button { width: var(--ui-touch-target); min-width: var(--ui-touch-target); height: var(--ui-touch-target); min-height: var(--ui-touch-target); }
   .composer-controls .plugin-close { min-width: var(--ui-touch-target); min-height: var(--ui-touch-target); }
   .plugin-picker { max-width: calc(100vw - 64px); }
   .activity-line-copy { display: grid; gap: 1px; }

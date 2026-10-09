@@ -1,5 +1,5 @@
 import { ResourceWorkspace } from "./ResourceWorkspace.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import { MarkdownMessage } from "../MarkdownMessage.js";
 import { WorkbenchClient, WorkbenchError, type AccountProfile, type CloudRun, type CloudSession, type SessionAction } from "./client.js";
@@ -110,6 +110,22 @@ export function App(): React.JSX.Element {
   const accountEpoch = useRef(0);
   const currentDraft = useRef(draft);
   currentDraft.current = draft;
+  const messageInput = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const input = messageInput.current;
+    if (!input || view !== "chat") return;
+    const resize = () => {
+      input.style.height = "0px";
+      input.style.height = `${input.scrollHeight}px`;
+    };
+    resize();
+    let width = input.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth !== width) { width = input.clientWidth; resize(); }
+    });
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [draft, view]);
   const bottom = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
   const feed = useRef<{ key: string; events: AgentEvent[] }>({ key: "", events: [] });
@@ -407,10 +423,10 @@ export function App(): React.JSX.Element {
         {session?.archivedAt && <div className="archived-notice" role="status"><span>会话已归档，恢复后可继续发送。</span><button type="button" disabled={!!managing || phase !== "ready"} onClick={() => { void manageSession(session.id, "restore").catch(() => undefined); }}>恢复会话</button></div>}
         <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
           <label htmlFor="message" className="sr-only">发送给 Harness 的问题</label>
-          <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={2} disabled={phase !== "ready" || submitting || !!pending || !!managing || !!session?.archivedAt} placeholder="描述你的问题…" onKeyDown={(event) => { if (isSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing }, preferences)) { event.preventDefault(); void send(); } }} />
+          <textarea ref={messageInput} id="message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} rows={1} disabled={phase !== "ready" || submitting || !!pending || !!managing || !!session?.archivedAt} placeholder="描述你的问题…" onKeyDown={(event) => { if (isSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing }, preferences)) { event.preventDefault(); void send(); } }} />
           {references.length > 0 && <div className="composer-attachments" aria-label="待发送参考素材">{references.map(reference => <span key={reference.id}><WorkbenchIcon name={reference.mimeType === "video/mp4" ? "story" : "image"} /><b>{reference.name}</b><small>{formatFileSize(reference.size)}</small><button type="button" aria-label={`移除附件：${reference.name}`} onClick={() => setReferences(items => items.filter(item => item.id !== reference.id))}>×</button></span>)}</div>}
           {campfire && <div className="composer-attachments" aria-label="已选择营火能力"><span><WorkbenchIcon name="story" /><b>营火 · {campfire.shopTitle}</b>{campfire.referenceTitle && <small>参考：{campfire.referenceTitle}</small>}<button type="button" aria-label="移除营火能力选择" disabled={pluginBusy} onClick={() => setCampfire(undefined)}>×</button></span></div>}
-          <div className="composer-controls"><div className="composer-plugins"><StoryUpload key={client.accountScope} client={client} disabled={pluginBusy || !!managing || !!session?.archivedAt} remaining={5 - references.length} onBusy={setUploading} {...(campfire ? { campfireShopId: campfire.shopId } : {})} {...(client.allowedTools.includes("resource_campfire_list") ? { onCampfire: () => setCampfireOpen(true) } : {})} onUploaded={reference => { if (selectedRef.current === selected) setReferences(items => items.some(item => item.id === reference.id) ? items : [...items, reference]); }} />{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={uploading || !draft.trim() || phase !== "ready" || loading || !!pending || !!managing || !!session?.archivedAt}><WorkbenchIcon name="arrow" /></button>}</div>
+          <div className="composer-controls"><div className="composer-plugins"><StoryUpload key={client.accountScope} client={client} disabled={pluginBusy || !!managing || !!session?.archivedAt} remaining={5 - references.length} onBusy={setUploading} {...(campfire ? { campfireShopId: campfire.shopId } : {})} {...(client.allowedTools.includes("resource_campfire_list") ? { onCampfire: () => setCampfireOpen(true) } : {})} onUploaded={reference => { if (selectedRef.current === selected) setReferences(items => items.some(item => item.id === reference.id) ? items : [...items, reference]); }} />{active && <span className="composer-busy">进行中</span>}</div>{submitting || active ? <button type="button" className="stop-button" aria-label={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} title={cancelling || active?.cancelRequested ? "正在停止生成" : "停止生成"} disabled={cancelling || active?.cancelRequested} onClick={() => { void cancel(); }}><WorkbenchIcon name="stop" /></button> : <button type="submit" className="primary send-button" aria-label="发送" title="发送" disabled={uploading || !draft.trim() || phase !== "ready" || loading || !!pending || !!managing || !!session?.archivedAt}><WorkbenchIcon name="send" /></button>}</div>
         </form>
         <p className="composer-note">已接入插件自动可用；付费生成使用当前账号额度</p>
         <div className="sr-only" role="status">{submitting ? "正在提交问题" : active ? "任务进行中" : turns.length ? "回答已更新" : ""}</div>

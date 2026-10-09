@@ -1,4 +1,4 @@
-type IconName = "chat" | "plugin" | "edit" | "search" | "user" | "globe" | "book" | "story" | "image" | "pin" | "arrow" | "stop" | "chevron" | "connection" | "menu" | "settings" | "logout" | "plus" | "more" | "pushpin" | "archive" | "restore" | "trash" | "download";
+type IconName = "chat" | "plugin" | "edit" | "search" | "user" | "globe" | "book" | "story" | "image" | "pin" | "arrow" | "stop" | "chevron" | "connection" | "menu" | "settings" | "logout" | "plus" | "more" | "pushpin" | "archive" | "restore" | "trash" | "download" | "send";
 
 const paths: Record<IconName, string> = {
   chat: "M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Zm2 5h10M7 13h6",
@@ -12,6 +12,7 @@ const paths: Record<IconName, string> = {
   image: "M3 18 8 12l5 6 4-4 5 7H2l1-3ZM15 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
   pin: "M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
   arrow: "M12 21V3M4 11l8-8 8 8",
+  send: "M21 3 3 10l7 3 3 7 8-17ZM10 13l11-10",
   download: "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
   stop: "M7 7h10v10H7z",
   chevron: "m9 5 7 7-7 7",
