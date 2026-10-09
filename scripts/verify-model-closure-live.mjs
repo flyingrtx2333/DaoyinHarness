@@ -7,6 +7,7 @@ import { verifyCloudLongTasks } from './verify-cloud-long-task-live.mjs';
 
 // Two actual account/Agent/tool/storage scenarios. No model replay or synthetic replies.
 const revision = process.argv[process.argv.indexOf('--expected-revision') + 1];
+const closureOnly = process.argv.includes('--closure-only');
 if (!process.argv.includes('--run')) {
   console.log(JSON.stringify({ status: 'prepared-not-executed', scenarios: ['csv', 'budget-closure'], maxSharedCalls: 24 }));
   process.exit(0);
@@ -18,7 +19,8 @@ const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(20 * 60_0
 const output = resolve('.cache/model-closure-live', new Date().toISOString().replaceAll(':', '-') + '_' + randomUUID().slice(0, 8));
 await mkdir(output, { recursive: true, mode: 0o700 });
 const report = { kind: 'real-account-model-closure', startedAt: new Date().toISOString(), revision,
-  maxSharedCalls: 24, status: 'running', normal: undefined, closure: undefined };
+  mode: closureOnly ? 'closure-only' : 'normal-and-closure',
+  maxSharedCalls: closureOnly ? 12 : 24, status: 'running', normal: undefined, closure: undefined };
 const save = async (name, value) => writeFile(join(output, name), JSON.stringify(sanitizeEvidence(value), null, 2) + '\n', { mode: 0o600 });
 const persist = () => save('report.json', report);
 const assert = (condition, code) => { if (!condition) throw Object.assign(new Error(code), { code }); };
@@ -29,10 +31,12 @@ try {
   await persist();
   console.log(JSON.stringify({ ready: true, input: 'hidden-credential-json', output }));
   await client.login(await readHiddenCredentials({ signal }));
-  const normal = await verifyCloudLongTasks({ client, expectedRevision: revision, output: join(output, 'normal'), signal, cases: ['csv'] });
-  report.normal = normal;
-  await persist();
-  assert(normal.passed, 'NORMAL_TASK_FAILED');
+  if (!closureOnly) {
+    const normal = await verifyCloudLongTasks({ client, expectedRevision: revision, output: join(output, 'normal'), signal, cases: ['csv'] });
+    report.normal = normal;
+    await persist();
+    assert(normal.passed, 'NORMAL_TASK_FAILED');
+  }
   const runtime = await request('/runtime');
   assert(runtime.build?.revision === revision, 'RUNTIME_REVISION_MISMATCH');
   await save('runtime.json', runtime);
@@ -54,7 +58,7 @@ try {
     const value = await request('/resources/control', { action: 'file_write', sessionId, workspaceId: entry.workspaceId, path, content });
     await save(`input-${i}.json`, { path, content, value });
   }
-  const body = { requestId: randomUUID(), message: '只在当前工作区核对 review-01.txt 到 review-12.txt 十二份核对单中的编号和记录值，按顺序逐份读取。每次模型回复只调用一次 file_read，只读一份文件；不要批量调用、不要用进程或搜索一次读取全部，也不要委派子任务或访问外部业务。完成后列出实际核对的编号和值。如果可信运行预算要求收尾，立即停止调用工具，如实列出已核对和未核对的编号，不能声称全部完成。不要修改输入文件。' };
+  const body = { requestId: randomUUID(), message: '只在当前工作区核对 review-01.txt 到 review-12.txt 十二份核对单中的编号和记录值，按顺序逐份读取。每次模型回复只调用一次 file_read，只读一份文件；不要批量调用、不要用进程或搜索一次读取全部，也不要委派子任务或访问外部业务。每读完一份就继续读取下一份，即使剩余额度不足以读完全部，也继续完成下一份；不要因为剩余次数少而提前总结。只有系统明确告知“本轮最后一次回答，不再调用工具”或当前没有任何可用工具时才停止读取并收尾，如实列出已核对和未核对的编号，不能声称全部完成。不要修改输入文件。' };
   entry.request = body;
   await save('closure-request.json', { sessionId, ...body });
   let accepted;

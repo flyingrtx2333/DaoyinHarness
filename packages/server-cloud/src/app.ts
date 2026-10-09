@@ -637,7 +637,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                     code: "MODEL_AUTHORIZATION_FAILED",
                   });
                 }
-                if (error instanceof CloudError && error.code === "MODEL_CONTEXT_TOO_LARGE") throw error;
+                if (error instanceof CloudError && ["MODEL_CONTEXT_TOO_LARGE", "MODEL_TOOL_INVALID"].includes(error.code)) throw error;
                 const message = toolCalls === 0
                   ? "模型服务本次未完成响应，本轮尚未执行任何业务工具；请重试。"
                   : `模型服务本次未完成响应；本轮此前已完成 ${String(toolCalls)} 次业务工具调用，请保留已显示结果后重试。`;
