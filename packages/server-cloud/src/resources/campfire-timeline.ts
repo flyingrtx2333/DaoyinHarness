@@ -48,7 +48,28 @@ export function campfireCaptions(segments: CampfireSegment[], width: number, hei
   const cues: string[] = [];
   const wordSegmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
   let elapsed = 0;
-  const timeline = narrationCaptions ?? segments.map(segment => { const cue = { startSeconds: elapsed, durationSeconds: segment.durationSeconds, text: segment.caption ?? "" }; elapsed += segment.durationSeconds; return cue; });
+  const segmentTimeline = segments.map(segment => { const cue = { startSeconds: elapsed, durationSeconds: segment.durationSeconds, text: segment.caption ?? "" }; elapsed += segment.durationSeconds; return cue; });
+  const timeline: CampfireCaption[] = narrationCaptions?.length ? [...narrationCaptions] : segmentTimeline;
+  if (narrationCaptions?.length) {
+    const spoken = new Set(narrationCaptions.map(cue => cue.text.trim()));
+    for (const cue of segmentTimeline) {
+      if (!cue.text.trim() || spoken.has(cue.text.trim())) continue;
+      let gaps = [{ start: cue.startSeconds, end: cue.startSeconds + cue.durationSeconds }];
+      for (const speech of narrationCaptions) {
+        const speechEnd = speech.startSeconds + speech.durationSeconds;
+        gaps = gaps.flatMap(gap => {
+          if (speechEnd <= gap.start || speech.startSeconds >= gap.end) return [gap];
+          return [
+            ...(speech.startSeconds > gap.start ? [{ start: gap.start, end: speech.startSeconds }] : []),
+            ...(speechEnd < gap.end ? [{ start: speechEnd, end: gap.end }] : []),
+          ];
+        });
+      }
+      // Show unvoiced labels such as an outro only where measured speech captions are absent.
+      timeline.push(...gaps.map(gap => ({ startSeconds: gap.start, durationSeconds: gap.end - gap.start, text: cue.text })));
+    }
+    timeline.sort((left, right) => left.startSeconds - right.startSeconds);
+  }
   for (const cue of timeline) {
     const chars = [...cue.text].map(char => /[\p{Cc}{}\\<>]/u.test(char) ? " " : char).join("").trim();
     const all = [...chars];
