@@ -78,19 +78,21 @@ export function campfireCaptions(segments: CampfireSegment[], width: number, hei
   return header + cues.join("\n") + "\n";
 }
 
-/** Keep narration dominant, duck music, retain only the requested amount of camera sound. */
+/** Keep narration dominant by ducking both camera sound and music during speech. */
 export function campfireAudioFilter(duration: number, audio: CampfireAudio, narrationInput?: number, musicInput?: number): string {
-  const filters = [`[0:a]aresample=48000,apad,atrim=duration=${duration},volume=${audio.sourceVolume ?? (narrationInput === undefined ? 1 : 0.12)}[camera]`];
-  const inputs = ["[camera]"];
+  const filters = [`[0:a]aresample=48000,apad,atrim=duration=${duration},volume=${audio.sourceVolume ?? (narrationInput === undefined ? 1 : 0.12)}[camerabed]`];
+  const inputs = [narrationInput === undefined ? "[camerabed]" : "[camera]"];
   if (narrationInput !== undefined) {
-    filters.push(`[${narrationInput}:a]aresample=48000,apad,atrim=duration=${duration},loudnorm=I=-16:TP=-2:LRA=7,asplit=2[narration][sidechain]`);
+    const branches = musicInput === undefined ? "asplit=2[narration][camerasidechain]" : "asplit=3[narration][camerasidechain][musicsidechain]";
+    filters.push(`[${narrationInput}:a]aresample=48000,apad,atrim=duration=${duration},loudnorm=I=-16:TP=-2:LRA=7,${branches}`);
+    filters.push("[camerabed][camerasidechain]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[camera]");
     inputs.push("[narration]");
   }
   if (musicInput !== undefined) {
     filters.push(`[${musicInput}:a]aresample=48000,atrim=duration=${duration},asetpts=PTS-STARTPTS,volume=${audio.musicVolume ?? 0.18},afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.8)}:d=0.8[musicbed]`);
-    if (narrationInput !== undefined) filters.push("[musicbed][sidechain]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[ducked]");
+    if (narrationInput !== undefined) filters.push("[musicbed][musicsidechain]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[ducked]");
     inputs.push(narrationInput === undefined ? "[musicbed]" : "[ducked]");
-  } else if (narrationInput !== undefined) filters.push("[sidechain]anullsink");
+  }
   filters.push(`${inputs.join("")}amix=inputs=${inputs.length}:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=9,aresample=48000[audio]`);
   return filters.join(";");
 }
