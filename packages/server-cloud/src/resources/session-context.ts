@@ -48,7 +48,7 @@ export async function attachedWorkspaceContext(identity: ExecutionIdentity, sess
   const workspaceId = ids[0];
   if (ids.length === 1 && workspaceId !== undefined && identity.allowedTools.includes("workspace_inspect")) {
     signal.throwIfAborted();
-    const inspected = await resourceCall<unknown>(identity, { action: "workspace_inspect", sessionId, workspaceId }, signal);
+    const inspected = await resourceCall<unknown>(identity, { action: "workspace_inspect", sessionId, workspaceId, metadataOnly: true }, signal);
     signal.throwIfAborted();
     environment = runtimeFacts(record(inspected) ? inspected.workspace : undefined, workspaceId);
   }

@@ -237,6 +237,8 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
   }
   if (request.action === "workspace_inspect") {
     const workspaceId = await workspaceAccess(auth, request);
+    if (request.metadataOnly === true) return { summary: "Workspace metadata inspected.",
+      workspace: await repository.workspace(auth, workspaceId), metadataOnly: true };
     return { summary: "Workspace inspected.", workspace: await repository.workspace(auth, workspaceId),
       snapshots: await repository.snapshots(auth, workspaceId), processes: await repository.processes(auth, workspaceId),
       artifacts: await repository.artifacts(auth, workspaceId), deployments: await repository.deployments(auth, workspaceId),

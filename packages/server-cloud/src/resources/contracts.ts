@@ -25,6 +25,7 @@ export interface ResourceControlRequest {
   requestId?: string;
   resourceId?: string;
   workspaceId?: string;
+  metadataOnly?: boolean;
   snapshotId?: string;
   artifactId?: string;
   deploymentId?: string;
