@@ -187,6 +187,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
           if (record(detail) && record(detail.detail) && ["STORY_OPERATION_FAILED", "YINGHUO_OPERATION_FAILED", "YINGHUO_UNAVAILABLE"].includes(String(detail.detail.code)) &&
               typeof detail.detail.message === "string" && detail.detail.message.length <= 600) message = detail.detail.message;
         } else await response.body?.cancel();
+        if (path === "model" && (response.status >= 500 || response.status === 429)) throw new CloudError(status, "MODEL_SERVICE_UNAVAILABLE", "模型服务暂不可用；此前完成的操作已保留。");
         throw new CloudError(status, "PLATFORM_BRIDGE_REJECTED", message);
       }
       if (onTextDelta && response.headers.get("content-type")?.includes("application/x-ndjson")) return await readModelStream(response, onTextDelta, signal);
@@ -207,6 +208,8 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
     } catch (error) {
       if (error instanceof CloudError) throw error;
+      parent.throwIfAborted();
+      if (path === "model") throw new CloudError(503, "MODEL_RESPONSE_INCOMPLETE", "模型连接或响应中断；此前完成的操作已保留。");
       throw new CloudError(503, "PLATFORM_BRIDGE_UNAVAILABLE", "平台业务接口暂不可用；本次请求未自动重试。");
     }
   }

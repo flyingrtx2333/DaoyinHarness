@@ -12,6 +12,7 @@ export interface ActivityView {
   startedAt: string;
   finishedAt?: string;
   phaseGroup?: string;
+  publicReply?: boolean;
   detailSummary?: string | undefined;
   details?: ActivityDetail[];
 }
@@ -206,6 +207,7 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
         kind: "commentary",
         status: "completed",
         text: readableCampfireText(event.payload.text),
+        publicReply: event.payload.source === "model" || event.payload.source === "router-model",
         startedAt: event.occurredAt,
         finishedAt: event.occurredAt,
         detailSummary: event.payload.source === "model" ? "主模型公开说明" :

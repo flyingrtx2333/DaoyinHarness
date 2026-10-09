@@ -289,6 +289,7 @@ export class AgentEngine {
     let modelRequests = 0;
     let summaryAttempted = false;
     let recoveryUsed = false;
+    let responseRecoveries = 0;
     let contextCharacters = this.#maxContextCharacters;
     let contextMessages = this.#maxContextMessages;
     let toolResultCharacters: number | undefined;
@@ -363,7 +364,9 @@ export class AgentEngine {
       const descriptors = new Map(tools.map((tool) => [tool.name, tool]));
       let reply: ModelReply;
       let streamed = "";
-      const contentBlockId = `block_${crypto.randomUUID()}`;
+      let publishedStreamed = "";
+      let responseRecoveryNotice = "";
+      let contentBlockId = `block_${crypto.randomUUID()}`;
       let memorySnapshot: MemoryContextSnapshot | undefined;
       try {
         let contextEvents = priorEvents;
@@ -445,6 +448,7 @@ export class AgentEngine {
               if (snapshot !== undefined) await memoryOperation((memorySignal) => snapshot.assertCurrent(memorySignal), modelSignal);
               modelSignal.throwIfAborted();
               await append("assistant.delta", { contentBlockId, delta });
+              publishedStreamed += delta;
             },
           });
           try {
@@ -452,7 +456,8 @@ export class AgentEngine {
             modelSignal.throwIfAborted();
             if (remainingCalls() <= 0) throw new AgentPolicyError("MODEL_CALL_LIMIT", "本轮模型调用预算已用尽。");
             modelRequests++;
-            const raw = await modelResponse(() => this.#model.complete({ messages, tools, systemPrompt, signal: modelSignal,
+            const raw = await modelResponse(() => this.#model.complete({ messages, tools,
+              systemPrompt: responseRecoveryNotice ? { ...systemPrompt, dynamicText: systemPrompt.dynamicText + responseRecoveryNotice } : systemPrompt, signal: modelSignal,
               onTextDelta: async (delta) => {
                 modelSignal.throwIfAborted();
                 if (typeof delta !== "string" || streamed.length + delta.length > 16_000) throw new Error("Invalid model stream.");
@@ -470,6 +475,20 @@ export class AgentEngine {
           } catch (error) {
             if (!signal.aborted && timeout.aborted) throw new AgentPolicyError("MODEL_TIMEOUT", "模型响应超时；请求结果不确定，未自动重试。");
             if (streamFailure.signal.aborted) throw streamFailure.signal.reason;
+            const responseFailure = modelFailure(error).code;
+            if (!signal.aborted && responseRecoveries < 2 && remainingCalls() > 1 &&
+                ["MODEL_RESPONSE_INCOMPLETE", "MODEL_SERVICE_UNAVAILABLE"].includes(responseFailure)) {
+              await textBuffer.discard();
+              if (publishedStreamed) await append("assistant.commentary", { contentBlockId, text: publishedStreamed, source: "model", stage: "before_model", toolCallIds: [] });
+              responseRecoveries++;
+              contentBlockId = `block_${crypto.randomUUID()}`; streamed = ""; publishedStreamed = "";
+              responseRecoveryNotice = "\n\n运行时恢复：上一次模型响应未完整返回，未执行该响应中的任何工具。继续使用已有真实工具结果；不要重复已成功的业务操作。本次至多调用两个工具，工具名称与 JSON 参数必须符合当前 schema；不要补写无效的历史工具响应。";
+              await append("phase.updated", { phase: "synthesizing", step,
+                displayText: "模型响应中断，正在自动继续…",
+                detail: { recovery: "incomplete-model-response", attempt: responseRecoveries, failureCode: responseFailure, replayedTools: 0 },
+              });
+              continue;
+            }
             // Only a definite pre-output context rejection can be retried. No tools are replayed.
             if (signal.aborted || streamed || recoveryUsed || remainingCalls() <= 1 ||
                 modelFailure(error).code !== "MODEL_CONTEXT_TOO_LARGE") throw error;

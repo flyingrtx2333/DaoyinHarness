@@ -26,6 +26,9 @@ export function structuredModelError(payload: unknown): CloudError | undefined {
   if (candidates.some((candidate) => candidate.code === "MODEL_TOOL_INVALID")) {
     return new CloudError(502, "MODEL_TOOL_INVALID", "模型返回的工具调用不符合本次请求，已拒绝执行；此前完成的操作已保留。");
   }
+  if (candidates.some(candidate => ["MODEL_OUTCOME_UNCERTAIN", "APP_MODEL_FAILED", "MODEL_OPERATION_FAILED"].includes(String(candidate.code)))) {
+    return new CloudError(502, "MODEL_RESPONSE_INCOMPLETE", "模型未返回完整有效的响应；此前完成的操作已保留。");
+  }
   const timeout = candidates.find((candidate) => ["MODEL_TIMEOUT", "MODEL_FIRST_RESPONSE_TIMEOUT", "MODEL_STREAM_IDLE_TIMEOUT"].includes(String(candidate.code)));
   if (timeout !== undefined) {
     const stage = timeout.code === "MODEL_FIRST_RESPONSE_TIMEOUT" ? "等待模型首次响应超时" : timeout.code === "MODEL_STREAM_IDLE_TIMEOUT" ? "模型响应流长时间没有新数据" : "模型请求超过总时限";

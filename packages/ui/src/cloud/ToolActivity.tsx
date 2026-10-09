@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MarkdownMessage } from "../MarkdownMessage.js";
 import type { ActivityView } from "./projection.js";
 
 export function ToolActivity({ activities }: { activities: ActivityView[] }): React.JSX.Element {
@@ -11,6 +12,7 @@ export function ToolActivity({ activities }: { activities: ActivityView[] }): Re
     return () => window.clearInterval(timer);
   }, [running]);
   return <div className="tools activity-timeline" role="log" aria-label="任务实时进度" aria-live="polite">{activities.map(activity => {
+    if (activity.kind === "commentary" && activity.publicReply) return <div className="markdown activity-reply" key={activity.id}><MarkdownMessage text={activity.text} /></div>;
     const elapsed = Math.max(0, Math.floor(((activity.finishedAt ? Date.parse(activity.finishedAt) : now) - Date.parse(activity.startedAt)) / 1000));
     const line = <>
       <span className="tool-status-icon" data-status={activity.status} aria-hidden="true" />
