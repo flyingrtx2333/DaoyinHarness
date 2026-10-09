@@ -2,7 +2,7 @@ import type { WorkbenchClient } from "./client.js";
 
 export type CampfireRole = "shop_profile" | "shop_document" | "shop_image" | "shop_video" | "reference_video" | "narration_audio" | "background_music" | "output_video";
 export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number; width?: number; height?: number; version?: number; origin?: "ai"; generated?: boolean; generatedSegments?: number[] }
-export interface CampfireSelection { shopId: string; shopTitle: string; referenceId?: string; referenceTitle?: string }
+export interface CampfireSelection { shopId: string; shopTitle: string; referenceId?: string; referenceTitle?: string; requirements?: string }
 export const CAMPFIRE_LABELS: Record<CampfireRole, string> = { shop_profile: "店铺资料", shop_document: "店铺文档", shop_image: "实拍图片", shop_video: "实拍视频", reference_video: "参考视频", narration_audio: "旁白音轨", background_music: "背景音乐", output_video: "剪辑成片" };
 const roles = Object.keys(CAMPFIRE_LABELS);
 export function campfireAssetLabel(asset: CampfireAsset): string { return asset.origin === "ai" ? "AI 演绎视频" : CAMPFIRE_LABELS[asset.role]; }

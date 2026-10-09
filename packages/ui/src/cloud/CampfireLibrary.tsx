@@ -103,7 +103,7 @@ function UploadDialog({ busy, onClose, children }: { busy: boolean; onClose: () 
   return <dialog ref={dialog} className="asset-dialog asset-upload-dialog" aria-label="上传素材" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><header className="asset-toolbar"><h2>上传素材</h2><button type="button" disabled={busy} onClick={onClose}>关闭</button></header>{children}</dialog>;
 }
 
-function CampfireThumbnail({ client, asset }: { client: WorkbenchClient; asset: CampfireAsset }): React.JSX.Element {
+export function CampfireThumbnail({ client, asset }: { client: WorkbenchClient; asset: CampfireAsset }): React.JSX.Element {
   const element = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false); const [failed, setFailed] = useState(false);
   const [ratio, setRatio] = useState<number | undefined>(() => typeof asset.width === "number" && typeof asset.height === "number" && Number.isFinite(asset.width) && Number.isFinite(asset.height) && asset.width > 0 && asset.height > 0 ? asset.width / asset.height : undefined);

@@ -432,7 +432,7 @@ export function App(): React.JSX.Element {
         <div className="sr-only" role="status">{submitting ? "正在提交问题" : active ? "任务进行中" : turns.length ? "回答已更新" : ""}</div>
       </div>
     </main>
-    {campfireOpen && phase === "ready" && <CampfirePicker key={client.accountScope} client={client} onClose={() => setCampfireOpen(false)} onSelect={selection => { setCampfire(selection); setCampfireOpen(false); document.getElementById("message")?.focus(); }} />}
+    {campfireOpen && phase === "ready" && <CampfirePicker key={client.accountScope} client={client} initialRequirements={draft} {...(campfire ? { initialSelection: campfire } : {})} onClose={() => setCampfireOpen(false)} onSelect={selection => { setCampfire(selection); if (selection.requirements) setDraft(selection.requirements); setCampfireOpen(false); document.getElementById("message")?.focus(); }} />}
     {settingsOpen && <SettingsDialog preferences={preferences} onChange={savePreferences} onClose={closeSettings} saveError={preferenceError} />}
     {videoInteraction && <VideoCreationDialog key={videoInteraction.interactionId} interaction={videoInteraction}
       busy={interactionBusy} error={interactionError}
