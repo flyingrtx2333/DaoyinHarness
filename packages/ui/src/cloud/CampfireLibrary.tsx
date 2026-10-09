@@ -15,7 +15,7 @@ export function CampfireLibrary({ client, ready, refreshKey = 0, collection, med
   const [busy, setBusy] = useState(false); const [progress, setProgress] = useState<number>(); const [error, setError] = useState("");
   const [selected, setSelected] = useState<CampfireAsset>(); const fileInput = useRef<HTMLInputElement>(null);
   const scope = client.accountScope; const loadGeneration = useRef(0);
-  const visibleItems = items.filter(item => (collection === "generated" ? item.role === "output_video" : item.role !== "output_video") && (mediaFilter === "all" || mediaFilter === "image" && item.mediaType.startsWith("image/") || mediaFilter === "video" && item.mediaType === "video/mp4") && item.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const visibleItems = items.filter(item => (collection === "generated" ? item.role === "output_video" : item.role !== "output_video") && (mediaFilter === "all" || mediaFilter === "image" && item.mediaType.startsWith("image/") || mediaFilter === "video" && item.mediaType === "video/mp4") && item.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => Number(!(a.mediaType.startsWith("image/") || a.mediaType === "video/mp4")) - Number(!(b.mediaType.startsWith("image/") || b.mediaType === "video/mp4")));
   useEffect(() => { onCountChange(visibleItems.length, !!nextCursor); }, [visibleItems.length, nextCursor, onCountChange]);
   async function refresh(): Promise<void> {
     const generation = ++loadGeneration.current; setBusy(true); setError("");
