@@ -359,7 +359,7 @@ export function App(): React.JSX.Element {
     </aside>
     <main id="conversation" className="main" tabIndex={-1}>
       <button className="mobile-menu-button" aria-label={sidebar ? "收起会话导航" : "展开会话导航"} aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><WorkbenchIcon name="menu" /></button>
-      {view === "plugins" && <div className="transcript plugin-transcript"><PluginWorkspace key={`${APPLICATION}:${client.accountScope}`} selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} /></div>}
+      {view === "plugins" && <div className="transcript plugin-transcript"><PluginWorkspace key={`${APPLICATION}:${client.accountScope}`} selectedId={plugin?.id ?? ""} onSelect={(id) => usePlugin(id)} busy={pluginBusy} authorizedProfiles={authorizedProfiles} allowedTools={client.allowedTools} /></div>}
       {view === "projects" && <ResourceWorkspace key={client.accountScope+":"+phase} client={client} ready={phase === "ready"} sessionId={selected} onDevelop={async (id) => { setSessions(await client.sessions()); choose(id); }} />}
       {view === "assets" && <div className="transcript plugin-transcript"><AssetLibrary key={`${client.accountScope}:${phase}`} client={client} ready={phase === "ready"} onConnect={() => { if (loginUrl) window.location.assign(loginUrl); else void connect(); }} /></div>}
       {view === "memory" && <div className="transcript plugin-transcript"><MemoryWorkspace key={`${client.accountScope}:${phase}`} client={client} ready={phase === "ready"} onConnect={() => { if (loginUrl) window.location.assign(loginUrl); else void connect(); }} /></div>}

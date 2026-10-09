@@ -8,6 +8,7 @@ export interface WorkbenchPlugin {
   status: "available" | "account_required" | "pending";
   profileId?: string;
   note: string;
+  availabilityTool?: string;
 }
 
 export const PLUGINS: readonly WorkbenchPlugin[] = [
@@ -25,6 +26,10 @@ export const PLUGINS: readonly WorkbenchPlugin[] = [
   { id: "builder", name: "网站与应用", mark: "站", status: "pending",
     description: "对话创建网站与轻应用",
     capabilities: ["创建网站", "修改页面", "应用预览"], note: "已有产品工坊业务，尚未接入此工作台。" },
+  { id: "yinghuo", name: "营火", mark: "营", status: "pending", profileId: "daoyin-workbench", availabilityTool: "yinghuo_list_shops",
+    description: "使用店铺资料和素材制作企业短视频",
+    capabilities: ["店铺与素材", "参考与模板", "视频制作与修改", "队列与进度", "发布包导出"],
+    note: "复用已有营火账号连接；未连接时登录营火即可。" },
   { id: "youji", name: "文旅影像", mark: "影", status: "pending",
     description: "生成景区场景人像",
     capabilities: ["场景人像", "AI 图片编辑"], note: "已有文旅影像业务，尚未接入此工作台。" },
@@ -40,9 +45,10 @@ export function sessionPlugin(profileId: string): WorkbenchPlugin | undefined {
   return PLUGINS.find((plugin) => plugin.status !== "pending" && plugin.profileId === profileId);
 }
 
-export function filterPlugins(query: string, authorizedProfiles: readonly string[] = []): readonly WorkbenchPlugin[] {
+export function filterPlugins(query: string, authorizedProfiles: readonly string[] = [], allowedTools: readonly string[] = []): readonly WorkbenchPlugin[] {
   const needle = query.trim().toLocaleLowerCase();
   return PLUGINS.filter((plugin) => [plugin.name, plugin.description, ...plugin.capabilities].join(" ").toLocaleLowerCase().includes(needle))
-    .map((plugin) => plugin.status === "account_required" && plugin.profileId && authorizedProfiles.includes(plugin.profileId)
+    .map((plugin) => plugin.availabilityTool && allowedTools.includes(plugin.availabilityTool)
+      ? { ...plugin, status: "available" as const } : plugin.status === "account_required" && plugin.profileId && authorizedProfiles.includes(plugin.profileId)
       ? { ...plugin, status: "available" as const, note: "使用当前账号已有的业务权限。" } : plugin);
 }

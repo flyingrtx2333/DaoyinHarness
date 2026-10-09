@@ -9,6 +9,7 @@ import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createClou
 export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { AgentEngine, type ModelClient } from "@daoyin/harness-agent-core";
+import { YINGHUO_MUTATIONS } from "./yinghuo-contract.js";
 import { capabilityPacksFor, explicitHighRiskPacks } from "./capability-packs.js";
 import { routeCapabilities, type CapabilitySemanticProvider } from "./capability-router.js";
 import { createCloudMemoryRuntime } from "./memory-tools.js";
@@ -120,7 +121,7 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
   const names = new Set<string>();
   const tools = businessTools.map((binding) => {
     const definition = binding.definition;
-    const storyPermission = REVIEWED_STORY_MUTATIONS[definition.name];
+    const storyPermission = REVIEWED_STORY_MUTATIONS[definition.name] ?? (profile.id === "daoyin-workbench" ? YINGHUO_MUTATIONS[definition.name] : undefined);
     const reviewedStoryWrite = ["story-quick", "daoyin-workbench"].includes(profile.id) &&
       definition.mutating === true && storyPermission !== undefined &&
       binding.requiredPermissions.length === 1 && binding.requiredPermissions[0] === storyPermission;

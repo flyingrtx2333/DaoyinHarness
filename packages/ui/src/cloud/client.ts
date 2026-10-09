@@ -53,11 +53,13 @@ export class WorkbenchClient {
   #csrf = "";
   #accountScope = "";
   #account: AccountProfile | undefined;
+  #allowedTools: readonly string[] = [];
   readonly #base: string;
   #receiptKey: string;
   readonly #receipts = new Map<string, PendingRequest>();
   public get accountScope(): string { return this.#accountScope; }
   public get account(): AccountProfile | undefined { return this.#account; }
+  public get allowedTools(): readonly string[] { return this.#allowedTools; }
   public constructor(private readonly storage: StoragePort, private readonly fetcher: typeof fetch = (input, init) => fetch(input, init), public readonly application: "company" | "saishi" | "story" = "company") {
     this.#base = application !== "company" ? `/api/agent-apps/${application}/workbench` : BASE;
     this.#receiptKey = application !== "company" ? `${RECEIPTS}:${application}` : RECEIPTS;
@@ -94,6 +96,7 @@ export class WorkbenchClient {
           this.#csrf = "";
           this.#accountScope = "";
           this.#account = undefined;
+          this.#allowedTools = [];
           if (this.application !== "company") {
             this.#receipts.clear();
             let loginUrl: string | undefined;
@@ -165,20 +168,22 @@ export class WorkbenchClient {
     this.#csrf = "";
     this.#accountScope = "";
     this.#account = undefined;
+    this.#allowedTools = [];
     this.#receipts.clear();
     try { this.storage.removeItem(this.#receiptKey); } catch { /* Account is already revoked; stale receipts cannot cross accounts. */ }
   }
   public async bootstrap(preserveAccount = false): Promise<number> {
-    if (!preserveAccount) this.#account = undefined;
-    const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string; account?: unknown; credits?: unknown }>("/bootstrap", {});
+    if (!preserveAccount) { this.#account = undefined; this.#allowedTools = []; }
+    const result = await this.#request<{ csrfToken: string; expiresAt: number; profileId?: string; authentication?: string; accountScope?: string; account?: unknown; credits?: unknown; allowedTools?: unknown }>("/bootstrap", {});
     if (!result.csrfToken || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() ||
         (this.application !== "company" && (result.profileId !== "daoyin-workbench" || result.authentication !== "account" || !identifier(result.accountScope)))) {
-      this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#receipts.clear();
+      this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#allowedTools = []; this.#receipts.clear();
       throw new WorkbenchError("账号工作台尚未接通，请稍后重新连接。");
     }
     if (this.application !== "company") {
       this.#accountScope = result.accountScope!;
       this.#account = accountProfile(result.account, result.credits);
+      this.#allowedTools = Object.freeze(Array.isArray(result.allowedTools) ? result.allowedTools.filter((name): name is string => identifier(name)) : []);
       this.#receiptKey = `${RECEIPTS}:${this.application}:${this.#accountScope}`;
       this.#restoreReceipts();
     }
@@ -249,7 +254,7 @@ export class WorkbenchClient {
     return socket;
   }
   public streamDenied(status: 401 | 403): WorkbenchError {
-    this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#receipts.clear();
+    this.#csrf = ""; this.#accountScope = ""; this.#account = undefined; this.#allowedTools = []; this.#receipts.clear();
     return new WorkbenchError(status === 401 ? "登录或访客身份已失效，请重新连接。" : "当前账号已无法访问此会话。", status,
       this.application !== "company" && status === 401 ? "/api/agent-apps/saishi/workbench/login" : undefined);
   }

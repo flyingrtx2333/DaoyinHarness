@@ -177,9 +177,9 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
         if (path === "model" && ![401, 402, 403].includes(response.status)) {
           const classified = structuredModelError(await readModelErrorPayload(response, signal));
           if (classified !== undefined) throw classified;
-        } else if (privateApp && path === "call") {
+        } else if (privateApp && ["call", "authorize-tool"].includes(path)) {
           const detail: unknown = await response.json().catch(() => null);
-          if (record(detail) && record(detail.detail) && detail.detail.code === "STORY_OPERATION_FAILED" &&
+          if (record(detail) && record(detail.detail) && ["STORY_OPERATION_FAILED", "YINGHUO_OPERATION_FAILED", "YINGHUO_UNAVAILABLE"].includes(String(detail.detail.code)) &&
               typeof detail.detail.message === "string" && detail.detail.message.length <= 600) message = detail.detail.message;
         } else await response.body?.cancel();
         throw new CloudError(status, "PLATFORM_BRIDGE_REJECTED", message);
@@ -213,9 +213,9 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   });
 
   async function privateProfile(identity: ExecutionIdentity, signal: AbortSignal) {
-    if (isProjectAccountIdentity(identity)) return {id:"daoyin-workbench",version:"1",instructions:"使用当前账号的独立云端项目工具开发与发布应用。所有代码执行均通过隔离执行服务。",tools:[]};
+    if (isProjectAccountIdentity(identity) && !identity.allowedTools.some(name => name.startsWith("yinghuo_"))) return {id:"daoyin-workbench",version:"1",instructions:"使用当前账号的独立云端项目工具开发与发布应用。所有代码执行均通过隔离执行服务。",tools:[]};
     const catalog = await post("profile", { authorizationId: identity.authorizationId }, signal, true);
-    const factory = isWorkbenchIdentity(identity) ? createWorkbenchProfile : isStoryIdentity(identity) ? createStoryProfile : createSaishiProfile;
+    const factory = isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity) ? createWorkbenchProfile : isStoryIdentity(identity) ? createStoryProfile : createSaishiProfile;
     return factory(catalog, identity, {
       authorize: async (name, input, current, operationId, childSignal) => {
         const value = await post("authorize-tool", { authorizationId: current.authorizationId, name, arguments: input,

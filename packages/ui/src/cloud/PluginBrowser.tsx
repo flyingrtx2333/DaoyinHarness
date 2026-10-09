@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { filterPlugins } from "./plugins.js";
 import { PluginIcon, WorkbenchIcon } from "./WorkbenchIcon.js";
 
-interface PluginActions { selectedId: string; onSelect: (id: string) => void; busy: boolean; authorizedProfiles?: readonly string[] }
+interface PluginActions { selectedId: string; onSelect: (id: string) => void; busy: boolean; authorizedProfiles?: readonly string[]; allowedTools?: readonly string[] }
 
-export function PluginCatalog({ authorizedProfiles = [] }: PluginActions): React.JSX.Element {
+export function PluginCatalog({ authorizedProfiles = [], allowedTools = [] }: PluginActions): React.JSX.Element {
   const [query, setQuery] = useState("");
-  const matches = filterPlugins(query, authorizedProfiles);
+  const matches = filterPlugins(query, authorizedProfiles, allowedTools);
   return <section className="plugin-catalog" aria-label="业务插件">
     <div className="plugin-catalog-toolbar"><label><span className="sr-only">搜索插件</span><WorkbenchIcon name="search" /><input type="search" placeholder="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} /></label></div>
     <div className="plugin-grid">{matches.map((plugin) => <article className={`plugin-card ${plugin.status}`} key={plugin.id} aria-labelledby={`catalog-${plugin.id}`}>
@@ -18,7 +18,7 @@ export function PluginCatalog({ authorizedProfiles = [] }: PluginActions): React
   </section>;
 }
 
-export function PluginPicker({ selectedId, onSelect, onBrowse, busy, authorizedProfiles = [] }: PluginActions & { onBrowse: () => void }): React.JSX.Element {
+export function PluginPicker({ selectedId, onSelect, onBrowse, busy, authorizedProfiles = [], allowedTools = [] }: PluginActions & { onBrowse: () => void }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -37,7 +37,7 @@ export function PluginPicker({ selectedId, onSelect, onBrowse, busy, authorizedP
     <button type="button" className="plugin-add" ref={trigger} aria-label="选择插件" aria-haspopup="dialog" aria-expanded={open} aria-controls="plugin-picker" onClick={() => setOpen(!open)}><span aria-hidden="true">＋</span></button>
     {open && <div className="plugin-picker" id="plugin-picker" role="dialog" aria-label="选择会话插件" ref={panel}>
       <div className="plugin-picker-heading">选择插件<button type="button" className="plugin-close" aria-label="关闭插件选择" onClick={() => close(true)}>×</button></div>
-      <div className="plugin-options">{filterPlugins("", authorizedProfiles).map((plugin) => plugin.status !== "pending" ?
+      <div className="plugin-options">{filterPlugins("", authorizedProfiles, allowedTools).map((plugin) => plugin.status !== "pending" ?
         <button type="button" className="plugin-option" key={plugin.id} aria-pressed={selectedId === plugin.id} disabled={busy} onClick={() => { onSelect(plugin.id); close(true); }}><span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span><span>{plugin.name}</span><span className="plugin-option-state">{plugin.status === "account_required" ? "打开" : selectedId === plugin.id ? "已选" : "选择"}</span></button> :
         <div className="plugin-option pending" key={plugin.id}><span className={`plugin-mark plugin-mark-${plugin.id}`}><PluginIcon id={plugin.id} /></span><span>{plugin.name}</span><span className="plugin-option-state">待接入</span></div>)}</div>
       <button type="button" className="plugin-browse" onClick={() => { close(false); onBrowse(); }}>浏览全部插件 <span aria-hidden="true">↗</span></button>

@@ -43,6 +43,9 @@ export function validateStoryInput(schema: unknown, value: unknown, depth = 0): 
   if (schema.type === "integer") return typeof value === "number" && Number.isSafeInteger(value) &&
     value >= (typeof schema.minimum === "number" ? schema.minimum : 0) &&
     value <= (typeof schema.maximum === "number" ? schema.maximum : Number.MAX_SAFE_INTEGER);
+  if (schema.type === "number") return typeof value === "number" && Number.isFinite(value) &&
+    value >= (typeof schema.minimum === "number" ? schema.minimum : -Infinity) &&
+    value <= (typeof schema.maximum === "number" ? schema.maximum : Infinity);
   if (schema.type === "array") return Array.isArray(value) && value.length <= (typeof schema.maxItems === "number" ? schema.maxItems : 12) &&
     value.every(item => validateStoryInput(schema.items, item, depth+1)) &&
     (schema.uniqueItems !== true || new Set(value.map(item => JSON.stringify(item))).size === value.length);
