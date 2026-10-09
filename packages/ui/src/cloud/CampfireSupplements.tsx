@@ -6,7 +6,7 @@ import { CampfirePreview } from "./CampfireLibrary.js";
 
 interface SupplementQuote {
   id: string; planId: string; shopId: string; title: string; missingShot: string; prompt: string;
-  model: string; resolution: string; aspectRatio: string; durationSeconds: number; estimatedCredits: number; expiresAt: string;
+  model: string; resolution: string; aspectRatio: string; durationSeconds: number; estimatedCredits: string; expiresAt: string;
 }
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value); }
 function parseQuote(value: unknown): SupplementQuote | undefined {
@@ -14,7 +14,7 @@ function parseQuote(value: unknown): SupplementQuote | undefined {
       ![value.title, value.missingShot, value.prompt, value.model, value.expiresAt].every(text => typeof text === "string" && text.length > 0 && text.length <= 1200) ||
       !["480p", "720p", "1080p"].includes(String(value.resolution)) || !["9:16", "16:9"].includes(String(value.aspectRatio)) ||
       typeof value.durationSeconds !== "number" || !Number.isInteger(value.durationSeconds) || value.durationSeconds < 4 || value.durationSeconds > 15 ||
-      typeof value.estimatedCredits !== "number" || !Number.isFinite(value.estimatedCredits) || value.estimatedCredits < 0 ||
+      typeof value.estimatedCredits !== "string" || !/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$/u.test(value.estimatedCredits) ||
       !Number.isFinite(Date.parse(String(value.expiresAt)))) return undefined;
   return value as unknown as SupplementQuote;
 }
@@ -79,7 +79,7 @@ function SupplementCard({ client, quote, onContinue }: { client: WorkbenchClient
   return <section className="asset-form campfire-supplement" aria-label="AI 补镜头报价">
     <h3>AI 演绎补镜头</h3><p>缺失镜头：{quote.missingShot}</p><p className="asset-document">{quote.prompt}</p>
     <p className="asset-library-note">{quote.durationSeconds} 秒 · {quote.aspectRatio} · {quote.resolution} · {quote.model}</p>
-    <p>预估 {quote.estimatedCredits.toLocaleString("zh-CN", { maximumFractionDigits: 6 })} 积分，按实际用量结算。</p>
+    <p>预估 {quote.estimatedCredits.includes(".") ? quote.estimatedCredits.replace(/0+$/u, "").replace(/\.$/u, "") : quote.estimatedCredits} 积分，按实际用量结算。</p>
     <p className="asset-library-note">画面会标记“AI 演绎”，不代表店铺真实现场。确认前不会提交生成。</p>
     <p role="status">{labels[status]}{expired && ["awaiting_confirmation", "approved"].includes(status) ? "；报价已过期，请在聊天中重新报价。" : ""}</p>
     {error && <p role="alert">{error}</p>}

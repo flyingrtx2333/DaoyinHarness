@@ -55,10 +55,14 @@ export class CampfireService {
     return { input, quote, facts };
   }
   #videoQuoteValid(quote: Data): boolean {
+    const creditUnits = (value: JsonValue | undefined): bigint | undefined => {
+      if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$/u.test(value)) return undefined;
+      const [whole, fraction = ""] = value.split("."); return BigInt(whole!) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
+    };
+    const estimated = creditUnits(quote.estimatedCredits); const reserve = creditUnits(quote.reserveCredits);
     return typeof quote.model === "string" && quote.model.length > 0 && quote.provider === "ark" && quote.currency === "CNY" &&
       ["480p", "720p", "1080p"].includes(text(quote, "resolution")) && /^[a-f0-9]{64}$/u.test(text(quote, "pricingDigest")) &&
-      typeof quote.estimatedCredits === "number" && Number.isFinite(quote.estimatedCredits) && quote.estimatedCredits >= 0 &&
-      typeof quote.reserveCredits === "number" && Number.isFinite(quote.reserveCredits) && quote.reserveCredits >= quote.estimatedCredits;
+      estimated !== undefined && reserve !== undefined && reserve >= estimated;
   }
   async #supplementState(auth: ExecutionIdentity, id: string, request: ResourceControlRequest, signal: AbortSignal): Promise<Data> {
     const { input, quote, facts } = await this.#supplementQuote(auth, id);
