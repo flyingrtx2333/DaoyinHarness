@@ -119,13 +119,13 @@ export class CampfireService {
     const filter = isVideo ? `select='${selection}',showinfo,scale=160:160:force_original_aspect_ratio=decrease,pad=160:160:(ow-iw)/2:(oh-ih)/2,tile=3x2` : "scale=320:320:force_original_aspect_ratio=decrease";
     const sampled = await this.#process(workspaceId, "/usr/bin/ffmpeg", ["-v", isVideo ? "info" : "error", "-nostdin", "-y", ...windowArgs, "-i", path, "-vf", filter, "-frames:v", "1", "-q:v", "25", "frames.jpg"], request, signal);
     const sampleTimes = isVideo ? [...String(sampled.stderr).matchAll(/pts_time:([0-9.]+)/gu)].map(match => Number((Number(match[1]) + windowStart).toFixed(6))) : [];
-    if (isVideo && sampleTimes.length !== 6) fail("CAMPFIRE_FRAME_INVALID", "未能取得六个实际视频帧，请选择更长的分析窗口。", 422);
+    if (isVideo && (sampleTimes.length === 0 || sampleTimes.length > 6)) fail("CAMPFIRE_FRAME_INVALID", "未能核对实际抽样视频帧，请调整分析窗口。", 422);
     const exported = await this.executor({ action: "workspace_prepare", operation: "snapshot", workspaceId }, signal);
     const frame = (exported.entries as WorkspaceEntry[]).find(entry => entry.path === "frames.jpg");
     if (!frame || frame.kind !== "file" || frame.size > 14000) fail("CAMPFIRE_FRAME_INVALID", "抽样画面未能保存，未分析画面内容。", 422);
     const data: Data = { analysisVersion: 3, requestedStart, requestedDuration, durationSeconds: duration, width: video.width, height: video.height, hasAudio: Boolean(probe.streams?.some(stream => stream.codec_type === "audio")),
-      ...(isVideo ? { windowStartSeconds: windowStart, windowDurationSeconds: windowDuration, sampleTimesSeconds: sampleTimes, sampleOrder: "从左到右、从上到下；时间来自实际解码帧" } : {}), ...referenceAnalysis,
-      sampledFrames: isVideo ? 6 : 1, visualEvidence: { mimeType: "image/jpeg", dataBase64: (await this.content.read(frame.blobHash, 14000)).toString("base64") } };
+      ...(isVideo ? { windowStartSeconds: windowStart, windowDurationSeconds: windowDuration, sampleTimesSeconds: sampleTimes, sampleOrder: "从左到右、从上到下；时间来自实际解码帧，不足六帧时剩余格为空白" } : {}), ...referenceAnalysis,
+      sampledFrames: isVideo ? sampleTimes.length : 1, visualEvidence: { mimeType: "image/jpeg", dataBase64: (await this.content.read(frame.blobHash, 14000)).toString("base64") } };
     await this.#append(auth, text(asset, "id"), "campfire.media.inspected", data, request);
     return { ...asset, ...data };
   }
