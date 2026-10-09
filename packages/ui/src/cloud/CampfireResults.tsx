@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { AgentEvent } from "@daoyin/harness-protocol";
 import type { WorkbenchClient } from "./client.js";
 import { campfireAsset, type CampfireAsset } from "./campfire-client.js";
@@ -6,6 +6,7 @@ import { campfireAsset, type CampfireAsset } from "./campfire-client.js";
 function InlineCampfireVideo({ client, asset }: { client: WorkbenchClient; asset: CampfireAsset }): React.JSX.Element {
   const container = useRef<HTMLElement>(null);
   const [url, setUrl] = useState(""); const [error, setError] = useState(""); const [attempt, setAttempt] = useState(0);
+  const [ratio, setRatio] = useState(() => typeof asset.width === "number" && typeof asset.height === "number" && Number.isFinite(asset.width) && Number.isFinite(asset.height) && asset.width > 0 && asset.height > 0 ? asset.width / asset.height : 16 / 9);
   const scope = client.accountScope;
   useEffect(() => {
     setUrl(""); setError("");
@@ -18,8 +19,8 @@ function InlineCampfireVideo({ client, asset }: { client: WorkbenchClient; asset
     if (container.current) observer.observe(container.current);
     return () => observer.disconnect();
   }, [client, scope, asset.id, attempt]);
-  return <section ref={container} className="campfire-result" aria-label={asset.title}>
-    <video src={url || undefined} controls playsInline preload="metadata" aria-label={asset.title} onError={() => setError("成片读取未完成，请重试；若账号已变化，请重新登录。")} />
+  return <section ref={container} className="campfire-result" aria-label={asset.title} style={{ "--campfire-video-ratio": ratio } as CSSProperties}>
+    <video src={url || undefined} controls playsInline preload="metadata" aria-label={asset.title} onLoadedMetadata={event => { const video = event.currentTarget; if (video.videoWidth > 0 && video.videoHeight > 0) setRatio(video.videoWidth / video.videoHeight); }} onError={() => setError("成片读取未完成，请重试；若账号已变化，请重新登录。")} />
     {!url && !error && <p role="status">正在读取成片…</p>}
     {error && <><p role="alert">{error}</p><button type="button" onClick={() => setAttempt(value => value + 1)}>重新读取成片</button></>}
     <div className="asset-control"><span>{asset.title}</span>{url && <a href={client.mediaUrl(asset.id, true)} download={asset.title.endsWith(".mp4") ? asset.title : asset.title + ".mp4"}>下载成片</a>}</div>
