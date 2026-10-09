@@ -29,6 +29,8 @@ function mediaHeaderMatches(type: string, bytes: Buffer): boolean {
 
 /** Capability implementation; all decoding and rendering use the existing gVisor executor. */
 export class CampfireService {
+  #thumbnailActive = 0;
+  readonly #thumbnailQueue: Array<() => void> = [];
   public constructor(private readonly repository: ResourceRepository, private readonly content: ContentStore,
     private readonly executor: (request: ExecutorProcessRequest, signal?: AbortSignal) => Promise<Record<string, unknown>>,
     private readonly images: Record<string, { digest?: unknown }>) {}
@@ -133,6 +135,38 @@ export class CampfireService {
     return { ...asset, ...data };
   }
 
+  async #thumbnail(auth: ExecutionIdentity, request: ResourceControlRequest, asset: Data, signal: AbortSignal): Promise<Record<string, unknown>> {
+    if (request.offset !== 0 || !(asset.mediaType === "video/mp4" || text(asset, "mediaType").startsWith("image/")))
+      fail("CAMPFIRE_THUMBNAIL_INVALID", "只有图片和视频支持封面缩略图。");
+    // Bound work before acquiring database locks, so waiting tiles cannot exhaust the pool.
+    if (this.#thumbnailQueue.length >= 32) fail("CAMPFIRE_THUMBNAIL_BUSY", "封面正在处理中，请稍后重试。", 429);
+    if (this.#thumbnailActive >= 2) await new Promise<void>(resolve => this.#thumbnailQueue.push(resolve));
+    else this.#thumbnailActive++;
+    try {
+      signal.throwIfAborted();
+      return await this.repository.serializeBusiness(auth, idOf(request), async () => {
+        let poster = (await this.#facts(auth, idOf(request))).findLast(item => item.eventType === "campfire.thumbnail.ready" && item.payload.thumbnailVersion === 1 && item.payload.sourceDigest === asset.digest)?.payload;
+        if (!poster) {
+          signal.throwIfAborted();
+          const workspaceId = await this.#workspace(auth, request, [asset]);
+          const source = `${idOf(request)}.${this.#extension(text(asset, "mediaType"))}`;
+          await this.#process(workspaceId, "/usr/bin/ffmpeg", ["-v", "error", "-nostdin", "-y", "-i", source, "-vf", "scale=480:480:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1", "-frames:v", "1", "-an", "-c:v", "libwebp", "-quality", "35", "-compression_level", "6", "poster.webp"], request, signal);
+          const exported = await this.executor({ action: "workspace_prepare", operation: "snapshot", workspaceId }, signal);
+          const file = (exported.entries as WorkspaceEntry[]).find(entry => entry.path === "poster.webp");
+          if (!file || file.kind !== "file" || file.size < 12 || file.size > 98304) fail("CAMPFIRE_THUMBNAIL_INVALID", "封面未能生成，请稍后重试。", 422);
+          const bytes = await this.content.read(file.blobHash, 98304);
+          if (!mediaHeaderMatches("image/webp", bytes)) fail("CAMPFIRE_THUMBNAIL_INVALID", "封面格式无效。", 422);
+          poster = { thumbnailVersion: 1, sourceDigest: asset.digest!, digest: file.blobHash, size: file.size, mediaType: "image/webp", maximumEdge: 480, quality: 35, workspaceId };
+          await this.#append(auth, idOf(request), "campfire.thumbnail.ready", poster, request);
+        }
+        const bytes = await this.content.read(text(poster, "digest"), 98304);
+        return { contentBase64: bytes.toString("base64"), nextOffset: bytes.length, size: bytes.length, mediaType: "image/webp", digest: poster.digest, thumbnailVersion: 1, done: true };
+      });
+    } finally {
+      const next = this.#thumbnailQueue.shift(); if (next) next(); else this.#thumbnailActive--;
+    }
+  }
+
   public async call(auth: ExecutionIdentity, request: ResourceControlRequest, signal: AbortSignal): Promise<Record<string, unknown>> {
     const definition = CAMPFIRE_DEFINITIONS[request.action as keyof typeof CAMPFIRE_DEFINITIONS];
     if (!definition) fail("CAMPFIRE_ACTION_INVALID", "营火操作不存在。");
@@ -226,6 +260,7 @@ export class CampfireService {
     if (request.action === "resource_media_read") {
       const asset = await this.#manifest(auth, idOf(request));
       if (!asset.digest) fail("CAMPFIRE_MEDIA_UNAVAILABLE", "该资料没有可下载文件。");
+      if (request.thumbnail) return this.#thumbnail(auth, request, asset, signal);
       const offset = request.offset!;
       if (offset > Number(asset.size)) fail("CAMPFIRE_RANGE_INVALID", "素材读取位置无效。");
       const end = Math.min(offset + CHUNK, Number(asset.size));

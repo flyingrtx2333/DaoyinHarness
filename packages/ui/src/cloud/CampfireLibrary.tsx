@@ -114,8 +114,7 @@ function CampfireThumbnail({ client, asset }: { client: WorkbenchClient; asset: 
   }, []);
   const video = asset.mediaType === "video/mp4", image = asset.mediaType.startsWith("image/");
   return <div ref={element} className="asset-thumbnail" style={{ aspectRatio: ratio ?? 16 / 10 }}>
-    {visible && !failed && (video || image) ? video ? <video src={client.mediaUrl(asset.id) + "#t=0.1"} muted playsInline preload="metadata" aria-hidden="true" onError={() => setFailed(true)} onLoadedMetadata={event => { const el = event.currentTarget; if (el.videoWidth && el.videoHeight) setRatio(el.videoWidth / el.videoHeight); }} />
-      : <img src={client.mediaUrl(asset.id)} alt="" loading="lazy" onError={() => setFailed(true)} onLoad={event => { const el = event.currentTarget; if (el.naturalWidth && el.naturalHeight) setRatio(el.naturalWidth / el.naturalHeight); }} />
+    {visible && !failed && (video || image) ? <img src={client.mediaUrl(asset.id, false, true)} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} onLoad={event => { const el = event.currentTarget; if (el.naturalWidth && el.naturalHeight) setRatio(el.naturalWidth / el.naturalHeight); }} />
       : <span className="asset-preview-fallback">{failed ? "预览暂不可用" : video || image ? CAMPFIRE_LABELS[asset.role] : asset.title}</span>}
     {video && <span className="asset-play" aria-hidden="true"><span /></span>}
   </div>;

@@ -73,6 +73,7 @@ export interface ResourceControlRequest {
   size?: number;
   index?: number;
   offset?: number;
+  thumbnail?: boolean;
   aspectRatio?: "9:16" | "16:9" | "1:1";
   segments?: CampfireSegment[];
   audio?: CampfireAudio;
