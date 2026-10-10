@@ -1,8 +1,10 @@
 # ADR 0041: DeepSeek model binding and durable upload analysis
 
-Harness chat and material understanding use the main platform's explicit `daoyin-harness` scene bindings. The owner requested DeepSeek V4.1 Flash (`deepseek-flash`) and the same server-side credential used by Yinghuo. The existing global DeepSeek credential differs from Yinghuo. Store the requested key in the separate platform provider configuration `harness-deepseek`, while retaining `deepseek` as the model/provider billing identity. Other applications keep their existing key. Provider secrets stay in the platform; Harness receives only an authenticated, metered analysis receipt.
+Status: amended 2026-10-10; provider and billing policy follows [ADR 0018](0018-platform-provider-and-account-billing.md).
 
-The four LLM scenes are `agent_turn`, `capability_routing`, `material_actions` and `material_boundaries`. Dedicated embedding and reranking remain retrieval models.
+Harness chat and material understanding use the platform's explicit `daoyin-harness` scene bindings and shared `deepseek` provider. The owner's earlier request meant the unified platform provider, not an independent Harness credential. The old separate provider is disabled and its credential override code is removed. Provider secrets stay in the platform; Harness receives only authenticated, metered receipts.
+
+The four LLM scenes are `agent_turn`, `capability_routing`, `material_actions` and `material_boundaries`. Routing uses local candidate retrieval and shared DeepSeek intent scoring; the obsolete embedding/reranking call paths have been removed. Narration uses the platform speech service with unified account billing.
 
 Uploads remain usable after a parsing failure. Images and videos enqueue durable analysis after their immutable upload fact is committed. A resource worker claims jobs with PostgreSQL advisory locks (released on disconnect, no expiring lease), records running/completed/failed facts, and resumes interrupted jobs after restart. Explicit retry never replaces prior valid analysis or original media. The queue is derived operational state; immutable resource events are the evidence.
 
