@@ -91,8 +91,8 @@ export function CampfireLibrary({ client, ready, externalLoading = false, refres
     {!loading && !error && !visibleItems.length && !Children.toArray(children).length && <p role="status">暂无素材</p>}
     <div className={`asset-${view}`} hidden={loading} aria-label={view === "masonry" ? "全部素材瀑布流" : "全部素材列表"}>{visibleItems.map(item => <article className={`asset-item${item.mediaType.startsWith("image/") || item.mediaType === "video/mp4" ? "" : " asset-text-item"}`} key={item.id}>
       <button type="button" className="asset-preview" aria-label={`预览营火素材 ${item.title}`} onClick={() => setSelected(item)}><CampfireThumbnail client={client} asset={item} /></button>
-      {item.analysisStatus && <div className={`asset-analysis asset-analysis-${item.analysisStatus}`}>
-        {item.analysisStatus === "completed" ? `已识别 · ${item.analysis?.actions.length ?? 0} 个动作` : item.analysisStatus === "failed"
+      {["shop_image","shop_video","reference_video"].includes(item.role) && <div className={`asset-analysis asset-analysis-${item.analysisStatus ?? "pending"}`}>
+        {!item.analysisStatus ? <button type="button" onClick={()=>{void analyze(item);}}>解析素材</button> : item.analysisStatus === "completed" ? `已识别 · ${item.analysis?.actions.length ?? 0} 个动作` : item.analysisStatus === "failed"
           ? <button type="button" title={item.message} onClick={()=>{void analyze(item);}}>解析失败 · 重试</button>
           : <><span className="spinner" aria-hidden="true" />{item.analysisStatus === "queued" ? "等待解析" : `解析中${item.analysisProgress ? ` ${item.analysisProgress}%` : ""}`}</>}
       </div>}

@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS harness_resource_events (
 );
 CREATE INDEX IF NOT EXISTS harness_resource_events_scope
  ON harness_resource_events(owner_key,sequence);
+CREATE INDEX IF NOT EXISTS harness_resource_events_resource ON harness_resource_events(owner_key,resource_id,sequence DESC);
 CREATE INDEX IF NOT EXISTS harness_resource_events_run
  ON harness_resource_events(run_id,sequence) WHERE run_id IS NOT NULL;
 
