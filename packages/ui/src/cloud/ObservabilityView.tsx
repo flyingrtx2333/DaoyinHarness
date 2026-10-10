@@ -152,7 +152,7 @@ function readableEvent(row: AuditRow, timings: ReadonlyMap<string, ToolTiming>):
     case "turn.started": return <p className="audit-readable-text">{event.payload.userMessage}</p>;
     case "capability.model.requested":
     case "capability.model.responded": return <p className="audit-readable-text">{rowSummary(row, timings)}</p>;
-    case "assistant.delta": return <p className="audit-readable-text audit-assistant-text">{rowSummary(row, timings)}</p>;
+    case "assistant.delta": return <p className="audit-readable-text audit-assistant-text">{row.sourceEvents.map(item => item.type === "assistant.delta" ? item.payload.delta : "").join("")}</p>;
     case "assistant.commentary": return <p className="audit-readable-text audit-assistant-text">{event.payload.text}</p>;
     case "phase.updated": {
       const actions = planActions(event);
@@ -199,6 +199,8 @@ export function ObservabilityView({ client }: { client: EvaluationClient }): Rea
   const [runs, setRuns] = useState<AuditRunSummary[]>([]);
   const [selected, setSelected] = useState<string>();
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [eventState, setEventState] = useState<"loading" | "ready" | "failed">("loading");
+  const [expanded, setExpanded] = useState<string>();
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
 
   useEffect(() => {
@@ -212,9 +214,9 @@ export function ObservabilityView({ client }: { client: EvaluationClient }): Rea
 
   useEffect(() => {
     if (!selected) { setEvents([]); return; }
-    const controller = new AbortController();
-    void client.auditRun(selected, controller.signal).then(value => { if (!controller.signal.aborted) setEvents(value.events); })
-      .catch(() => { if (!controller.signal.aborted) setEvents([]); });
+    const controller = new AbortController(); setEventState("loading");
+    void client.auditRun(selected, controller.signal).then(value => { if (!controller.signal.aborted) { setEvents(value.events); setEventState("ready"); } })
+      .catch(() => { if (!controller.signal.aborted) setEventState("failed"); });
     return () => controller.abort();
   }, [client, selected, revision]);
 
@@ -222,6 +224,8 @@ export function ObservabilityView({ client }: { client: EvaluationClient }): Rea
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") setRevision(value => value + 1); }, 5_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => { setEvents([]); setExpanded(undefined); }, [selected]);
 
   const selectedRun = runs.find(run => run.traceId === selected);
   const ordered = useMemo(() => [...events].sort((left, right) => left.eventSeq - right.eventSeq), [events]);
@@ -247,20 +251,36 @@ export function ObservabilityView({ client }: { client: EvaluationClient }): Rea
     {state === "ready" && runs.length === 0 && <p className="observability-state">当前时间范围内还没有新的完整审计记录。</p>}
     {runs.length > 0 && <div className="observability-layout audit-layout">
       <section className="observability-panel"><h2>最近任务</h2><div className="trace-list">{runs.map(run => <button type="button" className="trace-row audit-run-row" aria-current={selected === run.traceId ? "true" : undefined} onClick={() => setSelected(run.traceId)} key={run.traceId}>
-        <span data-status={run.status === "completed" ? "ok" : run.status === "running" ? "running" : "error"}>{statusLabel[run.status]}</span><strong>{clip(run.userMessage, 56)}</strong><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString("zh-CN")}</time><small>{run.modelCalls} 次模型 · {run.toolCalls} 次工具 · {run.eventCount} 条事件</small>
+        <span data-status={run.status === "completed" ? "ok" : run.status === "running" ? "running" : "error"}>{statusLabel[run.status]}</span><strong title={run.userMessage}>{clip(run.userMessage.replace(/^\[营火内置剪辑[^\]]*\]\s*/u, ""), 80)}</strong><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString("zh-CN")}</time><small>{run.modelCalls} 次模型 · {run.toolCalls} 次工具 · {run.eventCount} 条事件</small>
       </button>)}</div></section>
-      <section className="observability-panel audit-detail"><header><h2>全流程记录</h2>{selectedRun && <small>Run {selectedRun.runId} · 用户 {selectedRun.accountId} · {statusLabel[selectedRun.status]}</small>}</header>
+      <section className="observability-panel audit-detail"><header><h2>全流程记录</h2>{selectedRun && <span className="audit-status" data-status={selectedRun.status === "completed" ? "ok" : selectedRun.status === "running" ? "running" : "error"}>{statusLabel[selectedRun.status]}</span>}</header>
+        {selectedRun && <p className="audit-run-meta"><span title={selectedRun.runId}>Run {selectedRun.runId}</span><span>用户 {selectedRun.accountId}</span></p>}
         {selectedRun && <div className="audit-run-metrics" aria-label="本轮耗时统计"><article><span>整轮耗时</span><strong>{duration(elapsedMs)}</strong></article><article><span>模型耗时</span><strong>{modelEvents.length} 轮 · {duration(modelDurationMs)}</strong></article><article><span>工具执行耗时</span><strong>{startedTools} 次 · {duration(toolDurationMs)}</strong></article><article><span>事件记录</span><strong>{ordered.length} 条</strong></article></div>}
-        {rows.length === 0 && <p className="observability-state">尚无该任务的事件记录。</p>}
-        <div className="audit-timeline">{rows.map(row => {
-          const event = row.event;
-          const took = eventDuration(row, timings, ordered);
-          return <article className={`audit-event audit-event-${event.type.replaceAll(".", "-")}`} key={row.key}>
-            <header><span className="audit-seq">#{event.eventSeq}</span><strong>{eventTitle(event)}</strong>{took && <span className="audit-duration">{took}</span>}<time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleTimeString("zh-CN")}</time></header>
-            <div className="audit-event-summary">{rowSummary(row, timings)}</div>
-            <div className="audit-event-body">{readableEvent(row, timings)}{rawEvent(row)}</div>
-          </article>;
-        })}</div>
+        {eventState === "failed" && <p className="observability-state" role="alert">事件读取失败，请刷新重试。</p>}
+        {rows.length === 0 && eventState === "loading" && <p className="observability-state" role="status">正在读取任务事件…</p>}
+        {rows.length === 0 && eventState === "ready" && <p className="observability-state">尚无该任务的事件记录。</p>}
+        {rows.length > 0 && <><h3 className="audit-events-heading">执行事件 <small>{ordered.length} 条记录</small></h3>
+        <div className="audit-timeline">
+          <div className="audit-table-heading" aria-hidden="true"><span>序号</span><span>时间</span><span>事件</span><span>摘要</span><span>耗时</span><span/></div>
+          {rows.map(row => {
+            const event = row.event;
+            const took = eventDuration(row, timings, ordered);
+            const isOpen = expanded === row.key;
+            const warning = event.type === "tool.failed" || event.type === "turn.failed" || ((event.type === "model.responded" || event.type === "capability.model.responded") && event.payload.status !== "completed");
+            return <article className={`audit-event${isOpen ? " is-expanded" : ""}`} data-warning={warning || undefined} key={row.key}>
+              <button type="button" className="audit-event-toggle" aria-expanded={isOpen} aria-controls={`audit-${event.id}`} onClick={() => setExpanded(isOpen ? undefined : row.key)}>
+                <span className="audit-seq">{event.eventSeq}</span>
+                <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleTimeString("zh-CN")}</time>
+                <strong>{eventTitle(event)}</strong>
+                <span className="audit-event-summary">{rowSummary(row, timings)}</span>
+                <span className="audit-duration">{took ?? "—"}</span>
+                <span className="audit-chevron" aria-hidden="true">{isOpen ? "⌃" : "⌄"}</span>
+              </button>
+              {isOpen && <div className="audit-event-body" id={`audit-${event.id}`}>{readableEvent(row, timings)}{rawEvent(row)}</div>}
+            </article>;
+          })}
+        </div></>}
+
       </section>
     </div>}
   </section>;
