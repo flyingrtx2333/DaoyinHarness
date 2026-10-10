@@ -10,7 +10,7 @@ import "./admin.css";
 type Section="overview"|"agent"|"routing"|"observability";
 export function AdminWorkspace({client,workbenchClient,onDenied}:{client:EvaluationClient;workbenchClient:WorkbenchClient;onDenied:()=>void}):React.JSX.Element{
  const [section,setSection]=useState<Section>("overview");
- return <div className="admin-workspace">
+ return <div className="admin-workspace" data-section={section}>
   <header className="admin-header"><div><h1>测试后台</h1></div><span>管理员模式</span></header>
   <nav className="evaluation-tabs" aria-label="后台页面标签"><button aria-current={section==="overview"?"page":undefined} onClick={()=>setSection("overview")}>测试总览</button><button aria-current={section==="agent"?"page":undefined} onClick={()=>setSection("agent")}>Agent 评估</button><button aria-current={section==="routing"?"page":undefined} onClick={()=>setSection("routing")}>能力路由</button><button aria-current={section==="observability"?"page":undefined} onClick={()=>setSection("observability")}>审计记录</button></nav>
   {section==="overview"&&<section className="admin-test-grid" aria-label="可用测试">
