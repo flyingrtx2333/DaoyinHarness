@@ -66,7 +66,7 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   process_stop: { description: "Stop a running workspace process and its process group.", mutating: true, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, signal: { type: "string", enum: ["TERM", "KILL", "INT"] } }, ["workspaceId", "processId"]) },
   process_list: { description: "List recent processes in an attached workspace.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   artifact_create: { description: "Create an immutable artifact from a workspace path. A deployable artifact must follow a workspace snapshot and include metadata.deployment with a structured web-service command, port and health check.", mutating: true, inputSchema: object({ workspaceId, path, title: { type: "string", minLength: 1, maxLength: 120 }, mediaType: { type: "string", minLength: 1, maxLength: 160 }, metadata: { type: "object", additionalProperties: true, properties: { deployment: deploymentSpec } } }, ["workspaceId", "path", "title", "mediaType"]) },
-  artifact_read: { description: "Read artifact metadata and a bounded content reference.", mutating: false, inputSchema: object({ artifactId: { type: "string", pattern: "^art_[a-f0-9]{24}$" }, maximumBytes: { type: "integer", minimum: 1, maximum: 1000000 } }, ["artifactId"]) },
+  artifact_read: { description: "Read artifact metadata and exact base64 content in bounded byte ranges. Agent pages are at most 8192 bytes; use a smaller maximumBytes if model context truncates content. Continue from nextOffset until null when complete content is needed.", mutating: false, inputSchema: object({ artifactId: { type: "string", pattern: "^art_[a-f0-9]{24}$" }, offset: { type: "integer", minimum: 0 }, maximumBytes: { type: "integer", minimum: 1, maximum: 1000000 } }, ["artifactId"]) },
   artifact_list: { description: "List artifacts belonging to an attached workspace.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   deployment_create: { description: "Deploy an immutable snapshot-backed artifact to a managed HTTPS origin after an explicit current-turn request. The old route remains active until the candidate passes its health check.", mutating: true, inputSchema: object({ workspaceId, artifactId: { type: "string", pattern: "^art_[a-f0-9]{24}$" }, endpoint: { type: "string", pattern: "^https://", maxLength: 500 } }, ["workspaceId", "artifactId", "endpoint"]) },
   deployment_status: { description: "Read deployment state and health evidence.", mutating: false, inputSchema: object({ deploymentId: { type: "string", pattern: "^dep_[a-f0-9]{24}$" } }, ["deploymentId"]) },
@@ -117,7 +117,7 @@ const NETWORK_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   WORKSPACE_SUBNET_POOL_INVALID: "云端工作区地址池配置无效，命令未能启动。需要先修复运行环境。",
   WORKSPACE_SUBNET_POOL_EXHAUSTED: "云端工作区网络地址池已耗尽，命令未能启动。需要先配置可用的工作区地址池。",
   WORKSPACE_NETWORK_CREATE_FAILED: "云端未能创建隔离网络，命令未能启动。需要先修复运行环境。",
-  RESOURCE_AUDIT_PERSISTENCE_FAILED: "云端执行已返回，但回执保存失败；命令可能已完成。为避免重复执行，本轮不再自动运行命令，需要先修复审计存储。",
+  RESOURCE_AUDIT_PERSISTENCE_FAILED: "云端操作已返回，但完整证据未能保存；操作可能已完成。不要自动重复该操作，应先检查已有状态并修复证据存储或确认会话挂载的工作区。",
 };
 
 const RESOURCE_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
@@ -224,7 +224,11 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
           }
           await ensureActive(identity, signal);
           const verificationHint = resourceVerificationHint(name, input, result);
-          return { ok: true, summary: typeof result.summary === "string" ? result.summary : `${name} completed.`, evidence: { schemaVersion: 1, toolName: name, result: result as JsonValue, artifacts: [], diagnostics: [],
+          const reference = result.fullResultArtifact;
+          const artifactId = reference && typeof reference === "object" && !Array.isArray(reference)
+            ? (reference as Record<string, unknown>).artifactId : undefined;
+          const artifacts = typeof artifactId === "string" && /^art_[a-f0-9]{24}$/u.test(artifactId) ? [artifactId] : [];
+          return { ok: true, summary: typeof result.summary === "string" ? result.summary : `${name} completed.`, evidence: { schemaVersion: 1, toolName: name, result: result as JsonValue, artifacts, diagnostics: [],
             ...(verificationHint === undefined ? {} : { verificationHint }) } };
         },
       },

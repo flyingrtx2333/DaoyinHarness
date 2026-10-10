@@ -32,6 +32,8 @@ const poolConfig: PoolConfig = { host: databaseUrl.searchParams.get("host") ?? d
 const pool = new Pool(poolConfig);
 const content = await FileContentStore.open(contentRoot);
 const repository = new ResourceRepository(pool, content);
+const AGENT_RESULT_BYTES = 64 * 1024;
+const ARTIFACT_PAGE_BYTES = 8 * 1024;
 
 function identity(input: ResourceControlRequest): ExecutionIdentity {
   assertExecutionIdentity(input.authorization);
@@ -91,25 +93,70 @@ function requestedAudit(request: ResourceControlRequest): JsonValue {
   });
   if (typeof request.timeoutMs === "number") value.timeoutMs = request.timeoutMs;
   if (typeof request.maximumBytes === "number") value.maximumBytes = request.maximumBytes;
+  if (typeof request.offset === "number") value.offset = request.offset;
   if (request.query) value.queryDigest = `sha256:${createHash("sha256").update(request.query).digest("hex")}`;
   if (request.message) value.messageDigest = `sha256:${createHash("sha256").update(request.message).digest("hex")}`;
   return value;
 }
 
-async function completedAudit(auth: ExecutionIdentity, request: ResourceControlRequest, result: Record<string, unknown>): Promise<JsonValue> {
+async function resultWorkspace(auth: ExecutionIdentity, request: ResourceControlRequest, result: Record<string, unknown>): Promise<string> {
+  let workspaceId = request.workspaceId;
+  if (!workspaceId) {
+    for (const key of ["workspace", "snapshot", "artifact", "deployment"]) {
+      const item = result[key];
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const value = item as Record<string, unknown>;
+      const candidate = key === "workspace" ? value.id : value.workspaceId;
+      if (typeof candidate === "string" && /^wsp_[a-f0-9]{24}$/u.test(candidate)) { workspaceId = candidate; break; }
+    }
+  }
+  if (!workspaceId) {
+    const attached = (await repository.attached(auth, required(request.sessionId, "sessionId"))).filter(item => item.kind === "workspace");
+    if (attached.length === 1) workspaceId = attached[0]!.id;
+  }
+  if (!workspaceId) throw new ResourceError("RESOURCE_AUDIT_PERSISTENCE_FAILED", "The operation returned a large result, but no unambiguous attached workspace is available to retain its evidence. Do not repeat the operation automatically.", 503);
+  await repository.authorizeAttached(auth, required(request.sessionId, "sessionId"), workspaceId);
+  return workspaceId;
+}
+
+async function completedAudit(auth: ExecutionIdentity, request: ResourceControlRequest, result: Record<string, unknown>): Promise<{ payload: JsonValue; response: Record<string, unknown> }> {
   const encoded = Buffer.from(JSON.stringify(result)); const payload: Record<string, JsonValue> = {
     action: request.action, resultDigest: `sha256:${createHash("sha256").update(encoded).digest("hex")}`, resultBytes: encoded.byteLength,
   };
   for (const key of ["processId", "exitCode", "cursor", "state", "status", "path", "size", "digest"] as const) {
     const item = result[key]; if (typeof item === "string" || typeof item === "number" || typeof item === "boolean" || item === null) payload[key] = item;
   }
-  if (request.workspaceId && (request.action === "process_run" || (request.action === "process_read" &&
-      [result.stdout, result.stderr, result.output].some(item => typeof item === "string" && item.length)))) {
-    const artifact = await repository.createArtifact(auth, { workspaceId: request.workspaceId, title: `${request.action} output`,
-      mediaType: "application/json", content: encoded, metadata: { runId: request.sourceRun ?? null, processId: request.processId ?? null, audit: true } });
+  const oversized = Boolean(request.sourceRun) && encoded.byteLength > AGENT_RESULT_BYTES;
+  const processOutput = Boolean(request.workspaceId) && (request.action === "process_run" || (request.action === "process_read" &&
+    [result.stdout, result.stderr, result.output].some(item => typeof item === "string" && item.length)));
+  if (oversized || processOutput) {
+    const workspaceId = oversized ? await resultWorkspace(auth, request, result) : required(request.workspaceId, "workspaceId");
+    const artifact = await repository.createArtifact(auth, { workspaceId, title: `${request.action} ${processOutput ? "output" : "result"}`,
+      mediaType: "application/json", content: encoded, metadata: { runId: request.sourceRun ?? null, sessionId: request.sessionId ?? null,
+        requestId: request.requestId ?? null, action: request.action, processId: request.processId ?? null, audit: true } });
     payload.outputArtifactId = artifact.id; payload.outputBlobHash = artifact.blobHash;
+    if (oversized) {
+      const response: Record<string, unknown> = {
+        summary: typeof result.summary === "string" && Buffer.byteLength(result.summary) <= 1024 ? result.summary : `${request.action} returned.`,
+        truncated: true,
+        truncationReason: "The complete result exceeds the Agent response budget; the preview is incomplete. Read the immutable JSON artifact in bounded byte ranges for details.",
+        fullResultArtifact: { artifactId: artifact.id, workspaceId, bytes: artifact.size, digest: artifact.blobHash, mediaType: artifact.mediaType },
+      };
+      // Keep actual receipts and change paths usable without treating a preview as a complete result.
+      for (const key of ["path", "from", "to", "processId", "exitCode", "cursor", "state", "status", "size", "digest", "offset", "nextOffset", "totalBytes"]) {
+        const item = result[key];
+        if (item === null || typeof item === "number" || typeof item === "boolean" || (typeof item === "string" && Buffer.byteLength(item) <= 2048)) response[key] = item;
+      }
+      for (const key of ["workspace", "snapshot", "artifact", "deployment"]) {
+        const item = result[key];
+        if (item && typeof item === "object" && Buffer.byteLength(JSON.stringify(item)) <= 4096) response[key] = item;
+      }
+      response.preview = encoded.subarray(0, 16 * 1024).toString("utf8");
+      if (Buffer.byteLength(JSON.stringify(response)) > AGENT_RESULT_BYTES) delete response.preview;
+      return { payload, response };
+    }
   }
-  return payload;
+  return { payload, response: result };
 }
 
 async function localCall(socket: string, path: string, input: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -334,6 +381,17 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
   if (request.action === "artifact_read") {
     const artifactId = required(request.artifactId, "artifactId"); const artifact = await repository.artifact(auth, artifactId);
     await repository.authorizeAttached(auth, required(request.sessionId, "sessionId"), artifact.workspaceId);
+    if (request.sourceRun || request.offset !== undefined) {
+      const offset = request.offset ?? 0;
+      const maximumBytes = Math.min(request.maximumBytes ?? ARTIFACT_PAGE_BYTES, request.sourceRun ? ARTIFACT_PAGE_BYTES : 1_000_000);
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > artifact.size || !Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+        throw new ResourceError("RESOURCE_INPUT_INVALID", "Artifact byte range is invalid.", 422);
+      }
+      const page = await content.readRange(artifact.blobHash, offset, maximumBytes);
+      const nextOffset = offset + page.byteLength;
+      return { summary: "Artifact byte range read.", offset, nextOffset: nextOffset < artifact.size ? nextOffset : null,
+        totalBytes: artifact.size, truncated: nextOffset < artifact.size, artifact, contentBase64: page.toString("base64") };
+    }
     const value = await repository.artifactContent(auth, artifactId, Math.min(request.maximumBytes ?? 1_000_000, 1_000_000));
     return { summary: "Artifact read.", artifact: value.artifact, contentBase64: value.content.toString("base64") };
   }
@@ -457,15 +515,19 @@ const server = http.createServer((request, response) => {
           ...(parsed.requestId ? { requestId: parsed.requestId } : {}), ...(resourceId ? { resourceId } : {}),
           payload: requestedAudit(parsed) });
       }
-      const value = await dispatch(parsed, controller.signal);
+      let value = await dispatch(parsed, controller.signal);
       try {
-        if (auditIdentity) await repository.appendEvent(auditIdentity, { eventType: "operation.completed",
+        if (auditIdentity) {
+          const completed = await completedAudit(auditIdentity, parsed, value);
+          await repository.appendEvent(auditIdentity, { eventType: "operation.completed",
           ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}), ...(parsed.sourceRun ? { runId: parsed.sourceRun } : {}),
           ...(parsed.requestId ? { requestId: parsed.requestId } : {}), ...(resourceId ? { resourceId } : {}),
-          payload: await completedAudit(auditIdentity, parsed, value) });
+          payload: completed.payload });
+          value = completed.response;
+        }
       } catch (error) {
-        if (parsed.action !== "process_run" && parsed.action !== "process_read") throw error;
-        throw new ResourceError("RESOURCE_AUDIT_PERSISTENCE_FAILED", "Execution returned, but its audit evidence could not be saved. Do not repeat the command automatically.", 503);
+        if (error instanceof ResourceError && error.code === "RESOURCE_AUDIT_PERSISTENCE_FAILED") throw error;
+        throw new ResourceError("RESOURCE_AUDIT_PERSISTENCE_FAILED", "The operation returned, but its audit evidence could not be saved. Do not repeat the operation automatically.", 503);
       }
       response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
     } catch (error) {

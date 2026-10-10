@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Switch only the exact server-built executor; an unchanged dependent control may need starting.
+"""Switch one exact server-built executor or control component after idle/protection checks.
 
 Local push and bundle-transfer evidence is recorded separately by the operator.
 The server checks its clean main HEAD/origin/main, never contacts GitHub here.
@@ -17,7 +17,8 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 helpers = runpy.run_path(str(ROOT / "scripts/deploy-resource-builder.py"))
 access, digest, command_digest = (helpers[name] for name in ("access", "digest", "command_digest"))
-UNIT, CONTROL, NODE = "daoyin-resource-executor.service", access.CONTROL, access.NODE
+EXECUTOR, CONTROL, NODE = "daoyin-resource-executor.service", access.CONTROL, access.NODE
+UNIT, ARTIFACT = EXECUTOR, "executor.mjs"
 DROPIN = pathlib.Path(f"/etc/systemd/system/{UNIT}.d/99-harness-executor-release.conf")
 PROTECTED = ["daoyin-harness-cloud.service", "daoyin-resource-builder.service", "daoyin-resource-deployer.service",
              "daoyin-resource-buildkit.service", "daoyin-resource-egress.service", "docker.service", "nginx.service"]
@@ -78,6 +79,9 @@ def require_release(revision):
         target = release / name
         if target.resolve(strict=True) != target or not target.is_file() or digest(target.read_bytes()) != expected:
             raise RuntimeError("Candidate artifact integrity check failed.")
+    if ARTIFACT == "service.mjs":
+        access.run([NODE, "-e", "require('node:module').createRequire(process.argv[1]).resolve('pg')",
+                    str(release / ARTIFACT)])
     return release, {"manifestSha256": digest(encoded), "builtAt": manifest.get("builtAt"), "files": files}
 
 
@@ -98,14 +102,14 @@ def protected_state():
     ids = access.run(["docker", "ps", "-a", "-q"]).split()
     containers = access.run(["docker", "inspect", "--format", "{{.Id}} {{.Name}} {{.Config.Image}} {{.State.Status}} {{.State.StartedAt}}", *ids]) if ids else ""
     return {"units": units, "links": links, "configs": configs, "containersSha256": digest("\n".join(sorted(containers.splitlines())).encode()),
-            "controlExecStartSha256": command_digest(CONTROL)}
+            **({"controlExecStartSha256": command_digest(CONTROL)} if UNIT != CONTROL else {})}
 
 
 def idle():
     access.run([NODE, "-e", PG_CHECK])
     if access.run(["docker", "ps", "--filter", "label=daoyin.harness.resource=1", "-q"]):
         raise RuntimeError("Active workspace containers exist.")
-    for unit in [UNIT, CONTROL, "daoyin-resource-builder.service", "daoyin-resource-deployer.service"]:
+    for unit in [EXECUTOR, CONTROL, "daoyin-resource-builder.service", "daoyin-resource-deployer.service"]:
         group = access.run(["systemctl", "show", unit, "-p", "ControlGroup", "--value"])
         if not re.fullmatch(r"/system.slice/[A-Za-z0-9_.-]+", group):
             raise RuntimeError("Resource worker cgroup cannot be verified.")
@@ -132,16 +136,22 @@ def start_original_control(report):
 
 
 def main():
+    global UNIT, ARTIFACT, DROPIN
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", required=True, metavar="EXACT_PUSHED_COMMIT")
+    parser.add_argument("--component", choices=["executor", "control"], default="executor")
     args = parser.parse_args()
+    if args.component == "control":
+        UNIT, ARTIFACT = CONTROL, "service.mjs"
+        DROPIN = pathlib.Path(f"/etc/systemd/system/{UNIT}.d/99-harness-control-release.conf")
+        PROTECTED.append(EXECUTOR)
     if sys.platform != "linux" or os.geteuid() != 0 or not re.fullmatch(r"[a-f0-9]{40}", args.apply):
         raise RuntimeError("Use independent Linux root --apply EXACT_PUSHED_COMMIT.")
     os.chdir(ROOT)
     require_checkout(args.apply)
     release, manifest = require_release(args.apply)
     if DROPIN.is_symlink() or DROPIN.parent.resolve() != DROPIN.parent:
-        raise RuntimeError("Executor release drop-in must not be a symlink.")
+        raise RuntimeError("Component release drop-in must not be a symlink.")
     previous_dropin = DROPIN.read_bytes() if DROPIN.exists() else None
     previous_mode = DROPIN.stat().st_mode & 0o777 if previous_dropin is not None else 0o600
     if not access.active(UNIT) or not access.active(CONTROL):
@@ -153,9 +163,9 @@ def main():
     _, previous_command = process_command(UNIT)
     _, control_command = process_command(CONTROL)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    journal = pathlib.Path(f"/opt/daoyin-harness/deployments/{stamp}-executor-release-{args.apply[:12]}-{os.getpid()}.json")
-    report = {"revision": args.apply, "phase": "preflight", "artifact": str(release / "executor.mjs"), "manifest": manifest,
-              "previous": previous, "previousExecutorCommandSha256": digest(previous_command), "restartedUnits": [], "startedUnits": [],
+    journal = pathlib.Path(f"/opt/daoyin-harness/deployments/{stamp}-{args.component}-release-{args.apply[:12]}-{os.getpid()}.json")
+    report = {"revision": args.apply, "phase": "preflight", "component": args.component, "artifact": str(release / ARTIFACT), "manifest": manifest,
+              "previous": previous, "previousComponentCommandSha256": digest(previous_command), "restartedUnits": [], "startedUnits": [],
               "runtimeChanged": False, "resourceCurrentChanged": False, "uiChanged": False, "realModelValidation": "not-run"}
     if previous_dropin is not None:
         access.atomic(journal.with_suffix(".rollback"), previous_dropin)
@@ -174,7 +184,7 @@ def main():
         verify_scope(previous)
         idle()
         changed = True
-        access.atomic(DROPIN, f"[Service]\nExecStart=\nExecStart={NODE} {release}/executor.mjs\n".encode())
+        access.atomic(DROPIN, f"[Service]\nExecStart=\nExecStart={NODE} {release}/{ARTIFACT}\n".encode())
         access.run(["systemctl", "daemon-reload"])
         access.run(["systemctl", "restart", UNIT])
         report["restartedUnits"].append(UNIT)
@@ -182,12 +192,12 @@ def main():
         if not access.ready():
             raise RuntimeError("Candidate resource/cloud readiness is unconfirmed.")
         pid, command = process_command(UNIT)
-        if command.rstrip(b"\0").split(b"\0") != [NODE.encode(), str(release / "executor.mjs").encode()]:
-            raise RuntimeError("Executor is not running the exact candidate artifact.")
-        if process_command(CONTROL)[1] != control_command:
+        if command.rstrip(b"\0").split(b"\0") != [NODE.encode(), str(release / ARTIFACT).encode()]:
+            raise RuntimeError("Component is not running the exact candidate artifact.")
+        if UNIT != CONTROL and process_command(CONTROL)[1] != control_command:
             raise RuntimeError("Resource control did not retain its original command.")
         verify_scope(previous)
-        report.update(phase="deployed", executorPid=pid)
+        report.update(phase="deployed", componentPid=pid)
     except Exception as error:
         report.update(phase="failed", failure=str(error)[:300])
         signal.alarm(180)
@@ -204,7 +214,7 @@ def main():
                 start_original_control(report)
                 ready = access.ready()
                 verify_scope(previous)
-                if process_command(UNIT)[1] != previous_command or process_command(CONTROL)[1] != control_command:
+                if process_command(UNIT)[1] != previous_command or (UNIT != CONTROL and process_command(CONTROL)[1] != control_command):
                     raise RuntimeError("Original component commands were not restored.")
                 report["rollback"] = "restored-and-ready" if ready else "restored-readiness-unconfirmed"
             except Exception:
@@ -221,5 +231,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception:
-        print(json.dumps({"phase": "preflight-failed", "message": "Executor preflight failed; protected output withheld."}), file=sys.stderr)
+        print(json.dumps({"phase": "preflight-failed", "message": "Resource component preflight failed; protected output withheld."}), file=sys.stderr)
         sys.exit(1)
