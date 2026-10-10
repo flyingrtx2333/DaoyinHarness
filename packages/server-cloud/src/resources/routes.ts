@@ -6,7 +6,7 @@ import { CloudError } from "../repository.js";
 import type { ResourceControlRequest } from "./contracts.js";
 import { resourceCall } from "./tools.js";
 
-const actionPattern = "^(?:resource_(?:list|attach|detach|media_(?:begin|chunk|commit|read|profile|supplement_approve)|campfire_(?:list|inspect|music|narrate|plan|render|status|supplement(?:_quote|_status)?))|workspace_(?:create|inspect|snapshot|restore)|file_(?:list|stat|read|search|write|patch|mkdir|move|remove)|git_(?:status|diff|log|branch|checkout|commit|export_patch)|process_(?:run|start|read|write|stop|list)|artifact_(?:create|read|list)|deployment_(?:create|status|rollback))$";
+const actionPattern = "^(?:resource_(?:list|attach|detach|media_(?:begin|chunk|commit|read|profile|analyze|supplement_approve)|campfire_(?:list|inspect|music|narrate|plan|render|status|supplement(?:_quote|_status)?))|workspace_(?:create|inspect|snapshot|restore)|file_(?:list|stat|read|search|write|patch|mkdir|move|remove)|git_(?:status|diff|log|branch|checkout|commit|export_patch)|process_(?:run|start|read|write|stop|list)|artifact_(?:create|read|list)|deployment_(?:create|status|rollback))$";
 
 export function registerResourceRoutes(app: FastifyInstance, options: {
   repository: CloudRepository;
