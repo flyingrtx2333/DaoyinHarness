@@ -20,6 +20,9 @@ const run = (file, args, options = {}) => {
     throw new Error(`Command failed: ${file}; exit ${error.status ?? 'unknown'}; raw output withheld.`);
   }
 };
+// The installed service permits 150 seconds for a graceful stop. Wait for that
+// lifecycle to finish before switching releases or attempting rollback.
+const stopRuntime = () => run('systemctl', ['stop', service], { timeout: 180000 });
 const report = { revision, startedAt: new Date().toISOString(), environment: 'independent-linux-server',
   scope: 'runtime-only', uiChanged: false, resourceChanged: false, platformChanged: false,
   dockerRestarted: false, dataMigration: false, realModelValidation: 'not-run' };
@@ -146,7 +149,7 @@ await verify(destination);
 let stopped = false;
 try {
   await assertIdle(); equalProtected(before, await protectedState());
-  stopped = true; run('systemctl', ['stop', service]);
+  stopped = true; stopRuntime();
   await assertIdle(); equalProtected(before, await protectedState());
   await replaceLink(destination); run('systemctl', ['start', service]);
   if (!await ready()) throw new Error('Candidate runtime did not become ready.');
@@ -167,7 +170,7 @@ try {
   report.phase = 'failed'; report.failure = error.message;
   if (stopped) {
     try {
-      run('systemctl', ['stop', service]); await replaceLink(previous); run('systemctl', ['start', service]);
+      stopRuntime(); await replaceLink(previous); run('systemctl', ['start', service]);
       const restored = await ready(); report.protectedAfterRollback = await protectedState(); equalProtected(before, report.protectedAfterRollback);
       report.rollback = restored ? 'previous-runtime-restored-and-ready' : 'previous-runtime-restored-readiness-unconfirmed';
     } catch (rollback) { report.rollback = rollback.message; }
