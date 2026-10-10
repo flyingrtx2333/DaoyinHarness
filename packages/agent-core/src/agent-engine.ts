@@ -411,6 +411,13 @@ export class AgentEngine {
               ? "当前仍允许工具；停止无关探索，对照原始用户要求检查实际产物和修改范围，必要时执行聚焦验证。已有核对证据可复用；发现问题时在现有额度内修正并核对，不能把写入成功代替结果有效。用户明确要求不追加验证时遵从，并说明未验证。"
               : "当前不再允许工具；如实区分已执行的变更、已有的核对证据和未验证部分。缺少必要验收时不能声称目标已经验证完成，预算不足的未完成目标报告 partial。")
           : "";
+        const deliveryStep = !finalStep && tools.length > 0 && remaining <= 3;
+        const deliveryInstruction = deliveryStep && !verificationStep
+          ? "\n\n运行时阶段切换：当前进入工具仍可用的交付阶段，之后才是关闭工具的结果报告。" +
+            "停止扩展无关探索，复用已有观察，对照原始用户目标选择剩余额度内最小的合法交付或核对动作。" +
+            "查询或问答目标可以用已有依据只读交付，不要求写入；必要依据不足时只补关键观察，不能猜测结果、强行变更或把准备工作说成完成。" +
+            "确有必要前提缺失时报告 blocked；仅因预算结束而未完成时报告 partial。"
+          : "";
         const outcomeInstruction = this.#remainingModelCalls === undefined ? "" :
           "只有最终普通回答才在正文末尾另起独立一行添加任务结果标记，从 [[task_outcome:completed]]、[[task_outcome:partial]]、[[task_outcome:blocked]] 中选择且仅添加一种；不要输出竖线或多个标记。" +
           "completed 表示你判断用户目标已完成（不涉及任务动作的普通问答也使用 completed）；partial 表示仍有未完成事项，包括调用、步骤或时间预算结束；blocked 表示已有观察确认缺少必要依据、权限或其他执行条件。" +
@@ -431,13 +438,14 @@ export class AgentEngine {
           "按照原始用户要求交付结果，直接说明实际完成的事项、验证结果与未完成事项。不要仿写工具记录或生成待执行的调用；建议的后续操作不是已执行证据。" +
           "根据返回中的错误、退出码与截断信息判断哪些事实已确认，不把局部成功说成全部完成。" : "";
         const memoryText = memorySnapshot?.text ? `\n\n${memorySnapshot.text}` : "";
-        let systemPrompt = { stableText: context.prompt.stableText, dynamicText: context.prompt.dynamicText + memoryText + budgetNotice + verificationInstruction + closing,
+        let systemPrompt = { stableText: context.prompt.stableText, dynamicText: context.prompt.dynamicText + memoryText + budgetNotice + verificationInstruction + deliveryInstruction + closing,
           sections: [...context.prompt.sections.map((section) => ({ id: section.id, kind: section.kind })),
             ...(memoryText ? [{ id: "confirmed_memory", kind: "dynamic" as const }] : []),
             ...(budgetNotice ? [{ id: "shared_model_budget", kind: "dynamic" as const }] : []),
-            ...(verificationInstruction ? [{ id: "delivery_verification", kind: "dynamic" as const }] : [])] };
+            ...(verificationInstruction ? [{ id: "delivery_verification", kind: "dynamic" as const }] : []),
+            ...(deliveryInstruction ? [{ id: "delivery_preparation", kind: "dynamic" as const }] : [])] };
         let budget: ModelContextBudget = {
-          systemMessage: { role: "system", content: context.systemMessage.content + memoryText + budgetNotice + verificationInstruction + closing },
+          systemMessage: { role: "system", content: context.systemMessage.content + memoryText + budgetNotice + verificationInstruction + deliveryInstruction + closing },
           history, current, ...(memoryCheckpoint === undefined ? {} : { runtimeNote: memoryCheckpoint }),
           overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
           maxCharacters: contextCharacters, maxMessages: contextMessages,
@@ -451,7 +459,7 @@ export class AgentEngine {
         if (signal.aborted) return cancel();
         await append("phase.updated", {
           phase: step === 0 ? "thinking" : "synthesizing",
-          displayText: verificationStep ? "正在核对实际产物与任务要求…" : "模型正在生成…",
+          displayText: verificationStep ? "正在核对实际产物与任务要求…" : deliveryStep ? "正在根据已有依据交付结果…" : "模型正在生成…",
           step,
         });
         for (;;) {
