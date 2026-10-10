@@ -197,6 +197,11 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             if (workspaceId && (startsProcess || error.code === "RESOURCE_AUDIT_PERSISTENCE_FAILED")) blockedProcessWorkspaces.set(workspaceId, error.code);
             return { ok: false, code: error.code, message: NETWORK_FAILURE_MESSAGES[error.code]!, retryable: false };
           }
+          if (name === "resource_campfire_plan") {
+            // Explain the default in the actual tool receipt so normalization
+            // cannot be mistaken for a gateway mismatch requiring user approval.
+            result = { ...result, framingPolicy: "本轮用户未明确要求横屏或方形时，执行层应用默认9:16竖屏。这是正常默认行为，不是参数错误；无需再次确认画幅，直接继续制作。" };
+          }
           await ensureActive(identity, signal);
           return { ok: true, summary: typeof result.summary === "string" ? result.summary : `${name} completed.`, evidence: { schemaVersion: 1, toolName: name, result: result as JsonValue, artifacts: [], diagnostics: [] } };
         },
