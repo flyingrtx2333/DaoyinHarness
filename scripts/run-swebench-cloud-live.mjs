@@ -505,8 +505,17 @@ try {
       if (item.input.length > 10_000) throw new Error("Issue prompt exceeds the ordinary cloud run API limit.");
       const requestId = randomUUID();
       item.requestId = requestId;
+      item.status = "run-admission-pending";
+      item.admission = { status: "request-persisted", requestId, observedAt: new Date().toISOString(), mutatingResubmissions: 0 };
+      await save();
       const accepted = await call(`/sessions/${item.sessionId}/runs`, { requestId, message: item.input });
+      if (!/^run_[a-f0-9-]{36}$/u.test(accepted.run?.id ?? "") || accepted.run.sessionId !== item.sessionId || accepted.run.requestId !== requestId) {
+        throw new Error("Accepted cloud run receipt does not match the persisted admission request.");
+      }
       currentRun = item.runId = accepted.run.id;
+      item.status = "actual-model-inference";
+      item.admission = { ...item.admission, status: "accepted", runId: item.runId, observedAt: new Date().toISOString() };
+      await save();
       let run = accepted.run;
       const allEvents = [];
       let cursor = 0;
@@ -524,6 +533,7 @@ try {
           await writeFile(join(caseOutput, "cloud-events.json"), text, { mode: 0o600 });
           item.persisted = { source: "ordinary-cloud-session-events-API", events: allEvents.filter(event => event.turnId === item.runId).length,
             file: join(caseOutput, "cloud-events.json"), sha256: sha(text), lastEventSeq: cursor };
+          await save();
           if (item.sharedModelCalls > 12 || report.sharedModelCalls > report.limits.totalModelCalls) throw Object.assign(new Error("Actual persisted shared model calls exceeded the budget."), { code: "SWE_BUDGET_EXCEEDED" });
           if (allEvents.some(event => event.type === "model.responded" && ["MODEL_AUTH_REQUIRED", "MODEL_ACCESS_DENIED", "MODEL_QUOTA_EXHAUSTED"].includes(event.payload.failureCode))) {
             throw Object.assign(new Error("Actual model authorization or quota failed; inference stopped."), { code: "SWE_MODEL_ACCESS_BLOCKED" });
@@ -607,14 +617,29 @@ try {
         ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}),
         ...(error.observationRecovery ? { observationRecovery: error.observationRecovery } : {}) };
       if (!currentRun && item.requestId && !item.runId) {
-        // A timed-out POST may have been accepted. Read its receipt once; never resubmit it.
+        // A timed-out POST may have been accepted. Reconcile the same request;
+        // only a unique same-session receipt may identify its run. Never resubmit.
         try {
           const receipt = await call(`/sessions/${item.sessionId}/runs`, undefined, { signal: null, timeoutMs: 15_000, totalTimeoutMs: 15_000,
             deadline: performance.now() + 15_000 });
-          const accepted = receipt.runs?.find(run => run.requestId === item.requestId);
-          if (accepted) { item.runId = accepted.id; item.recoveredAcceptedReceipt = true; currentRun = accepted.id; }
-          else { item.lifecycleIncomplete = true; report.lifecycleIncomplete = true; }
-        } catch { item.receiptRecoveryUnavailable = true; item.lifecycleIncomplete = true; report.lifecycleIncomplete = true; }
+          const matches = Array.isArray(receipt.runs) ? receipt.runs.filter(run => run.requestId === item.requestId) : [];
+          const accepted = matches.length === 1 ? matches[0] : undefined;
+          if (accepted?.sessionId === item.sessionId && /^run_[a-f0-9-]{36}$/u.test(accepted.id ?? "")) {
+            item.runId = accepted.id; item.recoveredAcceptedReceipt = true; currentRun = accepted.id;
+            item.admission = { ...item.admission, status: "recovered-accepted", runId: accepted.id, observedAt: new Date().toISOString() };
+          } else {
+            item.admission = { ...item.admission, status: "admission-unconfirmed", matchingReceipts: matches.length,
+              reason: !Array.isArray(receipt.runs) ? "invalid-run-list" : matches.length > 1 ? "conflicting-receipts" : "missing-or-invalid-receipt" };
+            item.lifecycleIncomplete = true; report.lifecycleIncomplete = true;
+          }
+          await save();
+        } catch (receiptError) {
+          item.receiptRecoveryUnavailable = true; item.lifecycleIncomplete = true; report.lifecycleIncomplete = true;
+          item.admission = { ...item.admission, status: "admission-unconfirmed", failure: { code: String(receiptError.code ?? receiptError.name),
+            ...(receiptError.publicFailure ? { publicFailure: receiptError.publicFailure } : {}),
+            ...(receiptError.observationRecovery ? { observationRecovery: receiptError.observationRecovery } : {}) } };
+          await save();
+        }
       }
       if (currentRun) {
         await settleAcceptedRun();
