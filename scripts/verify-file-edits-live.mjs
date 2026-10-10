@@ -27,7 +27,7 @@ const scenarios = [
   { name: 'stale-version-recovery', calls: 12, files: { 'settings.json': '{"quantity":2,"note":"initial"}\n' },
     message: '验证当前文件工具如何保护协作修改：先用 file_read 读取 settings.json；再用一次 process_run 在真实文件中把 note 改为 collaborator，保留 quantity=2。接着不重读，尝试用 file_patch 将 quantity 从 2 改为 3。预期旧版本保护拒绝该操作；若拒绝，重新读取当前文件，再用 file_patch 修改 quantity 为 3，保留 collaborator。最后读取文件并如实说明实际拒绝和恢复结果。不做外部操作。',
     expected: { 'settings.json': { quantity: 3, note: 'collaborator' } } },
-  { name: 'byte-preserving-edits', calls: 12, files: { 'mixed.txt': 'a\r\nb\nc\n', 'end.txt': 'a\nb', 'binary.bin': { contentBase64: 'AAE=' }, 'large.txt': { contentBase64: Buffer.from('HEAD\n' + 'x'.repeat(1_020_000)).toString('base64') } },
+  { name: 'byte-preserving-edits', calls: 12, files: { 'mixed.txt': 'a\r\nb\nc\n', 'end.txt': 'a\nb', 'binary.bin': { contentBase64: 'AAE=' } },
     message: '先用 file_read 读取 mixed.txt、end.txt、binary.bin 和 large.txt。用一次 file_patch 的统一差异补丁修改两个文本：mixed.txt 第二行 b 改为 B，不改变其他字节；end.txt 用无上下文 hunk 只删除第二行 b（它没有末尾换行），保留第一行原有换行。然后用 file_write 的 contentBase64=AAEC 将 binary.bin 改为三个字节 00 01 02。large.txt 是超过文本读取预算的文件，已知开头独有 HEAD；依据它的真实摘要回执用 file_patch 精确将 HEAD 改为 DONE，保留其余字节。不得用进程或整文件重写绕过文本补丁；核对真实回执和当前文件。',
     expected: { 'mixed.txt': 'a\r\nB\nc\n', 'end.txt': 'a\n', 'binary.bin': { contentBase64: 'AAEC' }, 'large.txt': 'DONE\n' + 'x'.repeat(1_020_000) }, modes: { 'mixed.txt': 0o664, 'end.txt': 0o775 } },
   { name: 'unified-multi-file-edit', calls: 12, files: { 'first.txt': 'environment=DEV\nowner=one\n', 'second.txt': 'environment=DEV\nowner=two\n' },
@@ -52,7 +52,7 @@ try {
       ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}), ...input }, { timeoutMs: 120_000 });
     item.workspaceId = (await control('workspace_create', { title: scenario.name, source: { kind: 'empty' }, runtimeId: 'python313' })).workspace.id;
     for (const [path, content] of Object.entries(scenario.files)) await control('file_write', { path, ...(typeof content === 'string' ? { content } : content) });
-    if (scenario.modes) await control('process_run', { executable: 'python', args: ['-c', 'import os; ' + Object.entries(scenario.modes).map(([path, mode]) => `os.chmod(${JSON.stringify(path)}, ${mode})`).join('; ')], cwd: '.', timeoutMs: 30_000 });
+    if (scenario.modes) await control('process_run', { executable: 'python', args: ['-c', 'import os; ' + Object.entries(scenario.modes).map(([path, mode]) => `os.chmod(${JSON.stringify(path)}, ${mode})`).join('; ') + (scenario.name === 'byte-preserving-edits' ? '; from pathlib import Path; Path("large.txt").write_bytes(bytes([72,69,65,68,10]) + b"x" * 1020000)' : '')], cwd: '.', timeoutMs: 30_000 });
     const requestId = randomUUID(); item.requestId = requestId; await save();
     const accepted = await request(`/sessions/${sessionId}/runs`, { requestId,
       message: `只操作当前挂载的工作区 ${item.workspaceId}。${scenario.message}不要委派子任务、写记忆或操作工作区之外的业务。` });
@@ -103,7 +103,7 @@ try {
   }
   report.status = 'passed';
 } catch (error) {
-  report.status = 'failed'; report.failureCode = error.publicFailure?.code ?? error.code ?? error.message ?? error.name; report.failureStage = error.publicFailure?.path;
+  report.status = 'failed'; report.failureCode = error.publicFailure?.code ?? error.code ?? error.message ?? error.name; report.failureStage = error.publicFailure?.path; report.publicFailure = error.publicFailure;
   if (active) { try { await request(`/runs/${active}/cancel`, {}, { signal: null, timeoutMs: 15_000 }); report.cancelledRun = active; } catch { report.cancelStatus = 'unconfirmed'; } }
 } finally { report.finishedAt = new Date().toISOString(); await save(); client.close(); }
 console.log(JSON.stringify({ status: report.status, output, failureCode: report.failureCode }));

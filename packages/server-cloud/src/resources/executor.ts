@@ -446,8 +446,10 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
     if (binary || data.length > maximum)
       return { path: request.path, digest: fileDigest(data), size: data.length, binary, contentAvailable: false,
         reason: binary ? "binary" : "text-budget-exceeded" };
-    const lines = data.toString("utf8").split(/\r?\n/u); const start = Math.max(1, request.startLine ?? 1); const end = Math.min(lines.length, request.endLine ?? lines.length);
-    return { path: request.path, digest: fileDigest(data), startLine: start, endLine: end, totalLines: lines.length, content: lines.slice(start - 1, end).join("\n") };
+    const lines = data.toString("utf8").match(/[^\n]*(?:\n|$)/gu)?.filter(line => line.length > 0) ?? [];
+    const start = Math.max(1, request.startLine ?? 1); const end = Math.min(lines.length, request.endLine ?? lines.length);
+    return { path: request.path, digest: fileDigest(data), startLine: start, endLine: end, totalLines: lines.length,
+      endsWithNewline: data.at(-1) === 10, content: lines.slice(start - 1, end).join("") };
   }
   if (operation === "write") {
     const target = await safePath(workspaceId, request.path!, true); const data = request.contentBase64 === undefined ? Buffer.from(request.content ?? "") : Buffer.from(request.contentBase64, "base64");

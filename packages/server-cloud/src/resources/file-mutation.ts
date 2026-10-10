@@ -31,19 +31,20 @@ export function fileChange(path: string, before: Buffer | null, after: Buffer | 
   const afterDigest = after === null ? null : fileDigest(after);
   const changed = beforeDigest !== afterDigest;
   const base = { path, changed, beforeDigest, afterDigest };
-  if (!changed || before?.includes(0) || after?.includes(0)) return base;
-  const oldLines = before === null ? [] : before.toString("utf8").split("\n");
-  const newLines = after === null ? [] : after.toString("utf8").split("\n");
+  if (!changed || [before, after].some(data => data && (data.includes(0) || !Buffer.from(data.toString("utf8")).equals(data)))) return base;
+  const physicalLines = (data: Buffer | null) => data?.toString("utf8").match(/[^\n]*(?:\n|$)/gu)?.filter(line => line.length > 0) ?? [];
+  const oldLines = physicalLines(before), newLines = physicalLines(after);
   let first = 0;
   while (first < oldLines.length && first < newLines.length && oldLines[first] === newLines[first]) first++;
   let oldEnd = oldLines.length, newEnd = newLines.length;
   while (oldEnd > first && newEnd > first && oldLines[oldEnd - 1] === newLines[newEnd - 1]) { oldEnd--; newEnd--; }
   // Keep work and output bounded even for a whole-file replacement.
-  let preview = `@@ -${first + 1},${oldEnd - first} +${first + 1},${newEnd - first} @@\n`;
+  let preview = `@@ -${first + (oldEnd > first ? 1 : 0)},${oldEnd - first} +${first + (newEnd > first ? 1 : 0)},${newEnd - first} @@\n`;
   let previewTruncated = false;
   for (const [lines, end, marker] of [[oldLines, oldEnd, "-"], [newLines, newEnd, "+"]] as const) {
     for (let index = first; index < end; index++) {
-      const line = `${marker}${lines[index]}\n`;
+      const original = lines[index]!;
+      const line = `${marker}${original}${original.endsWith("\n") ? "" : "\n\\ No newline at end of file\n"}`;
       if (preview.length + line.length > 2000) { previewTruncated = true; break; }
       preview += line;
     }
