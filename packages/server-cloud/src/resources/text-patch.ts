@@ -2,8 +2,8 @@ import { assertWorkspacePath } from "@daoyin/harness-contracts";
 import { ResourceError } from "./repository.js";
 
 export interface TextPatch { path: string; create: boolean; remove: boolean; hunks: string[] }
-const conflict = (): never => { throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Patch ranges or text do not match the current file; read the affected range and rebuild the patch.", 409); };
-const unsupported = (): never => { throw new ResourceError("PATCH_FORMAT_UNSUPPORTED", "Use unified text hunks for file_patch; use file_move for renames and file_write for binary content or mode-specific capabilities.", 422); };
+function conflict(): never { throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Patch ranges or text do not match the current file; read the affected range and rebuild the patch.", 409); }
+function unsupported(): never { throw new ResourceError("PATCH_FORMAT_UNSUPPORTED", "Use unified text hunks for file_patch; use file_move for renames and file_write for binary content or mode-specific capabilities.", 422); }
 
 function headerPath(line: string): string | null {
   let value = line.slice(4).split("\t")[0]!;
