@@ -7,6 +7,7 @@ import type { JsonValue } from "@daoyin/harness-protocol";
 import { validateStoryInput } from "../story-profile.js";
 import { CAMPFIRE_REFERENCE_PRESETS } from "./campfire-presets.js";
 import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
+import type { CampfireMediaGateway } from "./campfire-gateway.js";
 import type { ContentStore } from "./content-store.js";
 import type { ExecutorProcessRequest, ResourceControlRequest } from "./contracts.js";
 import { ResourceError, type ResourceRepository } from "./repository.js";
@@ -40,7 +41,7 @@ export class CampfireService {
   readonly #thumbnailQueue: Array<() => void> = [];
   public constructor(private readonly repository: ResourceRepository, private readonly content: ContentStore,
     private readonly executor: (request: ExecutorProcessRequest, signal?: AbortSignal) => Promise<Record<string, unknown>>,
-    private readonly images: Record<string, { digest?: unknown }>, private readonly analysisGateway?: PlatformMaterialGateway) {}
+    private readonly images: Record<string, { digest?: unknown }>, private readonly analysisGateway?: PlatformMaterialGateway, private readonly gateway?: CampfireMediaGateway) {}
 
   async #facts(auth: ExecutionIdentity, id: string): Promise<Array<{ eventType: string; payload: Data }>> {
     return (await this.repository.businessFacts(auth, id)).map(item => ({ eventType: item.eventType, payload: record(item.payload) ? item.payload : {} }));
@@ -365,6 +366,57 @@ export class CampfireService {
         preset: request.preset!, license: "CC0-1.0", artist: "Kevin MacLeod", sourceUrl: "https://github.com/0lhi/FreePD/blob/cf011c7016595833b550a88ff127f089188b25f8/Upbeat/City%20Sunshine.mp3", sourceSha256: digest };
       const id = await this.repository.createBusiness(auth, String(asset.title), "campfire.media.ready", asset, `music:${request.shopId}:${request.preset}:v1`);
       return { summary: "已保存本店可用的CC0配乐，请inspect实际时长后用于制作计划", asset: { ...asset, id }, untrusted: true };
+    }
+    if (request.action === "resource_campfire_narrate") {
+      if (!this.gateway) fail("CAMPFIRE_SPEECH_UNAVAILABLE", "主平台配音网关尚未配置，未开始生成。", 503);
+      const shop = await this.#manifest(auth, request.shopId!);
+      if (shop.role !== "shop_profile") fail("CAMPFIRE_SHOP_INVALID", "请选择本店真实资料。");
+      const sentences = request.sentences!.map(sentence => sentence.trim());
+      if (sentences.some(sentence => !sentence) || sentences.join("").length > 2000) fail("CAMPFIRE_SPEECH_TOO_LONG", "旁白须为1至12句、合计2000字以内。");
+      const input: Data = { title: request.title!, shopId: request.shopId!, sentences, voice: request.voice!, speed: request.speed! };
+      const id = await this.repository.createBusiness(auth, request.title!, "campfire.narration.requested", input, request.requestKey!);
+      return this.repository.serializeBusiness(auth, id, async () => {
+        const facts = await this.#facts(auth, id);
+        if (facts.some(item => item.eventType === "campfire.media.ready")) return { summary: "已读取原旁白及真实字幕时间轴", asset: await this.#manifest(auth, id), reused: true, untrusted: true };
+        if (facts.some(item => item.eventType === "campfire.narration.started")) fail("CAMPFIRE_NARRATION_EXISTS", `原旁白请求已有制作记录，请查询 ${id} 的真实状态，不重复生成。`, 409);
+        await this.#append(auth, id, "campfire.narration.started", { startedAt: new Date().toISOString() }, request);
+        try {
+          const parts: Data[] = [];
+          for (const [index, sentence] of sentences.entries()) {
+            signal.throwIfAborted();
+            const speech = await this.gateway!.speech(auth, { requestId: `cf_${id.slice(4)}_${index}`, text: sentence, voice: request.voice!, speed: request.speed! }, signal);
+            if (!mediaHeaderMatches(speech.mediaType, speech.bytes)) fail("CAMPFIRE_SPEECH_RESULT_INVALID", "网关返回的音频格式无效，未标记生成成功。", 502);
+            const blob = await this.content.put(speech.bytes);
+            const part: Data = { id: `speech-${index}`, mediaType: speech.mediaType, digest: blob.digest, size: blob.size, sentence, requestId: speech.requestId, model: speech.model, provider: speech.provider };
+            parts.push(part);
+            await this.#append(auth, id, "campfire.narration.part.ready", { ...part, index, total: sentences.length }, request);
+          }
+          const workspaceId = await this.#workspace(auth, request, parts);
+          let elapsed = 0; const captions: CampfireCaption[] = [];
+          for (const [index, part] of parts.entries()) {
+            await this.#process(workspaceId, "/usr/bin/ffmpeg", ["-v", "error", "-nostdin", "-y", "-i", `${text(part, "id")}.mp3`, "-vn", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", `speech-${index}.wav`], request, signal);
+            const result = await this.#process(workspaceId, "/usr/bin/ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "json", `speech-${index}.wav`], request, signal);
+            const duration = Number(JSON.parse(String(result.stdout)).format?.duration);
+            if (!Number.isFinite(duration) || duration <= 0 || elapsed + duration > 180) fail("CAMPFIRE_SPEECH_DURATION_INVALID", "真实旁白长度超出180秒限制，请修改文案；原音频已保留。", 422);
+            captions.push({ text: text(part, "sentence"), startSeconds: elapsed, durationSeconds: duration }); elapsed += duration;
+          }
+          await this.executor({ action: "file", operation: "write", workspaceId, path: "speech.txt", content: parts.map((_, index) => `file 'speech-${index}.wav'`).join("\n") }, signal);
+          await this.#process(workspaceId, "/usr/bin/ffmpeg", ["-v", "error", "-nostdin", "-y", "-f", "concat", "-safe", "1", "-i", "speech.txt", "-c:a", "pcm_s16le", "narration.wav"], request, signal);
+          const exported = await this.executor({ action: "workspace_prepare", operation: "snapshot", workspaceId }, signal);
+          const entries = exported.entries as WorkspaceEntry[];
+          const snapshot = await this.repository.recordSnapshot(auth, workspaceId, entries);
+          const output = entries.find(entry => entry.path === "narration.wav");
+          if (!output || output.kind !== "file" || output.size <= 44 || output.size > LIMIT) fail("CAMPFIRE_SPEECH_RESULT_INVALID", "旁白音轨未能保存。", 422);
+          const asset: Data = { ...input, role: "narration_audio", mediaType: "audio/wav", size: output.size, digest: output.blobHash, durationSeconds: elapsed, captions: captions as unknown as JsonValue, generated: true, workspaceId, snapshotId: snapshot.id, createdAt: new Date().toISOString() };
+          await this.#append(auth, id, "campfire.media.inspected", { analysisVersion: 2, requestedStart: null, requestedDuration: null, durationSeconds: elapsed, hasAudio: true }, request);
+          await this.#append(auth, id, "campfire.media.ready", asset, request);
+          return { summary: "旁白已实际生成，字幕时间轴按逐句真实音频测量", asset: { ...asset, id }, untrusted: true };
+        } catch (error) {
+          await this.#append(auth, id, "campfire.narration.failed", { code: error instanceof ResourceError ? error.code : "CAMPFIRE_NARRATION_FAILED", cancelled: signal.aborted }, request);
+          if (signal.aborted) throw error;
+          fail(error instanceof ResourceError ? error.code : "CAMPFIRE_NARRATION_FAILED", `旁白制作未完成：${error instanceof ResourceError ? error.message : "音频处理或保存失败"} 原请求 ${id} 和已生成音频已保留；请先查询状态，不重复生成。`, error instanceof ResourceError ? error.status : 502);
+        }
+      });
     }
     if (request.action === "resource_campfire_plan") {
       const shop = await this.#manifest(auth, request.shopId!);
