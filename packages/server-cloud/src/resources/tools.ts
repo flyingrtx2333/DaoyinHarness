@@ -172,7 +172,13 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
           if (blockedCode) return { ok: false, code: blockedCode, message: NETWORK_FAILURE_MESSAGES[blockedCode]!, retryable: false };
           let result: Record<string, unknown>;
           try {
-            result = await resourceCall<Record<string, unknown>>(identity, { ...input, action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}` } as ResourceControlRequest, signal);
+            // Output framing follows the current user's request, not a model guess
+            // based on the source footage. Unspecified output always stays vertical.
+            const requestedFraming = run.userMessage.replace(/(?:不要|不用|不做|非)\s*(?:横屏|方屏|正方形|16[:：]9|1[:：]1)/gu, "");
+            const aspectRatio = /1[:：]1|方屏|正方形/u.test(requestedFraming) ? "1:1"
+              : /16[:：]9|横屏/u.test(requestedFraming) ? "16:9" : "9:16";
+            const executionInput = name === "resource_campfire_plan" ? { ...input, aspectRatio } : input;
+            result = await resourceCall<Record<string, unknown>>(identity, { ...executionInput, action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}` } as ResourceControlRequest, signal);
           } catch (error) {
             // Preserve only independently specified infrastructure failures. The
             // registry still hides all other remote errors and arbitrary text.
