@@ -8,7 +8,7 @@ import { attachedWorkspaceContext } from "./resources/session-context.js";
 import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createCloudOrchestrationTools, validateCloudOrchestrationInput } from "./cloud-orchestration.js";
 export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import { AgentEngine, type ModelClient } from "@daoyin/harness-agent-core";
+import { AgentEngine, SystemPromptRegistry, type ModelClient } from "@daoyin/harness-agent-core";
 import { CLOUD_MODEL_TIMEOUT_MS } from "./model-limits.js";
 import { YINGHUO_MUTATIONS } from "./yinghuo-contract.js";
 import { capabilityPacksFor, explicitHighRiskPacks } from "./capability-packs.js";
@@ -44,6 +44,8 @@ export interface CloudProfile {
   id: string;
   version: string;
   instructions: string;
+  /** Optional capability guidance; global safety belongs to stable runtime rules. */
+  instructionsForTools?: (toolNames: readonly string[]) => string;
   tools: readonly CloudToolBinding[];
 }
 
@@ -693,7 +695,16 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           model, tools, events: engineEvents, compactionStore: stores.compactions,
           modelTimeoutMs: CLOUD_MODEL_TIMEOUT_MS,
           ...(memoryRuntime === undefined ? {} : { memory: memoryRuntime.provider }),
-          systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
+          promptRegistry: new SystemPromptRegistry([
+            { id: "cloud_runtime", kind: "stable", priority: 100,
+              render: () => `${SYSTEM_PROMPT}\n\n应用规则：\n${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}` },
+            { id: "cloud_capability_guidance", kind: "dynamic", priority: 200,
+              render: ({ tools: mounted }) => {
+                const names = mounted.map(tool => tool.name);
+                return (profile.instructionsForTools?.(names) ?? profile.instructions) +
+                  (names.includes(VIDEO_CONFIRMATION_TOOL) ? `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}` : "");
+              } },
+          ]),
           maxSteps: Math.max(1, maxModelCalls - modelCalls), maxToolCalls: 24,
           remainingModelCalls: () => Math.max(0, maxModelCalls - modelCalls),
           remainingTimeMs,

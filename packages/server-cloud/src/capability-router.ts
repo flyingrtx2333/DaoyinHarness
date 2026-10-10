@@ -156,7 +156,8 @@ function tokens(value: string): string[] {
   const normalized = value.normalize("NFKC").toLowerCase();
   const ascii = normalized.match(/[a-z0-9][a-z0-9_.-]*/gu) ?? [];
   const han = [...normalized.matchAll(/[\p{Script=Han}]+/gu)].flatMap((match) => {
-    const characters = [...match[0]], result = [...characters];
+    const characters = [...match[0]], result: string[] = [];
+    if (characters.length === 1) result.push(characters[0]!);
     for (let index = 0; index + 1 < characters.length; index++) {
       result.push(characters[index]! + characters[index + 1]!);
     }
@@ -166,7 +167,7 @@ function tokens(value: string): string[] {
 }
 function packText(pack: CapabilityPackManifest): string {
   return [pack.title, pack.summary, ...pack.intents, ...pack.examples,
-    ...pack.negativeExamples, ...pack.resourceKinds].join("\n");
+    ...pack.toolNames, ...pack.resourceKinds].join("\n");
 }
 function hasNonNegatedMatch(message: string, pattern: RegExp): boolean {
   return [...message.matchAll(pattern)].some((match) => {

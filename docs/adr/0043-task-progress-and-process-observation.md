@@ -54,6 +54,19 @@ format compatibility, project-declared environment preparation and focused
 validation. Non-coding and read-only tasks do not require a source change. No
 dataset hints, dependencies, gold patches or task-specific branches are added.
 
+An actual follow-up task fell back to lexical routing and lost its file tools.
+Negative examples must not increase positive lexical relevance; Chinese lexical
+matching uses adjacent characters rather than matching every individual character
+inside a phrase. Tool names remain searchable. Eligibility and intent checks are
+unchanged. This fixes scoring semantics without pinning a particular task's packs.
+
+Profiles may provide a capability-scoped instruction renderer. The unified
+workbench supplies its business instructions only while its actual business
+tools are mounted, using the existing dynamic system-prompt registry. General
+identity, resource safety and authorization stay in the runtime's stable rules;
+profiles without a renderer keep their complete instructions. A later authorized
+capability expansion recomputes the instructions on the next model request.
+
 ## Validation
 
 Use bounded real account/model/tool/storage scenarios and the existing frozen

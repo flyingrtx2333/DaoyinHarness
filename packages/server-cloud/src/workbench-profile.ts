@@ -86,5 +86,8 @@ export function createWorkbenchProfile(catalog: unknown, identity: ExecutionIden
   const yinghuo = Object.keys(YINGHUO_SCOPES).filter(name => identity.allowedTools.includes(name));
   if (yinghuo.length !== 0 && yinghuo.length !== Object.keys(YINGHUO_SCOPES).length) throw new Error("Incomplete Yinghuo authorization.");
   if (seen.size !== required.length + yinghuo.length || ![...required, ...yinghuo].every(name => seen.has(name))) throw new Error("Incomplete workbench catalog.");
-  return { id: "daoyin-workbench", version: "1", instructions: catalog.instructions, tools: [...tools, ...orchestrationPolicyBindings()] };
+  const instructions = catalog.instructions;
+  return { id: "daoyin-workbench", version: "1", instructions,
+    instructionsForTools: names => names.some(name => seen.has(name)) ? instructions : "",
+    tools: [...tools, ...orchestrationPolicyBindings()] };
 }
