@@ -264,13 +264,14 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       return publicProfile;
     },
     createCapabilitySemantic: (identity, run) => ({
-      retrieve: isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity) ? undefined : async (input) => {
+      retrieve: async (input) => {
         const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) ||
           isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
         if (!privateApp || run.authorizationId !== identity.authorizationId ||
             run.billingAccountId !== identity.billingAccountId) {
           throw new CloudError(403, "RUN_IDENTITY_MISMATCH", "任务授权不匹配。");
         }
+        if (isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity)) return {};
         const value = await post("capability-semantic", {
           authorizationId: identity.authorizationId, runId: run.id, operationId: "capability_vector",
           input: { schemaVersion: 1, operation: "retrieve", query: input.query, clauses: input.clauses,
