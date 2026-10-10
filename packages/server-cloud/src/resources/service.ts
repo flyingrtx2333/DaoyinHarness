@@ -318,10 +318,12 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
     const workspaceId = await workspaceAccess(auth, request);
     const result = await executor({ action: "file", operation: request.action.slice(5), workspaceId, runId: request.sourceRun,
       path: request.path, from: request.from, to: request.to, content: request.content, contentBase64: request.contentBase64,
+      expectedDigest: request.expectedDigest, expectedDigests: request.expectedDigests,
       expected: request.expected, replacement: request.replacement, patch: request.patch, query: request.query,
       searchMode: request.searchMode, glob: request.glob, startLine: request.startLine, endLine: request.endLine,
       maximumBytes: request.maximumBytes }, signal);
-    return { summary: `${request.action} completed.`, ...result };
+    const mutation = result.mutation as { changed?: boolean } | undefined;
+    return { summary: mutation?.changed === false ? `${request.action}: no content changed.` : `${request.action} completed.`, ...result };
   }
   if (request.action.startsWith("git_")) {
     const workspaceId = await workspaceAccess(auth, request);

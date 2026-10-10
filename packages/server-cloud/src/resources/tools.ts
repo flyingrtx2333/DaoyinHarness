@@ -45,10 +45,10 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   workspace_restore: { description: "Restore an attached workspace to one of its immutable snapshots.", mutating: true, inputSchema: object({ workspaceId, snapshotId: { type: "string", pattern: "^snp_[a-f0-9]{24}$" } }, ["workspaceId", "snapshotId"]) },
   file_list: { description: "List files and directories inside an attached workspace. Omit path for the workspace root; never use / or . as path.", mutating: false, inputSchema: object({ workspaceId, path, glob: { type: "string", maxLength: 256 } }, ["workspaceId"]) },
   file_stat: { description: "Read file, directory or safe symlink metadata.", mutating: false, inputSchema: object({ workspaceId, path }, ["workspaceId", "path"]) },
-  file_read: { description: "Read a bounded text range or return an artifact reference for binary content.", mutating: false, inputSchema: object({ workspaceId, path, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, maximumBytes: { type: "integer", minimum: 1, maximum: 1000000 } }, ["workspaceId", "path"]) },
+  file_read: { description: "Read a bounded text range with its actual file digest, or return an artifact reference for binary content. Read an existing file before overwriting or patching it.", mutating: false, inputSchema: object({ workspaceId, path, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, maximumBytes: { type: "integer", minimum: 1, maximum: 1000000 } }, ["workspaceId", "path"]) },
   file_search: { description: "Search workspace paths or text using literal, regular expression or glob matching.", mutating: false, inputSchema: object({ workspaceId, query: { type: "string", minLength: 1, maxLength: 4000 }, searchMode: { type: "string", enum: ["literal", "regex", "glob"] }, path, glob: { type: "string", maxLength: 256 } }, ["workspaceId", "query", "searchMode"]) },
-  file_write: { description: "Atomically create or replace a text or base64-encoded binary file.", mutating: true, inputSchema: object({ workspaceId, path, content: { type: "string", maxLength: 1000000 }, contentBase64: { type: "string", maxLength: 1400000 } }, ["workspaceId", "path"]) },
-  file_patch: { description: "Apply an exact replacement or unified diff, rejecting stale or ambiguous context.", mutating: true, inputSchema: object({ workspaceId, path, expected: { type: "string", maxLength: 1000000 }, replacement: { type: "string", maxLength: 1000000 }, patch: { type: "string", maxLength: 1000000 } }, ["workspaceId"]) },
+  file_write: { description: "Atomically create or replace a text or base64-encoded binary file. Read existing content first; the execution layer rejects unread or stale overwrites. Returns actual changed/no-op and bounded change evidence.", mutating: true, inputSchema: object({ workspaceId, path, content: { type: "string", maxLength: 1000000 }, contentBase64: { type: "string", maxLength: 1400000 } }, ["workspaceId", "path"]) },
+  file_patch: { description: "Apply an exact replacement or unified diff. Read each existing target first; reject stale versions, empty or ambiguous exact context. Returns actual changed/no-op and a bounded changed-region preview, not a correctness verdict.", mutating: true, inputSchema: object({ workspaceId, path, expected: { type: "string", maxLength: 1000000 }, replacement: { type: "string", maxLength: 1000000 }, patch: { type: "string", maxLength: 1000000 } }, ["workspaceId"]) },
   file_mkdir: { description: "Create a directory inside an attached workspace.", mutating: true, inputSchema: object({ workspaceId, path }, ["workspaceId", "path"]) },
   file_move: { description: "Move a file or directory within one attached workspace.", mutating: true, inputSchema: object({ workspaceId, from: path, to: path }, ["workspaceId", "from", "to"]) },
   file_remove: { description: "Remove a workspace path. This never deletes snapshots or external resources.", mutating: true, inputSchema: object({ workspaceId, path }, ["workspaceId", "path"]) },
@@ -121,6 +121,12 @@ const NETWORK_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
 };
 
 const RESOURCE_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+  FILE_NOT_OBSERVED: "目标文件已存在，但当前轮次没有可用于修改的最新读取回执。未执行本次修改；请先用 file_read 读取目标，再依据当前内容修改。",
+  FILE_STALE_VERSION: "目标文件在读取后发生了变化，未执行本次修改。请重新读取目标并基于最新内容修改；不要原样重试旧编辑。",
+  FILE_VERSION_INVALID: "修改携带的文件版本无效，未执行本次修改。请重新读取目标。",
+  FILE_EDIT_LIMIT: "目标必须是 16 MiB 以内的普通文件，当前工具无法安全观察它；请使用适合该资源的能力。",
+  PATCH_CONTEXT_CONFLICT: "目标文本缺失、为空或匹配不唯一，未执行本次替换。请读取正确范围，使用唯一的非空原文作为 expected。",
+  PATCH_CONFLICT: "补丁未能通过路径检查或应用，未获得成功回执。请检查当前文件和补丁范围后修改，不要原样重复失败请求。",
   WORKSPACE_PATH_INVALID: "文件路径必须是工作区内的相对路径，例如 input.csv 或 src/app.py；不能使用 /、.、..、盘符或反斜杠。列出或搜索工作区根目录时省略 path；进程 cwd 可省略或使用 .。",
   WORKSPACE_PATH_ESCAPE: "路径超出了当前工作区边界，未执行操作。请使用工作区内的相对路径；不能通过父目录或链接访问工作区之外。",
   WORKSPACE_PATH_RESERVED: "该路径由工作区运行环境保护，不能读取或修改。请选择普通任务文件路径。",
@@ -145,10 +151,13 @@ function resourceVerificationHint(name: ResourceToolName, input: Record<string, 
   if (typeof resourceId !== "string" || !/^wsp_[a-f0-9]{24}$/u.test(resourceId)) return undefined;
   if (name === "workspace_restore") return { resourceId };
   if (!name.startsWith("file_") || !RESOURCE_DEFINITIONS[name].mutating) return undefined;
+  const mutation = result.mutation as { changed?: boolean; changes?: Array<{ path?: unknown; changed?: boolean }> } | undefined;
+  if (mutation?.changed === false) return undefined;
   // Only successful execution receipts identify changed paths. A unified patch
   // without a path receipt leaves its verification scope at the workspace.
-  const paths = [...new Set([result.path, result.from, result.to].filter((value): value is string =>
-    typeof value === "string" && value.length <= 512 && !value.includes("\0") && workspacePath.test(value)))].slice(0, 2);
+  const paths = [...new Set([...(mutation?.changes ?? []).filter(change => change.changed).map(change => change.path),
+    result.path, result.from, result.to].filter((value): value is string =>
+    typeof value === "string" && value.length <= 512 && !value.includes("\0") && workspacePath.test(value)))].slice(0, 8);
   return { resourceId, ...(paths.length ? { paths } : {}) };
 }
 
@@ -165,6 +174,8 @@ const CAMPFIRE_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, ensureActive: (identity: ExecutionIdentity, signal?: AbortSignal) => Promise<void>): CloudToolBinding[] {
   if (identity.space.kind === "public") return [];
   const blockedProcessWorkspaces = new Map<string, string>();
+  // Run-local observations only. Hashes come from receipts, never model input.
+  const observedFiles = new Map<string, Map<string, string | null>>();
   const deploymentMutationsEnabled = process.env.HARNESS_DEPLOYMENT_EXECUTOR_ENABLED === "1";
   return RESOURCE_TOOL_NAMES.filter(name => identity.allowedTools.includes(name) &&
     !CAMPFIRE_UI_ACTIONS.has(name) &&
@@ -198,7 +209,12 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             const aspectRatio = /1[:：]1|方屏|正方形/u.test(requestedFraming) ? "1:1"
               : /16[:：]9|横屏/u.test(requestedFraming) ? "16:9" : "9:16";
             const executionInput = name === "resource_campfire_plan" ? { ...input, aspectRatio } : input;
-            result = await resourceCall<Record<string, unknown>>(identity, { ...executionInput, action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}` } as ResourceControlRequest, signal);
+            const observed = workspaceId ? observedFiles.get(workspaceId) : undefined;
+            const versionGuard = name === "file_write" || (name === "file_patch" && typeof input.patch !== "string")
+              ? { expectedDigest: typeof input.path === "string" ? observed?.get(input.path) ?? null : null }
+              : name === "file_patch" ? { expectedDigests: Object.fromEntries(observed ?? []) } : {};
+            result = await resourceCall<Record<string, unknown>>(identity, { ...executionInput, ...versionGuard,
+              action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}` } as ResourceControlRequest, signal);
           } catch (error) {
             // Preserve only independently specified infrastructure failures. The
             // registry still hides all other remote errors and arbitrary text.
@@ -223,6 +239,19 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             result = { ...result, framingPolicy: "本轮用户未明确要求横屏或方形时，执行层应用默认9:16竖屏。这是正常默认行为，不是参数错误；无需再次确认画幅，直接继续制作。" };
           }
           await ensureActive(identity, signal);
+          if (workspaceId) {
+            if (["workspace_restore", "file_move", "file_remove", "git_checkout", "git_branch"].includes(name)) observedFiles.delete(workspaceId);
+            const observed = observedFiles.get(workspaceId) ?? new Map<string, string | null>();
+            if (name === "file_read" && typeof result.path === "string" && typeof result.digest === "string" && /^sha256:[a-f0-9]{64}$/u.test(result.digest)) {
+              observed.set(result.path, result.digest);
+            }
+            const mutation = result.mutation as { changes?: Array<{ path?: unknown; afterDigest?: unknown }> } | undefined;
+            for (const change of mutation?.changes ?? []) {
+              if (typeof change.path === "string" && (change.afterDigest === null ||
+                (typeof change.afterDigest === "string" && /^sha256:[a-f0-9]{64}$/u.test(change.afterDigest)))) observed.set(change.path, change.afterDigest);
+            }
+            if (observed.size) observedFiles.set(workspaceId, observed);
+          }
           const verificationHint = resourceVerificationHint(name, input, result);
           const reference = result.fullResultArtifact;
           const artifactId = reference && typeof reference === "object" && !Array.isArray(reference)

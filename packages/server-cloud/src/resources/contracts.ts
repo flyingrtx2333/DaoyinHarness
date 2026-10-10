@@ -40,6 +40,8 @@ export interface ResourceControlRequest {
   to?: string;
   content?: string;
   contentBase64?: string;
+  expectedDigest?: string | null;
+  expectedDigests?: Record<string, string | null>;
   expected?: string;
   replacement?: string;
   patch?: string;
@@ -108,6 +110,8 @@ export interface ExecutorProcessRequest {
   to?: string | undefined;
   content?: string | undefined;
   contentBase64?: string | undefined;
+  expectedDigest?: string | null | undefined;
+  expectedDigests?: Record<string, string | null> | undefined;
   expected?: string | undefined;
   replacement?: string | undefined;
   patch?: string | undefined;

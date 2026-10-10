@@ -9,6 +9,7 @@ import { ResourceError } from "./repository.js";
 import { assertRuntimeSpec } from "./runtime-policy.js";
 import { ensureWorkspaceEgress, isolateExistingContainer } from "./workspace-network.js";
 import type { ExecutorProcessRequest, ResolvedSecret } from "./contracts.js";
+import { assertFileVersion, fileBaseline, fileChange, fileDigest, fileMutation } from "./file-mutation.js";
 
 const ROOT = process.env.HARNESS_WORKSPACE_ROOT ?? "/var/lib/daoyin-resources/workspaces";
 const CONTENT_ROOT = process.env.HARNESS_CONTENT_STORE_ROOT ?? "/var/lib/daoyin-resources/content";
@@ -429,24 +430,73 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
     if (operation === "read_binary") return { contentBase64: data.toString("base64"), size: data.length };
     if (data.includes(0)) throw new ResourceError("FILE_BINARY", "Binary file must be read through an artifact reference.", 422);
     const lines = data.toString("utf8").split(/\r?\n/u); const start = Math.max(1, request.startLine ?? 1); const end = Math.min(lines.length, request.endLine ?? lines.length);
-    return { path: request.path, startLine: start, endLine: end, totalLines: lines.length, content: lines.slice(start - 1, end).join("\n") };
+    return { path: request.path, digest: fileDigest(data), startLine: start, endLine: end, totalLines: lines.length, content: lines.slice(start - 1, end).join("\n") };
   }
   if (operation === "write") {
     const target = await safePath(workspaceId, request.path!, true); const data = request.contentBase64 === undefined ? Buffer.from(request.content ?? "") : Buffer.from(request.contentBase64, "base64");
     if (data.length > 16 * 1024 * 1024) throw new ResourceError("FILE_WRITE_LIMIT", "File exceeds the write limit.", 413);
+    const before = await fileBaseline(target); assertFileVersion(before, request.expectedDigest);
+    const mutation = fileMutation([fileChange(request.path!, before, data)]);
+    if (!mutation.changed) return { mutation, path: request.path, size: data.length, digest: fileDigest(data) };
     await mkdir(path.dirname(target), { recursive: true, mode: 0o755 }); const temporary = `${target}.${randomBytes(6).toString("hex")}.tmp`;
     await writeFile(temporary, data, { flag: "wx", mode: 0o644 }); await chown(temporary, 1000, 1000); await rename(temporary, target);
-    return { path: request.path, size: data.length, digest: `sha256:${createHash("sha256").update(data).digest("hex")}` };
+    return { mutation, path: request.path, size: data.length, digest: fileDigest(data) };
   }
   if (operation === "patch") {
     if (request.patch !== undefined) {
-      const spec = await loadRuntime(workspaceId); const result = await foreground(workspaceId, spec, "git", ["apply", "--whitespace=nowarn", "-"], ".", request.patch, 120_000, undefined, request.runId);
+      const spec = await loadRuntime(workspaceId);
+      const listing = await foreground(workspaceId, spec, "git", ["apply", "--numstat", "-z", "-"], ".", request.patch, 120_000, undefined, request.runId);
+      if (listing.exitCode !== 0) throw new ResourceError("PATCH_CONFLICT", "Patch paths could not be inspected; use a smaller patch or exact replacement.", 409);
+      const paths = new Set<string>();
+      for (const entry of listing.stdout.split("\0").filter(Boolean)) {
+        const matched = /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/su.exec(entry);
+        if (!matched) throw new ResourceError("PATCH_CONFLICT", "Patch path format is unsupported; use exact replacement.", 409);
+        paths.add(matched[1]!);
+      }
+      // A rename/copy can also touch a source not named in numstat.
+      for (const line of request.patch.split("\n")) {
+        if (!/^(?:rename|copy) (?:from|to) /u.test(line)) continue;
+        const encoded = line.replace(/^(?:rename|copy) (?:from|to) /u, "");
+        let value: unknown = encoded;
+        if (encoded.startsWith('"')) {
+          try { value = JSON.parse(encoded) as unknown; } catch { throw new ResourceError("PATCH_CONFLICT", "Quoted patch path is unsupported; use exact replacement.", 409); }
+        }
+        if (typeof value !== "string") throw new ResourceError("PATCH_CONFLICT", "Patch path is invalid.", 409);
+        paths.add(value);
+      }
+      if (!paths.size || paths.size > 128) throw new ResourceError("PATCH_CONFLICT", "Patch must address 1–128 files.", 409);
+      const baselines = new Map<string, { target: string; before: Buffer | null }>();
+      let baselineBytes = 0;
+      for (const item of paths) {
+        const target = await safePath(workspaceId, item, true); const before = await fileBaseline(target);
+        baselineBytes += before?.length ?? 0;
+        if (baselineBytes > 32 * 1024 * 1024 || (before?.length ?? 0) + Buffer.byteLength(request.patch) > 16 * 1024 * 1024) {
+          throw new ResourceError("FILE_EDIT_LIMIT", "Patch observation exceeds its bounded file budget; use a smaller edit.", 413);
+        }
+        if (request.expectedDigests !== undefined) assertFileVersion(before,
+          Object.hasOwn(request.expectedDigests, item) ? request.expectedDigests[item] : null);
+        baselines.set(item, { target, before });
+      }
+      const result = await foreground(workspaceId, spec, "git", ["apply", "--whitespace=nowarn", "-"], ".", request.patch, 120_000, undefined, request.runId);
       if (result.exitCode !== 0) throw new ResourceError("PATCH_CONFLICT", `Patch did not apply: ${result.stderr.slice(-2000)}`, 409);
-      return result;
+      const changes = [];
+      for (const [item, baseline] of baselines) changes.push(fileChange(item, baseline.before, await fileBaseline(baseline.target)));
+      return { mutation: fileMutation(changes), ...result };
     }
-    const target = await safePath(workspaceId, request.path!); const text = await readFile(target, "utf8"); const expected = request.expected ?? "";
+    const target = await safePath(workspaceId, request.path!); const before = await fileBaseline(target);
+    assertFileVersion(before, request.expectedDigest);
+    if (before === null || before.includes(0)) throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Exact replacement requires an existing text file.", 409);
+    const text = before.toString("utf8"); const expected = request.expected ?? "";
+    if (!expected.length) throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Expected text must not be empty.", 409);
     const first = text.indexOf(expected); if (first < 0 || text.indexOf(expected, first + expected.length) >= 0) throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Expected text is missing or ambiguous.", 409);
-    await writeFile(target, text.slice(0, first) + (request.replacement ?? "") + text.slice(first + expected.length), "utf8"); return { path: request.path };
+    const after = Buffer.from(text.slice(0, first) + (request.replacement ?? "") + text.slice(first + expected.length));
+    const mutation = fileMutation([fileChange(request.path!, before, after)]);
+    if (mutation.changed) {
+      const info = await stat(target); const temporary = `${target}.${randomBytes(6).toString("hex")}.tmp`;
+      try { await writeFile(temporary, after, { flag: "wx", mode: info.mode & 0o777 }); await chown(temporary, info.uid, info.gid); await rename(temporary, target); }
+      finally { await rm(temporary, { force: true }); }
+    }
+    return { mutation, path: request.path, digest: fileDigest(after) };
   }
   if (operation === "mkdir") { const target = await safePath(workspaceId, request.path!, true); await mkdir(target, { recursive: true, mode: 0o755 }); await chown(target, 1000, 1000); return { path: request.path }; }
   if (operation === "move") { const from = await safePath(workspaceId, request.from!); const to = await safePath(workspaceId, request.to!, true); await mkdir(path.dirname(to), { recursive: true }); await rename(from, to); return { from: request.from, to: request.to }; }
