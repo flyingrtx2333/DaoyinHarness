@@ -264,7 +264,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       return publicProfile;
     },
     createCapabilitySemantic: (identity, run) => ({
-      retrieve: async (input) => {
+      retrieve: isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity) ? undefined : async (input) => {
         const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) ||
           isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
         if (!privateApp || run.authorizationId !== identity.authorizationId ||

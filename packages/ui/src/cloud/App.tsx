@@ -243,8 +243,12 @@ export function App(): React.JSX.Element {
       events: feed.current.events,
       onUpdate: (nextRuns, accumulated) => {
         if (epoch !== accountEpoch.current || loggingOut.current) return;
+        const newlyFinished = accumulated.some(event =>
+          ["turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted"].includes(event.type) &&
+          !feed.current.events.some(previous => previous.eventSeq === event.eventSeq));
         feed.current = { key, events: accumulated };
         setRuns(nextRuns); setEvents(accumulated); setLoading(false);
+        if (newlyFinished) void connect(true);
         if (recoveryError) { const recovered = recoveryError; setError(current => current === recovered ? "" : current); recoveryError = ""; }
       },
       onError: (cause) => {
