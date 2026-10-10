@@ -37,6 +37,9 @@
 .asset-list .asset-meta { padding:0; }
 .asset-list h2 { min-height:0; }
 .campfire-library { min-width:0; }
+.asset-loading { display:grid; place-items:center; min-height:clamp(240px,45dvh,440px); }
+.asset-loading .spinner { transform:scale(1.5); }
+.asset-masonry[hidden],.asset-list[hidden] { display:none; }
 .asset-form { display:grid; gap:var(--ui-space-3); padding:var(--ui-card-padding); margin-bottom:var(--ui-space-4); border:1px solid var(--ui-line); border-radius:var(--ui-radius-card); }
 .asset-form label { display:grid; gap:var(--ui-space-1); font-size:var(--ui-font-control); }
 .asset-control { display:flex; align-items:center; flex-wrap:wrap; gap:var(--ui-space-2); font-size:var(--ui-font-control); }

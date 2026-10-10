@@ -1,9 +1,10 @@
 import { Children, useEffect, useRef, useState } from "react";
 import { CampfireShopManager } from "./CampfireShopManager.js";
+import { AssetLoading } from "./AssetLoading.js";
 import type { WorkbenchClient } from "./client.js";
 import { CAMPFIRE_LABELS, campfireAssetLabel, campfireBlob, campfireList, mergeCampfireAssets, campfireUpload, type CampfireAsset, type CampfireRole } from "./campfire-client.js";
 
-export function CampfireLibrary({ client, ready, refreshKey = 0, collection, mediaFilter, query, view, uploadRequest, manageRequest, onCountChange, children }: { client: WorkbenchClient; ready: boolean; refreshKey?: number; collection: "shop" | "generated"; mediaFilter: "all" | "image" | "video"; query: string; view: "masonry" | "list"; uploadRequest: number; manageRequest: number; onCountChange: (count: number, more: boolean) => void; children?: React.ReactNode }): React.JSX.Element {
+export function CampfireLibrary({ client, ready, externalLoading = false, refreshKey = 0, collection, mediaFilter, query, view, uploadRequest, manageRequest, onCountChange, children }: { client: WorkbenchClient; ready: boolean; externalLoading?: boolean; refreshKey?: number; collection: "shop" | "generated"; mediaFilter: "all" | "image" | "video"; query: string; view: "masonry" | "list"; uploadRequest: number; manageRequest: number; onCountChange: (count: number, more: boolean) => void; children?: React.ReactNode }): React.JSX.Element {
   const [showUpload, setShowUpload] = useState(false);
   const lastUploadRequest = useRef(uploadRequest);
   useEffect(() => { if (uploadRequest !== lastUploadRequest.current) { lastUploadRequest.current = uploadRequest; setShowUpload(true); } }, [uploadRequest]);
@@ -17,6 +18,7 @@ export function CampfireLibrary({ client, ready, refreshKey = 0, collection, med
   const [busy, setBusy] = useState(false); const [progress, setProgress] = useState<number>(); const [error, setError] = useState("");
   const [selected, setSelected] = useState<CampfireAsset>(); const fileInput = useRef<HTMLInputElement>(null);
   const scope = client.accountScope; const loadGeneration = useRef(0);
+  const loading = externalLoading || busy && progress === undefined;
   const visibleItems = items.filter(item => (collection === "generated" ? item.role === "output_video" : item.role !== "output_video") && (mediaFilter === "all" || mediaFilter === "image" && item.mediaType.startsWith("image/") || mediaFilter === "video" && item.mediaType === "video/mp4") && item.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => Number(!(a.mediaType.startsWith("image/") || a.mediaType === "video/mp4")) - Number(!(b.mediaType.startsWith("image/") || b.mediaType === "video/mp4")));
   useEffect(() => { onCountChange(visibleItems.length, !!nextCursor); }, [visibleItems.length, nextCursor, onCountChange]);
   async function refresh(): Promise<void> {
@@ -67,12 +69,14 @@ export function CampfireLibrary({ client, ready, refreshKey = 0, collection, med
     {error && <p role="alert">{error}</p>}
     </UploadDialog>}
     {error && !showUpload && <p role="alert">{error}</p>}
-    {busy && progress === undefined && <p role="status">正在加载素材…</p>}
-    {!busy && !visibleItems.length && !Children.toArray(children).length && <p role="status">暂无素材</p>}
-    <div className={`asset-${view}`} aria-label={view === "masonry" ? "全部素材瀑布流" : "全部素材列表"}>{visibleItems.map(item => <article className={`asset-item${item.mediaType.startsWith("image/") || item.mediaType === "video/mp4" ? "" : " asset-text-item"}`} key={item.id}>
+    <div aria-busy={loading}>
+    {loading && <AssetLoading />}
+    {!loading && !error && !visibleItems.length && !Children.toArray(children).length && <p role="status">暂无素材</p>}
+    <div className={`asset-${view}`} hidden={loading} aria-label={view === "masonry" ? "全部素材瀑布流" : "全部素材列表"}>{visibleItems.map(item => <article className={`asset-item${item.mediaType.startsWith("image/") || item.mediaType === "video/mp4" ? "" : " asset-text-item"}`} key={item.id}>
       <button type="button" className="asset-preview" aria-label={`预览营火素材 ${item.title}`} onClick={() => setSelected(item)}><CampfireThumbnail client={client} asset={item} /></button>
       <div className="asset-meta"><h2 title={item.title}>{item.title}</h2><p>{campfireAssetLabel(item)}{item.durationSeconds ? ` · ${Math.round(item.durationSeconds)}秒` : ""}</p>{item.role === "shop_profile" && <button type="button" disabled={busy || !ready} onClick={() => { setManager(item.id); }}>修改资料</button>}</div>
     </article>)}{children}</div>
+    </div>
     {nextCursor && <button type="button" disabled={busy} onClick={() => { void loadMore(); }}>加载更多素材</button>}
     {manager !== undefined && <CampfireShopManager key={scope} client={client} initialShopId={manager} onClose={() => setManager(undefined)} useLabel="上传本店素材" onChanged={asset => { setItems(current => mergeCampfireAssets([asset], current.filter(item => item.id !== asset.id))); setShops(current => mergeCampfireAssets([asset], current.filter(item => item.id !== asset.id))); setShopId(asset.id); }} onUse={asset => { setShopId(asset.id); setShowUpload(true); setManager(undefined); }} />}
     {selected && <CampfirePreview client={client} asset={selected} onClose={() => setSelected(undefined)} />}

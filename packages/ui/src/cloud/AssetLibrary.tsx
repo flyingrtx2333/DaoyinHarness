@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkbenchClient } from "./client.js";
 import "./asset-library.css";
 import { CampfireLibrary } from "./CampfireLibrary.js";
+import { AssetLoading } from "./AssetLoading.js";
 
 const categories = { all: "全部", website: "网站", character: "角色图", scene: "场景图", storyboard: "分镜图", video: "视频" };
 type Category = keyof typeof categories;
@@ -152,10 +153,9 @@ export function AssetLibrary({ client, ready, onConnect }: { client: WorkbenchCl
       </div>
     </div>
     {!ready ? <div role="status"><p>请连接道引账号后查看资产。</p><button type="button" onClick={onConnect}>连接账号</button></div> : <>
-      {busy && <p role="status">正在加载资产…</p>}
       {errors.map(message => <p role="alert" key={message}>{message} <button type="button" onClick={() => setRefresh(v => v + 1)}>重试加载</button></p>)}
       {empty && !client.allowedTools.includes("resource_campfire_list") && <p role="status">暂无{category === "all" ? "资产" : categories[category]}。</p>}
-      {client.allowedTools.includes("resource_campfire_list") ? <CampfireLibrary client={client} ready={ready} refreshKey={refresh} collection={collection} mediaFilter={mediaFilter} query={query} view={view} uploadRequest={uploadRequest} manageRequest={manageRequest} onCountChange={onNativeCount}>{mediaCards}</CampfireLibrary> : <div className={`asset-${view}`}>{mediaCards}</div>}
+      {client.allowedTools.includes("resource_campfire_list") ? <CampfireLibrary client={client} ready={ready} externalLoading={busy} refreshKey={refresh} collection={collection} mediaFilter={mediaFilter} query={query} view={view} uploadRequest={uploadRequest} manageRequest={manageRequest} onCountChange={onNativeCount}>{mediaCards}</CampfireLibrary> : <div aria-busy={busy}>{busy && <AssetLoading />}<div className={`asset-${view}`} hidden={busy}>{mediaCards}</div></div>}
       {collection === "generated" && data && data.total > 0 && <footer className="asset-pagination" aria-label="项目素材分页"><span role="status">项目素材 {data.total} 项</span><button type="button"
         disabled={busy || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 24))}>上一页</button>
         <button type="button" disabled={busy || offset + 24 >= data.total} onClick={() => setOffset(v => v + 24)}>下一页</button></footer>}
