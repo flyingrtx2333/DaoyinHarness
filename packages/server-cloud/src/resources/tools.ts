@@ -157,10 +157,17 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
     !CAMPFIRE_UI_ACTIONS.has(name) &&
     (deploymentMutationsEnabled || !["deployment_create", "deployment_rollback"].includes(name))).map(name => {
     const descriptor = RESOURCE_DEFINITIONS[name];
+    // The execution adapter owns framing. Do not ask the model to invent a
+    // competing value that it can later mistake for an execution discrepancy.
+    const schema = name === "resource_campfire_plan" ? {
+      ...descriptor.inputSchema,
+      properties: Object.fromEntries(Object.entries(descriptor.inputSchema.properties as Record<string, unknown>).filter(([key]) => key !== "aspectRatio")),
+      required: (descriptor.inputSchema.required as string[]).filter(key => key !== "aspectRatio"),
+    } : descriptor.inputSchema;
     return {
       definition: {
         name, description: descriptor.description + (name === "resource_campfire_list" ? ` ${CAMPFIRE_INSTRUCTIONS}` : ""), category: "extension", mutating: descriptor.mutating,
-        inputSchema: descriptor.inputSchema as JsonValue,
+        inputSchema: schema as JsonValue,
         ...(CAMPFIRE_DISPLAY_NAMES[name] ? { displayName: CAMPFIRE_DISPLAY_NAMES[name], auditInput: () => ({}) } : {}),
         async execute(input, signal) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");

@@ -353,6 +353,10 @@ export class CampfireService {
     if (request.action === "resource_campfire_inspect") {
       const asset = await this.#manifest(auth, idOf(request));
       if ((request.startSeconds !== undefined || request.durationSeconds !== undefined) && asset.mediaType !== "video/mp4") fail("CAMPFIRE_WINDOW_INVALID", "只有视频支持按时间窗口查看。");
+      if (request.metadataOnly === true) {
+        const { digest: _digest, ...metadata } = asset;
+        return { summary: "已读取素材资料", asset: { ...metadata, ...presetDelivery(asset) }, metadataOnly: true, untrusted: true };
+      }
       return { summary: "已读取真实素材", asset: await this.#inspection(auth, request, asset, signal), untrusted: true };
     }
     if (request.action === "resource_campfire_music") {
