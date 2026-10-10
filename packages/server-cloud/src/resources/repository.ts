@@ -158,7 +158,7 @@ export class ResourceRepository {
       const row = await client.query(`INSERT INTO harness_material_analysis_jobs(resource_id,owner_key,identity,source_digest)
         VALUES($1,$2,$3,$4) ON CONFLICT(resource_id) DO UPDATE SET identity=$3,state='queued',updated_at=now()
         WHERE harness_material_analysis_jobs.owner_key=$2 AND harness_material_analysis_jobs.state='failed' RETURNING resource_id`,
-        [resourceId, ownerKey(identity), JSON.stringify(identity), sourceDigest]);
+        [resourceId, ownerKey(identity), JSON.stringify(JSON.stringify(identity)), sourceDigest]);
       if (row.rowCount) await client.query("INSERT INTO harness_resource_events(owner_key,resource_id,event_type,payload) VALUES($1,$2,'campfire.analysis.queued',$3)", [ownerKey(identity),resourceId,JSON.stringify({analysisStatus:"queued",sourceDigest,pipelineVersion:1})]);
       await client.query("COMMIT");
     } catch(error) { await client.query("ROLLBACK"); throw error; } finally {client.release();}
@@ -173,15 +173,18 @@ export class ResourceRepository {
       try {
         locked = (await client.query<{locked:boolean}>("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked",[lock])).rows[0]?.locked ?? false;
         if (!locked) continue;
-        const row = (await client.query<{identity:ExecutionIdentity,state:string}>("SELECT identity,state FROM harness_material_analysis_jobs WHERE resource_id=$1",[candidate.resourceId])).rows[0];
+        const row = (await client.query<{identity:ExecutionIdentity | string,state:string}>("SELECT identity,state FROM harness_material_analysis_jobs WHERE resource_id=$1",[candidate.resourceId])).rows[0];
         if (!row || !["queued","running"].includes(row.state)) continue;
+        // Preserve space property order used by the established account owner key.
+        // JSONB objects reorder keys, so new jobs retain the original JSON as a scalar.
+        const identity: ExecutionIdentity = typeof row.identity === "string" ? JSON.parse(row.identity) as ExecutionIdentity : row.identity;
         await client.query("UPDATE harness_material_analysis_jobs SET state='running',updated_at=now() WHERE resource_id=$1",[candidate.resourceId]);
         try {
-          await operation(row.identity,candidate.resourceId);
+          await operation(identity,candidate.resourceId);
           await client.query("UPDATE harness_material_analysis_jobs SET state='completed',updated_at=now() WHERE resource_id=$1",[candidate.resourceId]);
         } catch(error) {
           if (signal?.aborted) throw error;
-          await this.appendEvent(row.identity,{resourceId:candidate.resourceId,eventType:"campfire.analysis.failed",payload:{analysisStatus:"failed",errorCode:error instanceof ResourceError?error.code:"MATERIAL_ANALYSIS_FAILED",message:error instanceof ResourceError?error.message:"素材解析未完成，原素材已保存。"}});
+          await this.appendEvent(identity,{resourceId:candidate.resourceId,eventType:"campfire.analysis.failed",payload:{analysisStatus:"failed",errorCode:error instanceof ResourceError?error.code:"MATERIAL_ANALYSIS_FAILED",message:error instanceof ResourceError?error.message:"素材解析未完成，原素材已保存。"}});
           await client.query("UPDATE harness_material_analysis_jobs SET state='failed',updated_at=now() WHERE resource_id=$1",[candidate.resourceId]);
         }
         return;
