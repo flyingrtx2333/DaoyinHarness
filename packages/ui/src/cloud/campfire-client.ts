@@ -1,7 +1,18 @@
 import type { WorkbenchClient } from "./client.js";
 
 export type CampfireRole = "shop_profile" | "shop_document" | "shop_image" | "shop_video" | "reference_video" | "narration_audio" | "background_music" | "output_video";
-export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number; width?: number; height?: number; version?: number; analysisStatus?: "queued" | "running" | "completed" | "failed"; analysisProgress?: number; message?: string; analysis?: { summary: string; actions: Array<{label:string;startSeconds:number;endSeconds:number;confidence:number}> }; systemPreset?: string; origin?: "ai"; generated?: boolean; generatedSegments?: number[] }
+export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number; width?: number; height?: number; version?: number; analysisStatus?: "queued" | "running" | "completed" | "failed"; analysisProgress?: number; message?: string; analysis?: { summary: string; actions: Array<{label:string;startSeconds:number;endSeconds:number;confidence:number}> }; playbackUrl?: string; thumbnailUrl?: string; systemPreset?: string; origin?: "ai"; generated?: boolean; generatedSegments?: number[] }
+// Public system assets use immutable COS URLs. Private media keeps its authenticated path.
+export function campfireMediaUrl(client: WorkbenchClient, asset: CampfireAsset, thumbnail = false): string {
+  const value = thumbnail ? asset.thumbnailUrl : asset.playbackUrl;
+  if (asset.systemPreset && value) {
+    try {
+      const url = new URL(value);
+      if (url.protocol === "https:" && url.hostname === "meishan-1301397509.cos.ap-guangzhou.myqcloud.com" && !url.username && !url.password && !url.port && !url.search && !url.hash && /^\/harness\/system-references\/v1\/[a-f0-9]{64}\/(?:video\.mp4|poster-[a-f0-9]{64}\.webp)$/u.test(url.pathname)) return value;
+    } catch { /* Fall back to the account-owned resource path. */ }
+  }
+  return client.mediaUrl(asset.id, false, thumbnail);
+}
 export interface CampfireSelection { shopId: string; shopTitle: string; referenceId?: string; referenceTitle?: string; requirements?: string }
 export const CAMPFIRE_LABELS: Record<CampfireRole, string> = { shop_profile: "店铺资料", shop_document: "店铺文档", shop_image: "实拍图片", shop_video: "实拍视频", reference_video: "参考视频", narration_audio: "旁白音轨", background_music: "背景音乐", output_video: "剪辑成片" };
 const roles = Object.keys(CAMPFIRE_LABELS);

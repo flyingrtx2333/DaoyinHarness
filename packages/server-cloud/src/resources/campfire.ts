@@ -15,6 +15,10 @@ import { campfireAudioFilter, campfireCaptions, campfireDimensions, campfireVide
 type Data = Record<string, JsonValue>;
 const record = (value: unknown): value is Data => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (data: Data, key: string): string => typeof data[key] === "string" ? data[key] : "";
+function presetDelivery(asset: Data): Data {
+  const preset = CAMPFIRE_REFERENCE_PRESETS.find(item => asset.role === "reference_video" && item.key === asset.systemPreset && item.digest === asset.digest);
+  return preset ? {playbackUrl:preset.playbackUrl, thumbnailUrl:preset.thumbnailUrl} : {};
+}
 function fail(code: string, message: string, status = 400): never { throw new ResourceError(code, message, status); }
 const CHUNK = 256 * 1024;
 const LIMIT = 128 * 1024 * 1024;
@@ -47,7 +51,8 @@ export class CampfireService {
     if (!ready) fail("CAMPFIRE_ASSET_NOT_READY", "该素材尚未完成上传或制作，请选择已就绪的素材。", 409);
     const analyzed = facts.findLast(item => item.eventType === "campfire.analysis.completed");
     const state = facts.findLast(item => item.eventType.startsWith("campfire.analysis."));
-    return { ...ready.payload, ...analyzed?.payload, ...state?.payload, id };
+    const asset = { ...ready.payload, ...analyzed?.payload, ...state?.payload, id };
+    return {...asset,...presetDelivery(asset)};
   }
   async #append(auth: ExecutionIdentity, id: string, eventType: string, payload: Data, request: ResourceControlRequest): Promise<void> {
     await this.repository.appendEvent(auth, { resourceId: id, eventType, payload,
@@ -306,12 +311,12 @@ export class CampfireService {
       const systemPresets: Data[] = [];
       if (request.filterRole === "reference_video") for (const preset of CAMPFIRE_REFERENCE_PRESETS) {
         if (!await this.content.has(preset.digest)) fail("CAMPFIRE_PRESET_UNAVAILABLE", "系统参考视频暂不可用，请稍后重试。", 503);
-        const {key, ...media} = preset;
+        const {key, playbackUrl: _playbackUrl, thumbnailUrl: _thumbnailUrl, ...media} = preset;
         const asset: Data = {...media, role:"reference_video", mediaType:"video/mp4", systemPreset:key};
         // Provision immutable account-owned handles; media bytes remain shared by digest.
         const id = await this.repository.createBusiness(auth,preset.title,"campfire.media.ready",asset,`system-reference:${key}`);
         const {digest: _digest, ...metadata} = asset;
-        systemPresets.push({...metadata,id});
+        systemPresets.push({...metadata,...presetDelivery(asset),id});
       }
       let before: { createdAt: string; id: string } | undefined;
       if (request.shopId && (await this.#manifest(auth, request.shopId)).role !== "shop_profile") fail("CAMPFIRE_SHOP_INVALID", "请选择本店资料。");
@@ -330,7 +335,7 @@ export class CampfireService {
       const items = page.map((row): Data => {
         const data = record(row.payload) ? row.payload : {};
         const metadata = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "content" && key !== "digest"));
-        return { ...metadata, id: row.id };
+        return { ...metadata, ...presetDelivery(data), id: row.id };
       });
       return { summary: "已读取 Harness 营火素材页", items, systemPresets, hasMore, nextCursor, untrusted: true };
     }

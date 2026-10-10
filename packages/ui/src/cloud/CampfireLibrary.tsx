@@ -2,7 +2,7 @@ import { Children, useEffect, useRef, useState } from "react";
 import { CampfireShopManager } from "./CampfireShopManager.js";
 import { AssetLoading } from "./AssetLoading.js";
 import type { WorkbenchClient } from "./client.js";
-import { CAMPFIRE_LABELS, campfireAssetLabel, campfireBlob, campfireList, mergeCampfireAssets, campfireUpload, type CampfireAsset, type CampfireRole } from "./campfire-client.js";
+import { CAMPFIRE_LABELS, campfireAssetLabel, campfireBlob, campfireMediaUrl, campfireList, mergeCampfireAssets, campfireUpload, type CampfireAsset, type CampfireRole } from "./campfire-client.js";
 
 export function CampfireLibrary({ client, ready, externalLoading = false, refreshKey = 0, collection, mediaFilter, query, view, uploadRequest, manageRequest, onCountChange, children }: { client: WorkbenchClient; ready: boolean; externalLoading?: boolean; refreshKey?: number; collection: "shop" | "generated"; mediaFilter: "all" | "image" | "video"; query: string; view: "masonry" | "list"; uploadRequest: number; manageRequest: number; onCountChange: (count: number, more: boolean) => void; children?: React.ReactNode }): React.JSX.Element {
   const [showUpload, setShowUpload] = useState(false);
@@ -113,7 +113,7 @@ function UploadDialog({ busy, onClose, children }: { busy: boolean; onClose: () 
 
 export function CampfireThumbnail({ client, asset }: { client: WorkbenchClient; asset: CampfireAsset }): React.JSX.Element {
   const element = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false); const [failed, setFailed] = useState(false);
+  const [visible, setVisible] = useState(false); const [failed, setFailed] = useState(false); const [directFailed, setDirectFailed] = useState(false);
   const [ratio, setRatio] = useState<number | undefined>(() => typeof asset.width === "number" && typeof asset.height === "number" && Number.isFinite(asset.width) && Number.isFinite(asset.height) && asset.width > 0 && asset.height > 0 ? asset.width / asset.height : undefined);
   useEffect(() => {
     const node = element.current; if (!node) return;
@@ -121,8 +121,10 @@ export function CampfireThumbnail({ client, asset }: { client: WorkbenchClient; 
     observer.observe(node); return () => observer.disconnect();
   }, []);
   const video = asset.mediaType === "video/mp4", image = asset.mediaType.startsWith("image/");
+  const nativePoster = client.mediaUrl(asset.id,false,true);
+  const posterUrl = directFailed ? nativePoster : campfireMediaUrl(client,asset,true);
   return <div ref={element} className="asset-thumbnail" style={{ aspectRatio: ratio ?? 16 / 10 }}>
-    {visible && !failed && (video || image) ? <img src={client.mediaUrl(asset.id, false, true)} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} onLoad={event => { const el = event.currentTarget; if (el.naturalWidth && el.naturalHeight) setRatio(el.naturalWidth / el.naturalHeight); }} />
+    {visible && !failed && (video || image) ? <img src={posterUrl} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" onError={() => { if (posterUrl !== nativePoster) setDirectFailed(true); else setFailed(true); }} onLoad={event => { const el = event.currentTarget; if (el.naturalWidth && el.naturalHeight) setRatio(el.naturalWidth / el.naturalHeight); }} />
       : <span className="asset-preview-fallback">{failed ? "预览暂不可用" : video || image ? CAMPFIRE_LABELS[asset.role] : asset.title}</span>}
     {video && <span className="asset-play" aria-hidden="true"><span /></span>}
   </div>;
@@ -138,7 +140,7 @@ export function CampfirePreview({ client, asset, onClose }: { client: WorkbenchC
         const result = await client.resource<{ asset: CampfireAsset }>({ action: "resource_campfire_inspect", resourceId: asset.id });
         if (!controller.signal.aborted) setText(result.asset.content ?? "");
       } else {
-        if (asset.mediaType !== "text/plain") { if (!controller.signal.aborted) setUrl(client.mediaUrl(asset.id)); return; }
+        if (asset.mediaType !== "text/plain") { if (!controller.signal.aborted) setUrl(campfireMediaUrl(client,asset)); return; }
         const blob = await campfireBlob(client, asset, controller.signal);
         const content = await blob.text(); if (!controller.signal.aborted) setText(content);
       }
@@ -149,7 +151,7 @@ export function CampfirePreview({ client, asset, onClose }: { client: WorkbenchC
     <header className="asset-toolbar"><h2>{asset.title}</h2><button type="button" onClick={onClose}>关闭</button></header>
     {asset.origin === "ai" && <p>AI 演绎画面，不代表店铺真实现场。</p>}
     {!!asset.generatedSegments?.length && <p>此成片包含 AI 演绎片段，画面内已标记来源。</p>}
-    {error ? <p role="alert">{error}</p> : url ? asset.mediaType === "video/mp4" ? <video src={url} controls playsInline preload="metadata" /> : asset.mediaType.startsWith("audio/") ? <audio src={url} controls preload="metadata" /> : <img src={url} alt={asset.title} /> : text ? <pre className="asset-document">{text}</pre> : <p role="status">正在读取素材…</p>}
+    {error ? <p role="alert">{error}</p> : url ? asset.mediaType === "video/mp4" ? <video src={url} controls playsInline preload="metadata" poster={campfireMediaUrl(client,asset,true)} onError={() => { const native=client.mediaUrl(asset.id); if(url!==native)setUrl(native); else setError("视频暂不可用，请稍后重试。"); }} /> : asset.mediaType.startsWith("audio/") ? <audio src={url} controls preload="metadata" /> : <img src={url} alt={asset.title} /> : text ? <pre className="asset-document">{text}</pre> : <p role="status">正在读取素材…</p>}
     {url && <a href={client.mediaUrl(asset.id, true)} download={asset.title + (asset.mediaType === "video/mp4" && !asset.title.endsWith(".mp4") ? ".mp4" : "")}>下载素材</a>}
   </dialog>;
 }
