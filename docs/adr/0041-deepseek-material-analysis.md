@@ -1,6 +1,6 @@
 # ADR 0041: DeepSeek model binding and durable upload analysis
 
-Harness chat and material understanding use the main platform's explicit `daoyin-harness` scene bindings. The owner requested DeepSeek V4.1 Flash (`deepseek-flash`) and the same server-side credential used by Yinghuo. Provider secrets stay in the platform; Harness receives only an authenticated, metered analysis receipt.
+Harness chat and material understanding use the main platform's explicit `daoyin-harness` scene bindings. The owner requested DeepSeek V4.1 Flash (`deepseek-flash`) and the same server-side credential used by Yinghuo. The existing global DeepSeek credential differs from Yinghuo. Store the requested key in the separate platform provider configuration `harness-deepseek`, while retaining `deepseek` as the model/provider billing identity. Other applications keep their existing key. Provider secrets stay in the platform; Harness receives only an authenticated, metered analysis receipt.
 
 Uploads remain usable after a parsing failure. Images and videos enqueue durable analysis after their immutable upload fact is committed. A resource worker claims jobs with PostgreSQL advisory locks (released on disconnect, no expiring lease), records running/completed/failed facts, and resumes interrupted jobs after restart. Explicit retry never replaces prior valid analysis or original media. The queue is derived operational state; immutable resource events are the evidence.
 
