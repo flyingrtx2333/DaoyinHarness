@@ -15,6 +15,13 @@ export interface CampfireAudio {
   sourceVolume?: number;
   musicVolume?: number;
 }
+export interface CampfireArtText {
+  text: string;
+  startSeconds: number;
+  durationSeconds: number;
+  style: "warm" | "fresh" | "gold";
+  position: "top" | "center";
+}
 export interface CampfireCaption { startSeconds: number; durationSeconds: number; text: string }
 export function campfireDimensions(aspectRatio: string): [number, number] {
   return aspectRatio === "16:9" ? [1920, 1080] : aspectRatio === "1:1" ? [1080, 1080] : [1080, 1920];
@@ -40,11 +47,17 @@ function timestamp(seconds: number): string {
   const cs = Math.round(seconds * 100);
   return `${Math.floor(cs / 360000)}:${String(Math.floor(cs / 6000) % 60).padStart(2, "0")}:${String(Math.floor(cs / 100) % 60).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`;
 }
-export function campfireCaptions(segments: CampfireSegment[], width: number, height: number, narrationCaptions?: CampfireCaption[], generatedIndices: readonly number[] = []): string {
+export function campfireCaptions(segments: CampfireSegment[], width: number, height: number, narrationCaptions?: CampfireCaption[], generatedIndices: readonly number[] = [], artText: readonly CampfireArtText[] = []): string {
   const portrait = height > width;
   const fontSize = portrait ? 58 : 48;
   const lineLength = portrait ? 16 : 28;
-  const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Noto Sans CJK SC,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,70,70,${portrait ? 160 : 80},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+  const artSize = portrait ? 96 : 88;
+  const artStyles = [
+    ["warm", "&H0048E8FF", "&H00243A85", 7, 4],
+    ["fresh", "&H00FFFFFF", "&H00B85E20", 6, 3],
+    ["gold", "&H0066D9F5", "&H001A1823", 5, 5],
+  ].map(([name, color, outline, border, shadow]) => `Style: Art_${name},Noto Sans CJK SC,${artSize},${color},${color},${outline},&H80000000,-1,0,0,0,100,100,2,0,1,${border},${shadow},5,80,80,80,1`).join("\n");
+  const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Noto Sans CJK SC,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,70,70,${portrait ? 160 : 80},1\n${artStyles}\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
   const cues: string[] = [];
   const wordSegmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
   let elapsed = 0;
@@ -99,6 +112,17 @@ export function campfireCaptions(segments: CampfireSegment[], width: number, hei
   for (const [index, segment] of segments.entries()) {
     if (generatedIndices.includes(index)) cues.push(`Dialogue: 1,${timestamp(segmentStart)},${timestamp(segmentStart + segment.durationSeconds)},Default,,0,0,0,,{\\an9\\pos(${width - 48},48)\\fs${portrait ? 36 : 30}}AI 演绎`);
     segmentStart += segment.durationSeconds;
+  }
+  for (const title of artText) {
+    const chars = [...title.text].map(char => /[\p{Cc}{}\\<>]/u.test(char) ? " " : char).join("").trim();
+    if (!chars) continue;
+    const letters = [...chars];
+    const limit = portrait ? 8 : 14;
+    const lines: string[] = [];
+    for (let index = 0; index < letters.length; index += limit) lines.push(letters.slice(index, index + limit).join(""));
+    const y = Math.round(height * (title.position === "top" ? 0.22 : 0.45));
+    const tags = `{\\an5\\pos(${Math.round(width / 2)},${y})\\fad(180,180)\\fscx94\\fscy94\\t(0,180,\\fscx100\\fscy100)}`;
+    cues.push(`Dialogue: 2,${timestamp(title.startSeconds)},${timestamp(title.startSeconds + title.durationSeconds)},Art_${title.style},,0,0,0,,${tags}${lines.join("\\N")}`);
   }
   return header + cues.join("\n") + "\n";
 }

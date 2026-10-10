@@ -11,7 +11,7 @@ import type { CampfireMediaGateway } from "./campfire-gateway.js";
 import type { ContentStore } from "./content-store.js";
 import type { ExecutorProcessRequest, ResourceControlRequest } from "./contracts.js";
 import { ResourceError, type ResourceRepository } from "./repository.js";
-import { campfireAudioFilter, campfireCaptions, campfireDimensions, campfireVideoFilter, type CampfireAudio, type CampfireCaption, type CampfireSegment } from "./campfire-timeline.js";
+import { campfireAudioFilter, campfireCaptions, campfireDimensions, campfireVideoFilter, type CampfireArtText, type CampfireAudio, type CampfireCaption, type CampfireSegment } from "./campfire-timeline.js";
 
 type Data = Record<string, JsonValue>;
 const record = (value: unknown): value is Data => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -430,6 +430,9 @@ export class CampfireService {
       if (!segments.length) fail("CAMPFIRE_PLAN_EMPTY", "剪辑计划至少需要一个真实素材片段。");
       const plannedDuration = segments.reduce((sum, item) => sum + item.durationSeconds, 0);
       if (plannedDuration > 180) fail("CAMPFIRE_PLAN_TOO_LONG", "成片长度不超过180秒。");
+      for (const title of request.artText ?? []) {
+        if (!title.text.trim() || title.startSeconds + title.durationSeconds > plannedDuration + 0.001) fail("CAMPFIRE_ART_TEXT_INVALID", "艺术字须有文字，且显示时间不能超出成片；请调整艺术字时间，不修改素材或音轨。");
+      }
       const invalidRanges: string[] = [];
       for (const [index, segment] of segments.entries()) {
         const asset = await this.#manifest(auth, segment.assetId);
@@ -456,7 +459,7 @@ export class CampfireService {
         if (!inspected) fail("CAMPFIRE_INSPECT_REQUIRED", "请先读取待用音轨的实际时长。", 409);
         if (key === "narrationId" && Number(inspected.payload.durationSeconds) > plannedDuration + 0.1) fail("CAMPFIRE_NARRATION_TOO_LONG", "真实旁白长于剪辑时间轴，请延长镜头或修改旁白；不能截断口播。", 409);
       }
-      const plan: Data = { title: request.title!, shopId: request.shopId!, shopProfile: { title: shop.title!, content: shop.content!, version: shop.version ?? 1 }, referenceId: request.referenceId ?? null, aspectRatio: request.aspectRatio!, durationSeconds: Number(plannedDuration.toFixed(6)), segments: segments as unknown as JsonValue, audio: request.audio ? request.audio as unknown as JsonValue : {}, missingShots: request.missingShots!, renderVersion: 2, createdAt: new Date().toISOString() };
+      const plan: Data = { title: request.title!, shopId: request.shopId!, shopProfile: { title: shop.title!, content: shop.content!, version: shop.version ?? 1 }, referenceId: request.referenceId ?? null, aspectRatio: request.aspectRatio!, durationSeconds: Number(plannedDuration.toFixed(6)), segments: segments as unknown as JsonValue, audio: request.audio ? request.audio as unknown as JsonValue : {}, missingShots: request.missingShots!, artText: (request.artText ?? []) as unknown as JsonValue, renderVersion: 3, createdAt: new Date().toISOString() };
       const id = await this.repository.createBusiness(auth, request.title!, "campfire.plan.saved", plan);
       return { summary: `剪辑计划已保存：${segments.length}个镜头，总长${plan.durationSeconds}秒${request.missingShots!.length ? "；素材不足，请调整现有素材方案或上传实拍" : ""}`, plan: { ...plan, id }, canRender: request.missingShots!.length === 0, untrusted: true };
     }
@@ -497,8 +500,9 @@ export class CampfireService {
           const narration = assets.find(item => item.id === audio.narrationId);
           const narrationCaptions = narration?.generated === true && Array.isArray(narration.captions) ? narration.captions as unknown as CampfireCaption[] : undefined;
           const generatedIndices = segments.flatMap((segment, index) => assets.find(item => item.id === segment.assetId)?.origin === "ai" ? [index] : []);
-          const hasCaptions = Boolean(narrationCaptions?.length) || segments.some(segment => segment.caption?.trim()) || generatedIndices.length > 0;
-          if (hasCaptions) await this.executor({ action: "file", operation: "write", workspaceId, path: "captions.ass", content: campfireCaptions(segments, width, height, narrationCaptions, generatedIndices) }, signal);
+          const artText = (Array.isArray(plan.artText) ? plan.artText : []) as unknown as CampfireArtText[];
+          const hasCaptions = Boolean(narrationCaptions?.length) || segments.some(segment => segment.caption?.trim()) || generatedIndices.length > 0 || artText.length > 0;
+          if (hasCaptions) await this.executor({ action: "file", operation: "write", workspaceId, path: "captions.ass", content: campfireCaptions(segments, width, height, narrationCaptions, generatedIndices, artText) }, signal);
           const mixArgs = ["-v", "error", "-nostdin", "-y", "-f", "concat", "-safe", "1", "-i", "clips.txt"];
           let inputIndex = 1;
           let narrationInput: number | undefined; let musicInput: number | undefined;
@@ -515,7 +519,7 @@ export class CampfireService {
           const snapshot = await this.repository.recordSnapshot(auth, workspaceId, entries);
           const output = entries.find(entry => entry.path === "output.mp4");
           if (!output || output.kind !== "file" || output.size <= 0 || output.size > LIMIT) fail("CAMPFIRE_OUTPUT_INVALID", "成片未能保存或超出大小限制。", 422);
-          const asset: Data = { title: plan.title!, role: "output_video", shopId: plan.shopId!, mediaType: "video/mp4", size: output.size, digest: output.blobHash, durationSeconds: actualDuration, width, height, fps: 30, renderVersion: 2, audio: audio as unknown as JsonValue, generatedSegments: generatedIndices, planId, workspaceId, snapshotId: snapshot.id, createdAt: new Date().toISOString() };
+          const asset: Data = { title: plan.title!, role: "output_video", shopId: plan.shopId!, mediaType: "video/mp4", size: output.size, digest: output.blobHash, durationSeconds: actualDuration, width, height, fps: 30, renderVersion: plan.renderVersion ?? 2, artText: plan.artText ?? [], audio: audio as unknown as JsonValue, generatedSegments: generatedIndices, planId, workspaceId, snapshotId: snapshot.id, createdAt: new Date().toISOString() };
           const assetId = await this.repository.createBusiness(auth, text(plan, "title"), "campfire.render.completed", asset);
           await this.#append(auth, planId, "campfire.render.result", { assetId, durationSeconds: actualDuration }, request);
           return { summary: "制作已完成，成片可直接预览", completed: true, asset: { ...asset, id: assetId }, untrusted: true };

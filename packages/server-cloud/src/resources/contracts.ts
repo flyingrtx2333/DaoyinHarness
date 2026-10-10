@@ -1,6 +1,6 @@
 import type { DeploymentSpec, RuntimeSpec, WorkspaceEntry, WorkspaceSource } from "@daoyin/harness-contracts";
 import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
-import type { CampfireAudio, CampfireSegment } from "./campfire-timeline.js";
+import type { CampfireArtText, CampfireAudio, CampfireSegment } from "./campfire-timeline.js";
 
 export const RESOURCE_TOOL_NAMES = [
   "resource_list", "resource_attach", "resource_detach",
@@ -77,6 +77,7 @@ export interface ResourceControlRequest {
   aspectRatio?: "9:16" | "16:9" | "1:1";
   segments?: CampfireSegment[];
   audio?: CampfireAudio;
+  artText?: CampfireArtText[];
   startSeconds?: number;
   durationSeconds?: number;
   preset?: "city-sunshine";
