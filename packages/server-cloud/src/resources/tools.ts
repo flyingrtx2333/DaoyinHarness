@@ -73,7 +73,7 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   deployment_rollback: { description: "Roll back to a previous immutable deployment after an explicit current-turn request.", mutating: true, inputSchema: object({ deploymentId: { type: "string", pattern: "^dep_[a-f0-9]{24}$" } }, ["deploymentId"]) },
 };
 
-export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all cloud development and artifact tasks. A session may attach multiple resources; every file, Git and process call must name the intended workspaceId. Use IDs from the current attached-resource context or workspace_create; if unknown, first call resource_list and inspect attached, never invent an ID. File paths are workspace-relative, for example input.csv or src/app.py; omit path when listing or searching the workspace root, never use / or . as a file path. process cwd may be omitted or . for the workspace root. workspace_create always requires runtimeId: Node.js uses node22, Python uses python313, Go uses go125 and Rust uses rust190; choose node22 only when the user did not specify a language. Read before editing and use snapshots for durable checkpoints. Commands run only in the workspace gVisor sandbox and accept executable plus argument arrays, never host shell text. Public network access is available through the audited egress boundary; private, loopback, metadata and platform addresses remain forbidden. Never put credentials in files, arguments or messages. Git push, deployment, payment, external writes and destructive external actions require an explicit current-turn request. A command exit code, artifact digest, deployment health event or official evaluator is the evidence of completion; do not infer success from intent.`;
+export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all cloud development and artifact tasks. A session may attach multiple resources; every file, Git and process call must name the intended workspaceId. Use IDs from the current attached-resource context or workspace_create; if unknown, first call resource_list and inspect attached, never invent an ID. File paths are workspace-relative, for example input.csv or src/app.py; omit path when listing or searching the workspace root, never use / or . as a file path. process cwd may be omitted or . for the workspace root. workspace_create always requires runtimeId: Node.js uses node22, Python uses python313, Go uses go125 and Rust uses rust190; choose node22 only when the user did not specify a language. Read before editing and use snapshots for durable checkpoints. Commands run only in the workspace gVisor sandbox and accept executable plus argument arrays, never host shell text. Each process_run or process_start creates a new container: the base image is read-only, /tmp is temporary, and /workspace including runtime-managed user dependencies and caches persists across commands. Public network access is available through the audited egress boundary; private, loopback, metadata and platform addresses remain forbidden. Never put credentials in files, arguments or messages. Git push, deployment, payment, external writes and destructive external actions require an explicit current-turn request. A command exit code, artifact digest, deployment health event or official evaluator is the evidence of completion; do not infer success from intent.`;
 
 function owner(identity: ExecutionIdentity): { actor: string; space: string } {
   if (identity.space.kind === "public") throw new CloudError(403, "RESOURCE_ACCOUNT_REQUIRED", "Please sign in before using cloud resources.");
@@ -120,13 +120,14 @@ const NETWORK_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   RESOURCE_AUDIT_PERSISTENCE_FAILED: "云端执行已返回，但回执保存失败；命令可能已完成。为避免重复执行，本轮不再自动运行命令，需要先修复审计存储。",
 };
 
-const RESOURCE_INPUT_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+const RESOURCE_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   WORKSPACE_PATH_INVALID: "文件路径必须是工作区内的相对路径，例如 input.csv 或 src/app.py；不能使用 /、.、..、盘符或反斜杠。列出或搜索工作区根目录时省略 path；进程 cwd 可省略或使用 .。",
   WORKSPACE_PATH_ESCAPE: "路径超出了当前工作区边界，未执行操作。请使用工作区内的相对路径；不能通过父目录或链接访问工作区之外。",
   WORKSPACE_PATH_RESERVED: "该路径由工作区运行环境保护，不能读取或修改。请选择普通任务文件路径。",
   RESOURCE_ID_INVALID: "资源 ID 无效，未执行操作。请先调用 resource_list，使用 attached 中的真实工作区 ID，不要编造 ID。",
   RESOURCE_NOT_ATTACHED: "目标资源未挂载到当前会话，未执行操作。请调用 resource_list 核对当前 attached 资源和真实 ID。",
   RESOURCE_NOT_FOUND: "当前账号无法使用该资源，未执行操作。请调用 resource_list 核对当前账号和会话可用的真实资源 ID。",
+  PROCESS_TIMEOUT: "命令超过执行时限，本次未获得成功结果。安装或写入可能已留下部分状态；请先检查工作区和已有结果，确认原因或改变执行条件后再决定下一步，不要原样重复同一长时间命令。",
 };
 
 function invalidWorkspacePath(name: ResourceToolName, input: Record<string, unknown>): boolean {
@@ -172,7 +173,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
         async execute(input, signal) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");
           await ensureActive(identity, signal);
-          if (invalidWorkspacePath(name, input)) return { ok: false, code: "WORKSPACE_PATH_INVALID", message: RESOURCE_INPUT_FAILURE_MESSAGES.WORKSPACE_PATH_INVALID!, retryable: false };
+          if (invalidWorkspacePath(name, input)) return { ok: false, code: "WORKSPACE_PATH_INVALID", message: RESOURCE_FAILURE_MESSAGES.WORKSPACE_PATH_INVALID!, retryable: false };
           const startsProcess = name === "process_run" || name === "process_start";
           const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : undefined;
           const blockedCode = startsProcess && workspaceId ? blockedProcessWorkspaces.get(workspaceId) : undefined;
@@ -195,9 +196,9 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
               await ensureActive(identity, signal);
               return { ok: false, code: error.code, message: error.message, retryable: false };
             }
-            if (Object.hasOwn(RESOURCE_INPUT_FAILURE_MESSAGES, error.code)) {
+            if (Object.hasOwn(RESOURCE_FAILURE_MESSAGES, error.code)) {
               await ensureActive(identity, signal);
-              return { ok: false, code: error.code, message: RESOURCE_INPUT_FAILURE_MESSAGES[error.code]!, retryable: false };
+              return { ok: false, code: error.code, message: RESOURCE_FAILURE_MESSAGES[error.code]!, retryable: false };
             }
             if (!Object.hasOwn(NETWORK_FAILURE_MESSAGES, error.code)) throw error;
             await ensureActive(identity, signal);

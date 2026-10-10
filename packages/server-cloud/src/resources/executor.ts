@@ -169,9 +169,10 @@ async function docker(args: string[], timeoutMs = 30_000, input?: string, maximu
 
 async function removeSandboxContainer(name: string): Promise<boolean> {
   const removed = await docker(["rm", "-f", name], 30_000, undefined, 20_000).catch(() => null);
-  if (removed?.exitCode === 0) return true;
-  const inspected = await docker(["inspect", name], 10_000, undefined, 20_000).catch(() => null);
-  return inspected?.exitCode !== 0;
+  if (removed?.exitCode === 0 && !removed.timedOut) return true;
+  const listed = await docker(["ps", "-a", "--format", "{{.Names}}"], 10_000, undefined, 20_000).catch(() => null);
+  return listed !== null && listed.exitCode === 0 && !listed.timedOut &&
+    !listed.stdout.split(/\r?\n/u).includes(name);
 }
 
 function assertSandboxStarted(result: { exitCode: number; stderr: string }): void {
