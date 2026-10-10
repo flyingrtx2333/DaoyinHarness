@@ -42,6 +42,23 @@ export function CampfireLibrary({ client, ready, externalLoading = false, refres
   }
   useEffect(() => { if (ready) void refresh(); }, [client, ready, scope, refreshKey]);
   useEffect(() => { setItems([]); setShops([]); setShopId(""); setSelected(undefined); setManager(undefined); }, [scope]);
+  useEffect(() => {
+    if (!ready || !items.some(item=>item.analysisStatus === "queued" || item.analysisStatus === "running")) return;
+    const controller = new AbortController(); let pending = false;
+    const timer = setInterval(() => {
+      if (pending) return; pending = true;
+      void campfireList(client,{limit:100},controller.signal).then(data=>{
+        if (!controller.signal.aborted && scope === client.accountScope) setItems(current=>mergeCampfireAssets(current,data.items));
+      }).catch(()=>{ /* Keep the last known state; explicit refresh reports connection failures. */ }).finally(()=>{pending=false;});
+    },3000);
+    return ()=>{clearInterval(timer);controller.abort();};
+  },[client,ready,scope,items.some(item=>item.analysisStatus === "queued" || item.analysisStatus === "running")]);
+  async function analyze(asset: CampfireAsset): Promise<void> {
+    try {
+      const result = await client.resource<{asset:CampfireAsset}>({action:"resource_media_analyze",resourceId:asset.id});
+      if(scope === client.accountScope) setItems(current=>mergeCampfireAssets(current,[result.asset]));
+    } catch(cause) {if(scope === client.accountScope) setError(cause instanceof Error?cause.message:"解析未能开始。");}
+  }
   async function upload(files: File[]): Promise<void> {
     setBusy(true); setError("");
     try {
@@ -74,6 +91,11 @@ export function CampfireLibrary({ client, ready, externalLoading = false, refres
     {!loading && !error && !visibleItems.length && !Children.toArray(children).length && <p role="status">暂无素材</p>}
     <div className={`asset-${view}`} hidden={loading} aria-label={view === "masonry" ? "全部素材瀑布流" : "全部素材列表"}>{visibleItems.map(item => <article className={`asset-item${item.mediaType.startsWith("image/") || item.mediaType === "video/mp4" ? "" : " asset-text-item"}`} key={item.id}>
       <button type="button" className="asset-preview" aria-label={`预览营火素材 ${item.title}`} onClick={() => setSelected(item)}><CampfireThumbnail client={client} asset={item} /></button>
+      {item.analysisStatus && <div className={`asset-analysis asset-analysis-${item.analysisStatus}`}>
+        {item.analysisStatus === "completed" ? `已识别 · ${item.analysis?.actions.length ?? 0} 个动作` : item.analysisStatus === "failed"
+          ? <button type="button" title={item.message} onClick={()=>{void analyze(item);}}>解析失败 · 重试</button>
+          : <><span className="spinner" aria-hidden="true" />{item.analysisStatus === "queued" ? "等待解析" : `解析中${item.analysisProgress ? ` ${item.analysisProgress}%` : ""}`}</>}
+      </div>}
       <div className="asset-meta"><h2 title={item.title}>{item.title}</h2><p>{campfireAssetLabel(item)}{item.durationSeconds ? ` · ${Math.round(item.durationSeconds)}秒` : ""}</p>{item.role === "shop_profile" && <button type="button" disabled={busy || !ready} onClick={() => { setManager(item.id); }}>修改资料</button>}</div>
     </article>)}{children}</div>
     </div>

@@ -137,15 +137,56 @@ export class ResourceRepository {
 
   public async businessManifests(identity: ExecutionIdentity, page: { limit: number; shopId?: string; filterRole?: string; before?: { createdAt: string; id: string } }): Promise<Array<{ id: string; createdAt: string; payload: JsonValue }>> {
     return (await this.pool.query<{ id: string; createdAt: string; payload: JsonValue }>(
-      `SELECT r.id,to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt",e.payload FROM harness_resources r
+      `SELECT r.id,to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt",e.payload || COALESCE(a.payload, '{}'::jsonb) || COALESCE(st.payload, '{}'::jsonb) AS payload FROM harness_resources r
        JOIN LATERAL (SELECT event_type,payload FROM harness_resource_events WHERE resource_id=r.id
          AND owner_key=r.owner_key AND event_type IN ('campfire.media.ready','campfire.profile.ready','campfire.render.completed')
-         ORDER BY sequence DESC LIMIT 1) e ON true WHERE r.owner_key=$1
+         ORDER BY sequence DESC LIMIT 1) e ON true
+       LEFT JOIN LATERAL (SELECT payload - 'visualEvidence' AS payload FROM harness_resource_events WHERE resource_id=r.id AND owner_key=r.owner_key AND event_type='campfire.analysis.completed' ORDER BY sequence DESC LIMIT 1) a ON true
+       LEFT JOIN LATERAL (SELECT payload FROM harness_resource_events WHERE resource_id=r.id AND owner_key=r.owner_key AND event_type IN ('campfire.analysis.queued','campfire.analysis.running','campfire.analysis.failed','campfire.analysis.completed') ORDER BY sequence DESC LIMIT 1) st ON true WHERE r.owner_key=$1
          AND ($2::text IS NULL OR r.id=$2 OR e.payload->>'shopId'=$2 OR e.payload->>'role'='reference_video')
          AND ($3::text IS NULL OR e.payload->>'role'=$3)
          AND ($4::timestamptz IS NULL OR (r.created_at,r.id)<($4::timestamptz,$5::text))
        ORDER BY r.created_at DESC,r.id DESC LIMIT $6`,
       [ownerKey(identity), page.shopId ?? null, page.filterRole ?? null, page.before?.createdAt ?? null, page.before?.id ?? null, page.limit + 1])).rows;
+  }
+
+  public async enqueueMaterial(identity: ExecutionIdentity, resourceId: string, sourceDigest: string): Promise<void> {
+    await this.get(identity, resourceId);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const row = await client.query(`INSERT INTO harness_material_analysis_jobs(resource_id,owner_key,identity,source_digest)
+        VALUES($1,$2,$3,$4) ON CONFLICT(resource_id) DO UPDATE SET identity=$3,state='queued',updated_at=now()
+        WHERE harness_material_analysis_jobs.owner_key=$2 AND harness_material_analysis_jobs.state='failed' RETURNING resource_id`,
+        [resourceId, ownerKey(identity), JSON.stringify(identity), sourceDigest]);
+      if (row.rowCount) await client.query("INSERT INTO harness_resource_events(owner_key,resource_id,event_type,payload) VALUES($1,$2,'campfire.analysis.queued',$3)", [ownerKey(identity),resourceId,JSON.stringify({analysisStatus:"queued",sourceDigest,pipelineVersion:1})]);
+      await client.query("COMMIT");
+    } catch(error) { await client.query("ROLLBACK"); throw error; } finally {client.release();}
+  }
+
+  public async processMaterial(operation: (identity: ExecutionIdentity, resourceId: string) => Promise<void>, signal?: AbortSignal): Promise<void> {
+    const candidates = (await this.pool.query<{resourceId:string}>("SELECT resource_id AS \"resourceId\" FROM harness_material_analysis_jobs WHERE state IN ('queued','running') ORDER BY created_at LIMIT 16")).rows;
+    for (const candidate of candidates) {
+      const client = await this.pool.connect();
+      const lock = "material-analysis:" + candidate.resourceId;
+      let locked = false;
+      try {
+        locked = (await client.query<{locked:boolean}>("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked",[lock])).rows[0]?.locked ?? false;
+        if (!locked) continue;
+        const row = (await client.query<{identity:ExecutionIdentity,state:string}>("SELECT identity,state FROM harness_material_analysis_jobs WHERE resource_id=$1",[candidate.resourceId])).rows[0];
+        if (!row || !["queued","running"].includes(row.state)) continue;
+        await client.query("UPDATE harness_material_analysis_jobs SET state='running',updated_at=now() WHERE resource_id=$1",[candidate.resourceId]);
+        try {
+          await operation(row.identity,candidate.resourceId);
+          await client.query("UPDATE harness_material_analysis_jobs SET state='completed',updated_at=now() WHERE resource_id=$1",[candidate.resourceId]);
+        } catch(error) {
+          if (signal?.aborted) throw error;
+          await this.appendEvent(row.identity,{resourceId:candidate.resourceId,eventType:"campfire.analysis.failed",payload:{analysisStatus:"failed",errorCode:error instanceof ResourceError?error.code:"MATERIAL_ANALYSIS_FAILED",message:error instanceof ResourceError?error.message:"素材解析未完成，原素材已保存。"}});
+          await client.query("UPDATE harness_material_analysis_jobs SET state='failed',updated_at=now() WHERE resource_id=$1",[candidate.resourceId]);
+        }
+        return;
+      } finally { if(locked) await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))",[lock]).catch(()=>undefined);client.release(); }
+    }
   }
 
   public async serializeBusiness<T>(identity: ExecutionIdentity, resourceId: string, operation: () => Promise<T>): Promise<T> {

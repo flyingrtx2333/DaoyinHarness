@@ -9,6 +9,7 @@ import { ResourceError, ResourceRepository } from "./repository.js";
 import { assertRuntimeSpec } from "./runtime-policy.js";
 import { type DeploymentWorkerRequest, type ExecutorProcessRequest, type ResolvedSecret, type ResourceControlRequest, RESOURCE_TOOL_NAMES } from "./contracts.js";
 import { unixJson } from "../projects/wire.js";
+import { PlatformMaterialGateway } from "./material-gateway.js";
 import { CampfireService } from "./campfire.js";
 import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
 
@@ -121,7 +122,16 @@ async function localCall(socket: string, path: string, input: unknown, signal?: 
 function executor(input: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return localCall(EXECUTOR, "/execute", input, signal);
 }
-const campfire = new CampfireService(repository, content, executor, runtimeImages);
+const materialGateway = process.env.HARNESS_MATERIAL_PLATFORM_URL && process.env.HARNESS_MATERIAL_SERVICE_TOKEN
+  ? new PlatformMaterialGateway(process.env.HARNESS_MATERIAL_PLATFORM_URL,process.env.HARNESS_MATERIAL_SERVICE_TOKEN) : undefined;
+const campfire = new CampfireService(repository, content, executor, runtimeImages, materialGateway);
+const analysisAbort = new AbortController();
+let analysisWork: Promise<void> | undefined;
+const analysisTimer = setInterval(() => {
+  if (analysisWork || analysisAbort.signal.aborted) return;
+  analysisWork = campfire.processAnalysis(analysisAbort.signal).catch(() => { console.error("Material worker persistence unavailable; pending jobs retained."); }).finally(() => {analysisWork=undefined;});
+}, 2000);
+analysisTimer.unref();
 function builder(input: { workspaceId: string; dockerfile: string; context: string; timeoutMs: number }, signal?: AbortSignal): Promise<Record<string, unknown>> {
   return localCall(BUILDER, "/build", input, signal);
 }
@@ -470,5 +480,5 @@ server.listen(SOCKET, () => {
   if (Number.isSafeInteger(gid) && gid > 0) void chown(SOCKET, -1, gid).then(() => chmod(SOCKET, 0o660));
 });
 
-async function close(): Promise<void> { clearInterval(processReconcileTimer); await new Promise<void>(resolve => server.close(() => resolve())); await pool.end(); }
+async function close(): Promise<void> { clearInterval(analysisTimer); analysisAbort.abort(); await analysisWork; clearInterval(processReconcileTimer); await new Promise<void>(resolve => server.close(() => resolve())); await pool.end(); }
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close(); });

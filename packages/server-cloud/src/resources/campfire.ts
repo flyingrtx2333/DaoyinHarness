@@ -1,3 +1,5 @@
+import { assertExecutionIdentity } from "@daoyin/harness-contracts";
+import { PlatformMaterialGateway, type MaterialFrame, type MaterialAction } from "./material-gateway.js";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { defaultRuntimeSpec, type ExecutionIdentity, type WorkspaceEntry } from "@daoyin/harness-contracts";
@@ -33,7 +35,7 @@ export class CampfireService {
   readonly #thumbnailQueue: Array<() => void> = [];
   public constructor(private readonly repository: ResourceRepository, private readonly content: ContentStore,
     private readonly executor: (request: ExecutorProcessRequest, signal?: AbortSignal) => Promise<Record<string, unknown>>,
-    private readonly images: Record<string, { digest?: unknown }>) {}
+    private readonly images: Record<string, { digest?: unknown }>, private readonly analysisGateway?: PlatformMaterialGateway) {}
 
   async #facts(auth: ExecutionIdentity, id: string): Promise<Array<{ eventType: string; payload: Data }>> {
     return (await this.repository.businessFacts(auth, id)).map(item => ({ eventType: item.eventType, payload: record(item.payload) ? item.payload : {} }));
@@ -42,7 +44,9 @@ export class CampfireService {
     const facts = await this.#facts(auth, id);
     const ready = facts.findLast(item => ["campfire.media.ready", "campfire.profile.ready", "campfire.render.completed"].includes(item.eventType));
     if (!ready) fail("CAMPFIRE_ASSET_NOT_READY", "该素材尚未完成上传或制作，请选择已就绪的素材。", 409);
-    return { ...ready.payload, id };
+    const analyzed = facts.findLast(item => item.eventType === "campfire.analysis.completed");
+    const state = facts.findLast(item => item.eventType.startsWith("campfire.analysis."));
+    return { ...ready.payload, ...analyzed?.payload, ...state?.payload, id };
   }
   async #append(auth: ExecutionIdentity, id: string, eventType: string, payload: Data, request: ResourceControlRequest): Promise<void> {
     await this.repository.appendEvent(auth, { resourceId: id, eventType, payload,
@@ -135,6 +139,56 @@ export class CampfireService {
     return { ...asset, ...data };
   }
 
+  public async processAnalysis(signal: AbortSignal): Promise<void> {
+    await this.repository.processMaterial(async (auth, id) => {
+      assertExecutionIdentity(auth);
+      signal.throwIfAborted();
+      const request: ResourceControlRequest = { action: "resource_campfire_inspect", resourceId: id };
+      const asset = await this.#manifest(auth, id);
+      if (asset.pipelineVersion === 1 && asset.analysis && asset.sourceDigest === asset.digest) return;
+      if (!this.analysisGateway) fail("MATERIAL_GATEWAY_UNAVAILABLE", "素材解析网关尚未配置，原素材已保存。", 503);
+      await this.#append(auth,id,"campfire.analysis.running",{analysisStatus:"running",pipelineVersion:1},request);
+      const inspected = await this.#inspection(auth,request,asset,signal);
+      const duration = Number(inspected.durationSeconds);
+      const video = asset.mediaType === "video/mp4";
+      if (video && duration > 180) fail("MATERIAL_DURATION_LIMIT", "素材已保存；自动动作解析支持180秒内视频，请上传分段素材。", 422);
+      const frameOf = (value: Data): MaterialFrame => {
+        const visual = value.visualEvidence;
+        if (!record(visual) || typeof visual.dataBase64 !== "string") fail("MATERIAL_FRAME_INVALID", "解析画面不可用。", 422);
+        return {dataBase64:visual.dataBase64,timesSeconds:Array.isArray(value.sampleTimesSeconds)?value.sampleTimesSeconds.filter((x):x is number=>typeof x === "number"):[]};
+      };
+      const actions: MaterialAction[] = []; const summaries: string[] = []; const receipts: Data[] = [];
+      const count = video ? Math.ceil(duration / 20) : 1;
+      for (let index=0;index<count;index++) {
+        signal.throwIfAborted();
+        const start=index*20;
+        const window = video ? await this.#inspection(auth,{...request,startSeconds:start,durationSeconds:Math.min(20,duration-start)},asset,signal) : inspected;
+        const input={resourceId:id,sourceDigest:text(asset,"digest"),windowIndex:index,durationSeconds:duration};
+        const coarse=await this.analysisGateway.analyze(auth,{...input,phase:"actions",frames:[frameOf(window)],candidates:[]},signal);
+        const candidates=coarse.analysis.actions;
+        if (video && candidates.some(a=>a.startSeconds<start || a.endSeconds>Math.min(start+20,duration))) fail("MATERIAL_WINDOW_INVALID","解析动作超出实际采样窗口，未标记完成。",422);
+        if (candidates.length>8) fail("MATERIAL_ACTION_LIMIT", "该段动作数量超出解析预算，请上传更短片段；原素材已保存。",422);
+        let result=coarse;
+        if (video && candidates.length) {
+          const frames: MaterialFrame[]=[];
+          for(const action of candidates) for(const boundary of [action.startSeconds,action.endSeconds]) {
+            const at=Math.min(Math.max(0,boundary-1.5),Math.max(0,duration-0.5));
+            frames.push(frameOf(await this.#inspection(auth,{...request,startSeconds:at,durationSeconds:Math.min(3,duration-at)},asset,signal)));
+          }
+          result=await this.analysisGateway.analyze(auth,{...input,phase:"boundaries",frames,candidates},signal);
+        }
+        summaries.push(result.analysis.summary);actions.push(...result.analysis.actions);
+        receipts.push({windowIndex:index,model:result.model,provider:result.provider,actionsUsage:coarse.usage ?? null,boundariesUsage:result===coarse?null:result.usage ?? null});
+        await this.#append(auth,id,"campfire.analysis.running",{analysisStatus:"running",pipelineVersion:1,analysisProgress:Math.round((index+1)/count*100)},request);
+      }
+      actions.sort((a,b)=>a.startSeconds-b.startSeconds);
+      const data:Data={pipelineVersion:1,sourceDigest:asset.digest!,analysisStatus:"completed",analysisProgress:100,
+        durationSeconds:duration,width:inspected.width!,height:inspected.height!,analysis:{summary:summaries.join("\n"),actions:actions.map(a=>({...a})),
+        coverage:"连续20秒窗口，每窗六个实际解码帧；动作边界在附近三秒窗口再次采样精修，非逐帧识别"},receipts,analyzedAt:new Date().toISOString()};
+      await this.#append(auth,id,"campfire.analysis.completed",data,request);
+    }, signal);
+  }
+
   async #thumbnail(auth: ExecutionIdentity, request: ResourceControlRequest, asset: Data, signal: AbortSignal): Promise<Record<string, unknown>> {
     if (request.offset !== 0 || !(asset.mediaType === "video/mp4" || text(asset, "mediaType").startsWith("image/")))
       fail("CAMPFIRE_THUMBNAIL_INVALID", "只有图片和视频支持封面缩略图。");
@@ -191,7 +245,10 @@ export class CampfireService {
         const start = facts.find(item => item.eventType === "campfire.upload.started")?.payload;
         if (!start) fail("CAMPFIRE_UPLOAD_INVALID", "上传不存在。");
         const ready = facts.find(item => item.eventType === "campfire.media.ready");
-        if (ready) return { asset: { ...ready.payload, id }, reused: true };
+        if (ready) {
+          if (request.action === "resource_media_commit" && (ready.payload.mediaType === "video/mp4" || text(ready.payload,"mediaType").startsWith("image/"))) await this.repository.enqueueMaterial(auth,id,text(ready.payload,"digest"));
+          return { asset: await this.#manifest(auth,id), reused: true };
+        }
         const chunks = facts.filter(item => item.eventType === "campfire.upload.chunk").map(item => item.payload).sort((a, b) => Number(a.index) - Number(b.index));
         if (request.action === "resource_media_chunk") {
           const bytes = Buffer.from(request.contentBase64!, "base64");
@@ -213,7 +270,16 @@ export class CampfireService {
         const blob = await this.content.put(bytes);
         const asset: Data = { ...start, digest: blob.digest, createdAt: new Date().toISOString() };
         await this.#append(auth, id, "campfire.media.ready", asset, request);
-        return { asset: { ...asset, id } };
+        if(type === "video/mp4" || type.startsWith("image/")) await this.repository.enqueueMaterial(auth,id,blob.digest);
+        return { asset: await this.#manifest(auth,id) };
+      });
+    }
+    if (request.action === "resource_media_analyze") {
+      return this.repository.serializeBusiness(auth,idOf(request),async()=>{
+        const asset=await this.#manifest(auth,idOf(request));
+        if (!["shop_video","shop_image","reference_video"].includes(text(asset,"role"))) fail("MATERIAL_TYPE_INVALID","只有实拍图片、视频和参考视频支持动作解析。");
+        await this.repository.enqueueMaterial(auth,idOf(request),text(asset,"digest"));
+        return {asset:await this.#manifest(auth,idOf(request))};
       });
     }
     if (request.action === "resource_media_profile") {

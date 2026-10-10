@@ -88,6 +88,15 @@ CREATE INDEX IF NOT EXISTS harness_resource_events_scope
 CREATE INDEX IF NOT EXISTS harness_resource_events_run
  ON harness_resource_events(run_id,sequence) WHERE run_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS harness_material_analysis_jobs (
+ resource_id text PRIMARY KEY REFERENCES harness_resources(id), owner_key text NOT NULL,
+ identity jsonb NOT NULL, source_digest text NOT NULL, state text NOT NULL DEFAULT 'queued',
+ created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+ CHECK(state IN ('queued','running','completed','failed'))
+);
+CREATE INDEX IF NOT EXISTS harness_material_analysis_pending
+ ON harness_material_analysis_jobs(created_at) WHERE state IN ('queued','running');
+
 CREATE OR REPLACE FUNCTION harness_resource_events_immutable() RETURNS trigger AS $$
 BEGIN
  RAISE EXCEPTION 'harness_resource_events is append-only';
