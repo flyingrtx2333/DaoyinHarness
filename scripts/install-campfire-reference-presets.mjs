@@ -3,11 +3,12 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, realpath, stat, mkdir, chown, open, link, unlink } from 'node:fs/promises';
 import { isAbsolute, join, dirname } from 'node:path';
-const arg = name => process.argv[process.argv.indexOf(name) + 1];
+const arg = name => { const index = process.argv.indexOf(name); return index < 0 ? undefined : process.argv[index + 1]; };
 const source = arg('--source'), contentRoot = arg('--content-root');
 if (process.platform !== 'linux' || !source || !contentRoot || !isAbsolute(source) || !isAbsolute(contentRoot))
   throw new Error('Independent Linux server, --source and --content-root absolute directories required.');
 const sourceRoot = await realpath(source), root = await realpath(contentRoot), owner = await stat(root);
+if (!owner.isDirectory() || !(await stat(sourceRoot)).isDirectory()) throw new Error('Existing directories required.');
 const catalog = execFileSync('git', ['show', 'HEAD:packages/server-cloud/src/resources/campfire-presets.ts'], { encoding: 'utf8' });
 const presets = JSON.parse(catalog.slice(catalog.indexOf('['), catalog.lastIndexOf(']') + 1));
 const hash = data => createHash('sha256').update(data).digest('hex');
