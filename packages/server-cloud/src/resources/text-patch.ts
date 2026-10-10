@@ -23,14 +23,13 @@ export function parseTextPatch(patch: string): TextPatch[] {
   let oldRemaining = 0, newRemaining = 0;
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
-    if ((oldRemaining || newRemaining) && rawLines[index]!.endsWith("\r")) unsupported();
     if (line === "\\ No newline at end of file") { if (!current) conflict(); current.hunks.push(line); continue; }
     if (oldRemaining || newRemaining) {
       const marker = line[0];
       if (marker === " " || marker === "-") oldRemaining--;
       if (marker === " " || marker === "+") newRemaining--;
       if (![" ", "-", "+"].includes(marker ?? "") || oldRemaining < 0 || newRemaining < 0) conflict();
-      current!.hunks.push(line); continue;
+      current!.hunks.push(rawLines[index]!); continue;
     }
     if (line.startsWith("--- ")) {
       const oldPath = headerPath(line), next = lines[++index];
@@ -83,12 +82,15 @@ export function applyTextPatch(file: TextPatch, before: Buffer | null): Buffer |
       lastMarker = "";
       continue;
     }
-    const marker = line[0]!, content = line.slice(1);
+    const marker = line[0]!, rawContent = line.slice(1);
     if (marker !== "+") {
-      const original = source[cursor]; if (!original || original.content !== content) conflict();
+      const original = source[cursor];
+      const content = original?.ending === "\r\n" && rawContent.endsWith("\r") ? rawContent.slice(0, -1) : rawContent;
+      if (!original || original.content !== content) conflict();
       lastSourceEnding = original.ending; if (original.ending) insertionEnding = original.ending;
       if (marker === " ") output.push({ ...original }); cursor++;
-    } else output.push({ content, ending: insertionEnding });
+    } else output.push({ content: rawContent.endsWith("\r") ? rawContent.slice(0, -1) : rawContent,
+      ending: rawContent.endsWith("\r") ? "\r\n" : insertionEnding });
     lastMarker = marker;
   }
   for (let index = cursor; index < source.length; index++) output.push(source[index]!);
