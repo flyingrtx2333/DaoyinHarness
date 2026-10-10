@@ -27,6 +27,9 @@ const scenarios = [
   { name: 'stale-version-recovery', calls: 12, files: { 'settings.json': '{"quantity":2,"note":"initial"}\n' },
     message: '验证当前文件工具如何保护协作修改：先用 file_read 读取 settings.json；再用一次 process_run 在真实文件中把 note 改为 collaborator，保留 quantity=2。接着不重读，尝试用 file_patch 将 quantity 从 2 改为 3。预期旧版本保护拒绝该操作；若拒绝，重新读取当前文件，再用 file_patch 修改 quantity 为 3，保留 collaborator。最后读取文件并如实说明实际拒绝和恢复结果。不做外部操作。',
     expected: { 'settings.json': { quantity: 3, note: 'collaborator' } } },
+  { name: 'byte-preserving-edits', calls: 12, files: { 'mixed.txt': 'a\r\nb\nc\n', 'end.txt': 'a\nb', 'binary.bin': { contentBase64: 'AAE=' }, 'large.txt': { contentBase64: Buffer.from('HEAD\n' + 'x'.repeat(1_020_000)).toString('base64') } },
+    message: '先用 file_read 读取 mixed.txt、end.txt、binary.bin 和 large.txt。用一次 file_patch 的统一差异补丁修改两个文本：mixed.txt 第二行 b 改为 B，不改变其他字节；end.txt 用无上下文 hunk 只删除第二行 b（它没有末尾换行），保留第一行原有换行。然后用 file_write 的 contentBase64=AAEC 将 binary.bin 改为三个字节 00 01 02。large.txt 是超过文本读取预算的文件，已知开头独有 HEAD；依据它的真实摘要回执用 file_patch 精确将 HEAD 改为 DONE，保留其余字节。不得用进程或整文件重写绕过文本补丁；核对真实回执和当前文件。',
+    expected: { 'mixed.txt': 'a\r\nB\nc\n', 'end.txt': 'a\n', 'binary.bin': { contentBase64: 'AAEC' }, 'large.txt': 'DONE\n' + 'x'.repeat(1_020_000) }, modes: { 'mixed.txt': 0o664, 'end.txt': 0o775 } },
   { name: 'unified-multi-file-edit', calls: 12, files: { 'first.txt': 'environment=DEV\nowner=one\n', 'second.txt': 'environment=DEV\nowner=two\n' },
     message: '先读取 first.txt 和 second.txt，然后用一次 file_patch 的统一差异补丁（patch 参数）将两个文件的 environment=DEV 改成 environment=TEST，保留各自 owner。不要用进程或整文件重写绕过文件工具。查看实际回执的两个修改路径和差异，再读取结果确认。',
     expected: { 'first.txt': 'environment=TEST\nowner=one\n', 'second.txt': 'environment=TEST\nowner=two\n' } },
@@ -48,7 +51,8 @@ try {
     const control = (action, input = {}) => request('/resources/control', { action, sessionId, requestId: randomUUID(),
       ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}), ...input }, { timeoutMs: 120_000 });
     item.workspaceId = (await control('workspace_create', { title: scenario.name, source: { kind: 'empty' }, runtimeId: 'python313' })).workspace.id;
-    for (const [path, content] of Object.entries(scenario.files)) await control('file_write', { path, content });
+    for (const [path, content] of Object.entries(scenario.files)) await control('file_write', { path, ...(typeof content === 'string' ? { content } : content) });
+    if (scenario.modes) await control('process_run', { executable: 'python', args: ['-c', 'import os; ' + Object.entries(scenario.modes).map(([path, mode]) => `os.chmod(${JSON.stringify(path)}, ${mode})`).join('; ')], cwd: '.', timeoutMs: 30_000 });
     const requestId = randomUUID(); item.requestId = requestId; await save();
     const accepted = await request(`/sessions/${sessionId}/runs`, { requestId,
       message: `只操作当前挂载的工作区 ${item.workspaceId}。${scenario.message}不要委派子任务、写记忆或操作工作区之外的业务。` });
@@ -73,10 +77,20 @@ try {
     item.sharedModelCalls = item.events.filter(event => ['model.requested', 'capability.model.requested'].includes(event.type)).length;
     item.checks = { terminalCompleted: item.run.status === 'completed', withinBudget: item.sharedModelCalls <= scenario.calls,
       persistedContent: Object.entries(scenario.expected).every(([path, value]) => typeof value === 'string'
-        ? item.actualFiles[path].content === value : Object.keys(JSON.parse(item.actualFiles[path].content)).length === Object.keys(value).length && Object.entries(value).every(([key, expected]) => JSON.parse(item.actualFiles[path].content)[key] === expected)),
+        ? item.actualFiles[path].digest === 'sha256:' + createHash('sha256').update(value).digest('hex') : value.contentBase64
+        ? item.actualFiles[path].digest === 'sha256:' + createHash('sha256').update(Buffer.from(value.contentBase64, 'base64')).digest('hex') : Object.keys(JSON.parse(item.actualFiles[path].content)).length === Object.keys(value).length && Object.entries(value).every(([key, expected]) => JSON.parse(item.actualFiles[path].content)[key] === expected)),
       actualMutationEvidence: patches.some(event => event.payload.evidence.result.mutation?.changed === true),
       readVersions: completed.filter(event => event.payload.toolName === 'file_read').every(event => /^sha256:[a-f0-9]{64}$/u.test(event.payload.evidence.result.digest)),
     };
+    if (scenario.modes) {
+      item.actualModes = {};
+      for (const path of Object.keys(scenario.modes)) item.actualModes[path] = (await control('file_stat', { path })).mode;
+      item.checks.modesPreserved = Object.entries(scenario.modes).every(([path, mode]) => item.actualModes[path] === mode);
+      item.checks.largeFileObserved = completed.some(event => event.payload.toolName === 'file_read' && event.payload.evidence.result.reason === 'text-budget-exceeded' && event.payload.evidence.result.contentAvailable === false);
+      item.checks.binaryObserved = completed.some(event => event.payload.toolName === 'file_read' && event.payload.evidence.result.binary === true && event.payload.evidence.result.contentAvailable === false);
+      item.checks.binaryWritten = completed.some(event => event.payload.toolName === 'file_write' && event.payload.evidence.result.mutation?.changed && event.payload.evidence.result.path === 'binary.bin');
+      item.checks.unifiedTextChanges = patches.some(event => event.payload.evidence.result.mutation?.changes?.filter(change => change.changed).length === 2);
+    }
     if (scenario.name === 'edit-and-idempotence') {
       item.checks.noOpExplicit = patches.some(event => event.payload.evidence.result.mutation?.changed === false && !event.payload.evidence.verificationHint);
       item.checks.amountExecuted = completed.some(event => event.payload.toolName === 'process_run' && event.payload.evidence.result.exitCode === 0 && /\b21\b/u.test(event.payload.evidence.result.stdout ?? ''));

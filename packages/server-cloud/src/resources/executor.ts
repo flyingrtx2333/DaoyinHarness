@@ -413,13 +413,15 @@ async function importImage(request: ExecutorProcessRequest): Promise<Record<stri
   } finally { await rm(archive, { force: true }); }
 }
 
-async function atomicTextWrite(target: string, data: Buffer, existing: boolean): Promise<void> {
+async function atomicFileWrite(target: string, data: Buffer, existing: boolean): Promise<void> {
   const info = existing ? await stat(target) : undefined;
   await mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
   const temporary = `${target}.${randomBytes(6).toString("hex")}.tmp`;
   try {
     await writeFile(temporary, data, { flag: "wx", mode: info ? info.mode & 0o777 : 0o644 });
-    await chown(temporary, info?.uid ?? 1000, info?.gid ?? 1000); await rename(temporary, target);
+    await chown(temporary, info?.uid ?? 1000, info?.gid ?? 1000);
+    if (info) await chmod(temporary, info.mode & 0o777);
+    await rename(temporary, target);
   } finally { await rm(temporary, { force: true }); }
 }
 
@@ -436,10 +438,14 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
   }
   if (operation === "read" || operation === "read_binary") {
     const target = await safePath(workspaceId, request.path!); const maximum = Math.min(request.maximumBytes ?? 1_000_000, operation === "read_binary" ? 128 * 1024 * 1024 : 1_000_000);
-    const info = await stat(target); if (!info.isFile() || info.size > maximum) throw new ResourceError("FILE_READ_LIMIT", "File exceeds the read budget.", 413);
+    const info = await stat(target);
+    if (!info.isFile() || info.size > (operation === "read_binary" ? maximum : 16 * 1024 * 1024)) throw new ResourceError("FILE_READ_LIMIT", "File exceeds the supported read size.", 413);
     const data = await readFile(target);
     if (operation === "read_binary") return { contentBase64: data.toString("base64"), size: data.length };
-    if (data.includes(0)) throw new ResourceError("FILE_BINARY", "Binary file must be read through an artifact reference.", 422);
+    const binary = data.includes(0) || !Buffer.from(data.toString("utf8")).equals(data);
+    if (binary || data.length > maximum)
+      return { path: request.path, digest: fileDigest(data), size: data.length, binary, contentAvailable: false,
+        reason: binary ? "binary" : "text-budget-exceeded" };
     const lines = data.toString("utf8").split(/\r?\n/u); const start = Math.max(1, request.startLine ?? 1); const end = Math.min(lines.length, request.endLine ?? lines.length);
     return { path: request.path, digest: fileDigest(data), startLine: start, endLine: end, totalLines: lines.length, content: lines.slice(start - 1, end).join("\n") };
   }
@@ -449,8 +455,7 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
     const before = await fileBaseline(target); assertFileVersion(before, request.expectedDigest);
     const mutation = fileMutation([fileChange(request.path!, before, data)]);
     if (!mutation.changed) return { mutation, path: request.path, size: data.length, digest: fileDigest(data) };
-    await mkdir(path.dirname(target), { recursive: true, mode: 0o755 }); const temporary = `${target}.${randomBytes(6).toString("hex")}.tmp`;
-    await writeFile(temporary, data, { flag: "wx", mode: 0o644 }); await chown(temporary, 1000, 1000); await rename(temporary, target);
+    await atomicFileWrite(target, data, before !== null);
     return { mutation, path: request.path, size: data.length, digest: fileDigest(data) };
   }
   if (operation === "patch") {
@@ -472,7 +477,7 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
         for (const plan of plans) {
           if (!plan.change.changed) continue;
           if (plan.after === null) { await unlink(plan.target); continue; }
-          await atomicTextWrite(plan.target, plan.after, plan.before !== null);
+          await atomicFileWrite(plan.target, plan.after, plan.before !== null);
         }
       } catch {
         throw new ResourceError("PATCH_WRITE_FAILED", "Patch publication failed; some files may have changed. Inspect actual files before recovery; do not replay automatically.", 503);
@@ -483,11 +488,13 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
     assertFileVersion(before, request.expectedDigest);
     if (before === null || before.includes(0)) throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Exact replacement requires an existing text file.", 409);
     const text = before.toString("utf8"); const expected = request.expected ?? "";
+    if (!Buffer.from(text).equals(before)) throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Exact replacement requires valid UTF-8 text.", 409);
     if (!expected.length) throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Expected text must not be empty.", 409);
     const first = text.indexOf(expected); if (first < 0 || text.indexOf(expected, first + expected.length) >= 0) throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Expected text is missing or ambiguous.", 409);
     const after = Buffer.from(text.slice(0, first) + (request.replacement ?? "") + text.slice(first + expected.length));
+    if (after.length > 16 * 1024 * 1024) throw new ResourceError("FILE_EDIT_LIMIT", "Patched file exceeds 16 MiB.", 413);
     const mutation = fileMutation([fileChange(request.path!, before, after)]);
-    if (mutation.changed) await atomicTextWrite(target, after, true);
+    if (mutation.changed) await atomicFileWrite(target, after, true);
     return { mutation, path: request.path, digest: fileDigest(after) };
   }
   if (operation === "mkdir") { const target = await safePath(workspaceId, request.path!, true); await mkdir(target, { recursive: true, mode: 0o755 }); await chown(target, 1000, 1000); return { path: request.path }; }
