@@ -10,6 +10,7 @@ import { assertRuntimeSpec } from "./runtime-policy.js";
 import { ensureWorkspaceEgress, isolateExistingContainer } from "./workspace-network.js";
 import type { ExecutorProcessRequest, ResolvedSecret } from "./contracts.js";
 import { assertFileVersion, fileBaseline, fileChange, fileDigest, fileMutation } from "./file-mutation.js";
+import { applyTextPatch, parseTextPatch } from "./text-patch.js";
 
 const ROOT = process.env.HARNESS_WORKSPACE_ROOT ?? "/var/lib/daoyin-resources/workspaces";
 const CONTENT_ROOT = process.env.HARNESS_CONTENT_STORE_ROOT ?? "/var/lib/daoyin-resources/content";
@@ -412,6 +413,16 @@ async function importImage(request: ExecutorProcessRequest): Promise<Record<stri
   } finally { await rm(archive, { force: true }); }
 }
 
+async function atomicTextWrite(target: string, data: Buffer, existing: boolean): Promise<void> {
+  const info = existing ? await stat(target) : undefined;
+  await mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
+  const temporary = `${target}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    await writeFile(temporary, data, { flag: "wx", mode: info ? info.mode & 0o777 : 0o644 });
+    await chown(temporary, info?.uid ?? 1000, info?.gid ?? 1000); await rename(temporary, target);
+  } finally { await rm(temporary, { force: true }); }
+}
+
 async function fileOperation(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
   const workspaceId = request.workspaceId!; const operation = request.operation ?? "";
   if (operation === "list") {
@@ -444,44 +455,29 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
   }
   if (operation === "patch") {
     if (request.patch !== undefined) {
-      const spec = await loadRuntime(workspaceId);
-      const listing = await foreground(workspaceId, spec, "git", ["apply", "--numstat", "-z", "-"], ".", request.patch, 120_000, undefined, request.runId);
-      if (listing.exitCode !== 0) throw new ResourceError("PATCH_CONFLICT", "Patch paths could not be inspected; use a smaller patch or exact replacement.", 409);
-      const paths = new Set<string>();
-      for (const entry of listing.stdout.split("\0").filter(Boolean)) {
-        const matched = /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/su.exec(entry);
-        if (!matched) throw new ResourceError("PATCH_CONFLICT", "Patch path format is unsupported; use exact replacement.", 409);
-        paths.add(matched[1]!);
-      }
-      // A rename/copy can also touch a source not named in numstat.
-      for (const line of request.patch.split("\n")) {
-        if (!/^(?:rename|copy) (?:from|to) /u.test(line)) continue;
-        const encoded = line.replace(/^(?:rename|copy) (?:from|to) /u, "");
-        let value: unknown = encoded;
-        if (encoded.startsWith('"')) {
-          try { value = JSON.parse(encoded) as unknown; } catch { throw new ResourceError("PATCH_CONFLICT", "Quoted patch path is unsupported; use exact replacement.", 409); }
-        }
-        if (typeof value !== "string") throw new ResourceError("PATCH_CONFLICT", "Patch path is invalid.", 409);
-        paths.add(value);
-      }
-      if (!paths.size || paths.size > 128) throw new ResourceError("PATCH_CONFLICT", "Patch must address 1–128 files.", 409);
-      const baselines = new Map<string, { target: string; before: Buffer | null }>();
-      let baselineBytes = 0;
-      for (const item of paths) {
-        const target = await safePath(workspaceId, item, true); const before = await fileBaseline(target);
+      const plans = []; let baselineBytes = 0;
+      for (const item of parseTextPatch(request.patch)) {
+        const target = await safePath(workspaceId, item.path, true); const before = await fileBaseline(target);
         baselineBytes += before?.length ?? 0;
-        if (baselineBytes > 32 * 1024 * 1024 || (before?.length ?? 0) + Buffer.byteLength(request.patch) > 16 * 1024 * 1024) {
-          throw new ResourceError("FILE_EDIT_LIMIT", "Patch observation exceeds its bounded file budget; use a smaller edit.", 413);
-        }
+        if (baselineBytes > 32 * 1024 * 1024) throw new ResourceError("FILE_EDIT_LIMIT", "Patch baselines exceed 32 MiB; use a smaller edit.", 413);
         if (request.expectedDigests !== undefined) assertFileVersion(before,
-          Object.hasOwn(request.expectedDigests, item) ? request.expectedDigests[item] : null);
-        baselines.set(item, { target, before });
+          Object.hasOwn(request.expectedDigests, item.path) ? request.expectedDigests[item.path] : null);
+        const after = applyTextPatch(item, before);
+        plans.push({ target, before, after, change: fileChange(item.path, before, after) });
       }
-      const result = await foreground(workspaceId, spec, "git", ["apply", "--whitespace=nowarn", "-"], ".", request.patch, 120_000, undefined, request.runId);
-      if (result.exitCode !== 0) throw new ResourceError("PATCH_CONFLICT", `Patch did not apply: ${result.stderr.slice(-2000)}`, 409);
-      const changes = [];
-      for (const [item, baseline] of baselines) changes.push(fileChange(item, baseline.before, await fileBaseline(baseline.target)));
-      return { mutation: fileMutation(changes), ...result };
+      // Validate every file before changing any. The existing queue and pause
+      // cover publication; each individual text write is atomic.
+      const mutation = fileMutation(plans.map(plan => plan.change));
+      try {
+        for (const plan of plans) {
+          if (!plan.change.changed) continue;
+          if (plan.after === null) { await unlink(plan.target); continue; }
+          await atomicTextWrite(plan.target, plan.after, plan.before !== null);
+        }
+      } catch {
+        throw new ResourceError("PATCH_WRITE_FAILED", "Patch publication failed; some files may have changed. Inspect actual files before recovery; do not replay automatically.", 503);
+      }
+      return { mutation };
     }
     const target = await safePath(workspaceId, request.path!); const before = await fileBaseline(target);
     assertFileVersion(before, request.expectedDigest);
@@ -491,11 +487,7 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
     const first = text.indexOf(expected); if (first < 0 || text.indexOf(expected, first + expected.length) >= 0) throw new ResourceError("PATCH_CONTEXT_CONFLICT", "Expected text is missing or ambiguous.", 409);
     const after = Buffer.from(text.slice(0, first) + (request.replacement ?? "") + text.slice(first + expected.length));
     const mutation = fileMutation([fileChange(request.path!, before, after)]);
-    if (mutation.changed) {
-      const info = await stat(target); const temporary = `${target}.${randomBytes(6).toString("hex")}.tmp`;
-      try { await writeFile(temporary, after, { flag: "wx", mode: info.mode & 0o777 }); await chown(temporary, info.uid, info.gid); await rename(temporary, target); }
-      finally { await rm(temporary, { force: true }); }
-    }
+    if (mutation.changed) await atomicTextWrite(target, after, true);
     return { mutation, path: request.path, digest: fileDigest(after) };
   }
   if (operation === "mkdir") { const target = await safePath(workspaceId, request.path!, true); await mkdir(target, { recursive: true, mode: 0o755 }); await chown(target, 1000, 1000); return { path: request.path }; }
