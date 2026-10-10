@@ -117,12 +117,38 @@ export function campfireCaptions(segments: CampfireSegment[], width: number, hei
     const chars = [...title.text].map(char => /[\p{Cc}{}\\<>]/u.test(char) ? " " : char).join("").trim();
     if (!chars) continue;
     const letters = [...chars];
-    const limit = portrait ? 8 : 14;
+    const limit = portrait ? 12 : 18;
     const lines: string[] = [];
     for (let index = 0; index < letters.length; index += limit) lines.push(letters.slice(index, index + limit).join(""));
+    // Reserve side room for ornaments and rotation, including long and multiline titles.
+    const scale = Math.min(width, height) / 1080;
+    const longest = Math.max(...lines.map(line => [...line].length));
+    const size = Math.round(Math.min(artSize, width * 0.66 / longest));
+    const x = Math.round(width / 2);
     const y = Math.round(height * (title.position === "top" ? 0.22 : 0.45));
-    const tags = `{\\an5\\pos(${Math.round(width / 2)},${y})\\fad(180,180)\\fscx94\\fscy94\\t(0,180,\\fscx100\\fscy100)}`;
-    cues.push(`Dialogue: 2,${timestamp(title.startSeconds)},${timestamp(title.startSeconds + title.durationSeconds)},Art_${title.style},,0,0,0,,${tags}${lines.join("\\N")}`);
+    const fill = title.style === "fresh" ? "&H00FFFFFF&" : title.style === "gold" ? "&H0038E8FF&" : "&H0048AEFF&";
+    const rim = title.style === "fresh" ? "&H00B85E20&" : "&H002875C8&";
+    const start = timestamp(title.startSeconds), end = timestamp(title.startSeconds + title.durationSeconds);
+    const layers = [
+      { layer: 2, dx: 7, dy: 12, color: "&H00202532&", border: "&H00202532&", outline: 15 },
+      { layer: 3, dx: 3, dy: 6, color: rim, border: rim, outline: 12 },
+      { layer: 4, dx: 0, dy: 0, color: "&H00FFFFFF&", border: "&H00FFFFFF&", outline: 10 },
+      { layer: 5, dx: 0, dy: 0, color: fill, border: "&H00202532&", outline: 4 },
+    ];
+    for (const layer of layers) {
+      const px = Math.round(x + layer.dx * scale), py = Math.round(y + layer.dy * scale);
+      const tags = `{\\an5\\fs${size}\\b1\\move(${px},${Math.round(py + 28 * scale)},${px},${py},0,170)\\org(${x},${y})\\frz-4\\fax0.08\\1c${layer.color}\\3c${layer.border}\\bord${layer.outline * scale}\\shad0\\fscx58\\fscy58\\t(0,150,\\fscx110\\fscy110)\\t(150,260,\\fscx100\\fscy100)\\fad(70,160)}`;
+      cues.push(`Dialogue: ${layer.layer},${start},${end},Art_${title.style},,0,0,0,,${tags}${lines.join("\\N")}`);
+    }
+    const halfWidth = longest * size / 2;
+    for (const [side, offsetY, rotation, ornamentSize] of [[-1, -30, 12, 1], [1, 30, -12, 0.8]] as const) {
+      const px = Math.round(x + side * (halfWidth + 48 * scale));
+      const py = Math.round(y + offsetY * scale);
+      // Vector ornaments render without a Unicode star glyph or an external image dependency.
+      const growth = Math.round(100 * scale * ornamentSize);
+      const tags = `{\\an7\\pos(${px},${py})\\p1\\frz${rotation}\\1c${fill}\\3c&H00FFFFFF&\\bord${3 * scale}\\shad0\\fscx0\\fscy0\\t(90,240,\\fscx${growth}\\fscy${growth})\\fad(90,160)}`;
+      cues.push(`Dialogue: 6,${start},${end},Art_${title.style},,0,0,0,,${tags}m 0 -22 l 7 -7 22 0 7 7 0 22 -7 7 -22 0 -7 -7`);
+    }
   }
   return header + cues.join("\n") + "\n";
 }
