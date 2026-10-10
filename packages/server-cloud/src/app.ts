@@ -118,7 +118,8 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
   const businessTools = profile.tools.filter((binding) => !isMemoryToolName(binding.definition.name) &&
     !isEpisodicMemoryToolName(binding.definition.name) && !ORCHESTRATION_TOOLS.has(binding.definition.name));
   if (!/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.id) || !/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.version) ||
-      !profile.instructions.trim() || profile.instructions.length > 10_000 || businessTools.length > 2_000 || profile.tools.length > 2_000) {
+      !profile.instructions.trim() || profile.instructions.length > 10_000 || businessTools.length > 2_000 || profile.tools.length > 2_000 ||
+      (profile.instructionsForTools !== undefined && typeof profile.instructionsForTools !== "function")) {
     throw new CloudError(503, "PROFILE_INVALID", "应用配置不可用。");
   }
   const names = new Set<string>();
@@ -137,7 +138,8 @@ function checkedProfile(profile: CloudProfile): CloudProfile {
     return Object.freeze({ ...binding, requiredPermissions: Object.freeze([...binding.requiredPermissions]),
       definition: Object.freeze({ ...definition, inputSchema: structuredClone(definition.inputSchema) }) });
   });
-  return Object.freeze({ id: profile.id, version: profile.version, instructions: profile.instructions, tools: Object.freeze(tools) });
+  return Object.freeze({ id: profile.id, version: profile.version, instructions: profile.instructions,
+    ...(profile.instructionsForTools === undefined ? {} : { instructionsForTools: profile.instructionsForTools }), tools: Object.freeze(tools) });
 }
 
 /** Creates the isolated API; does not bind a port, mount local tools, or choose a default identity. */
@@ -657,7 +659,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const childTools = new ToolRegistry(wrappedDefinitions.filter((definition) => definition.mutating === false &&
           !isMemoryToolName(definition.name) && !isEpisodicMemoryToolName(definition.name)), { authorize });
         const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
-          tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}`, signal: controller.signal,
+          tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructionsForTools?.(childTools.definitions().map(tool => tool.name)) ?? profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}`, signal: controller.signal,
           remainingModelCalls: () => maxModelCalls - modelCalls, remainingTimeMs, chargeTool, createModel: createMeteredModel, ensureActive });
         const tools = new ToolRegistry([...wrappedDefinitions,
           ...(capabilitySearchTool === undefined ? [] : [capabilitySearchTool]),
