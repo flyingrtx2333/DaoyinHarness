@@ -39,7 +39,8 @@ async function idle(connectionString,query){
   await idle(env('/etc/daoyin-resources/service.env').HARNESS_RESOURCES_DATABASE_URL,`SELECT
     (SELECT count(*)::integer FROM harness_workspaces WHERE state='creating') AS workspaces,
     (SELECT count(*)::integer FROM harness_process_sessions WHERE status IN ('starting','running')) AS processes,
-    (SELECT count(*)::integer FROM harness_deployments WHERE status IN ('queued','starting')) AS deployments`);
+    (SELECT count(*)::integer FROM harness_deployments WHERE status IN ('queued','starting')) AS deployments,
+    (SELECT count(*)::integer FROM harness_material_analysis_jobs WHERE state IN ('queued','running')) AS material_jobs`);
 }catch{process.exitCode=1;}})();
 """
 
@@ -104,7 +105,7 @@ def idle():
     access.run([NODE, "-e", PG_CHECK])
     if access.run(["docker", "ps", "--filter", "label=daoyin.harness.resource=1", "-q"]):
         raise RuntimeError("Active workspace containers exist.")
-    for unit in [UNIT, "daoyin-resource-builder.service", "daoyin-resource-deployer.service"]:
+    for unit in [UNIT, CONTROL, "daoyin-resource-builder.service", "daoyin-resource-deployer.service"]:
         group = access.run(["systemctl", "show", unit, "-p", "ControlGroup", "--value"])
         if not re.fullmatch(r"/system.slice/[A-Za-z0-9_.-]+", group):
             raise RuntimeError("Resource worker cgroup cannot be verified.")
@@ -139,7 +140,7 @@ def main():
     os.chdir(ROOT)
     require_checkout(args.apply)
     release, manifest = require_release(args.apply)
-    if DROPIN.is_symlink():
+    if DROPIN.is_symlink() or DROPIN.parent.resolve() != DROPIN.parent:
         raise RuntimeError("Executor release drop-in must not be a symlink.")
     previous_dropin = DROPIN.read_bytes() if DROPIN.exists() else None
     previous_mode = DROPIN.stat().st_mode & 0o777 if previous_dropin is not None else 0o600
