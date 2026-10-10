@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { chmod, chown, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertResourceId, assertWorkspacePath, type RuntimeSpec, type WorkspaceEntry } from "@daoyin/harness-contracts";
@@ -581,10 +582,16 @@ async function processOperation(request: ExecutorProcessRequest): Promise<Record
       return { processId, output: "", cursor: request.cursor ?? 0, truncated: false, state: "timed_out", exitCode: null };
     }
     const result = await docker(["logs", session.name], 20_000, undefined, 16_000_000);
+    if (result.exitCode !== 0 || result.timedOut)
+      throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Process output could not be observed; the process was not restarted.", 503);
     const inspect = await docker(["inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", session.name], 10_000);
+    if (inspect.exitCode !== 0 || inspect.timedOut)
+      throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Process state could not be observed; the process was not restarted.", 503);
     const all = Buffer.from(result.stdout + result.stderr); const requested = Math.max(0, request.cursor ?? 0);
     const start = Math.min(requested, all.byteLength); const maximum = 1_000_000; const end = Math.min(all.byteLength, start + maximum);
-    const [state = "unknown", exit = ""] = inspect.stdout.trim().split(/\s+/u);
+    const [state = "", exit = ""] = inspect.stdout.trim().split(/\s+/u);
+    if (!["created", "running", "paused", "restarting", "removing", "exited", "dead"].includes(state) || !/^\d+$/u.test(exit))
+      throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Process state response is incomplete; no terminal result was established.", 503);
     const output = await redactSecretOutput(session.name, all.subarray(start, end).toString("utf8"));
     if (["exited", "dead"].includes(state)) await cleanupSecrets(session.name);
     return { processId, output, cursor: end,
@@ -644,7 +651,29 @@ async function dispatch(request: ExecutorProcessRequest): Promise<Record<string,
   throw new ResourceError("EXECUTOR_ACTION_DENIED", "Executor operation is not allowed.", 403);
 }
 
+async function readProcessWithWait(request: ExecutorProcessRequest, waitMs: number): Promise<Record<string, unknown>> {
+  const started = performance.now();
+  const deadline = started + waitMs;
+  while (true) {
+    // Each observation joins the normal workspace queue; sleeping between
+    // observations must not hold it and block edits or process_stop.
+    const result = await dispatchSerialized({ ...request, waitMs: 0 });
+    const remaining = deadline - performance.now();
+    if ((typeof result.output === "string" && result.output.length > 0) ||
+        !["running", "created", "restarting", "paused"].includes(String(result.state)) || remaining <= 0) {
+      return { ...result, observation: { waitMs, elapsedMs: Math.round(performance.now() - started) } };
+    }
+    await delay(Math.min(500, remaining));
+  }
+}
+
 function dispatchSerialized(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
+  if (request.action === "process" && request.operation === "read") {
+    const waitMs = request.waitMs ?? 0;
+    if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 30_000)
+      throw new ResourceError("PROCESS_WAIT_INVALID", "Process observation wait must be an integer between 0 and 30000 milliseconds.");
+    if (waitMs > 0) return readProcessWithWait(request, waitMs);
+  }
   if (request.action === "readiness" || !request.workspaceId) return dispatch(request);
   const previous = workspaceQueues.get(request.workspaceId) ?? Promise.resolve();
   const pending = previous.then(() => dispatch(request));

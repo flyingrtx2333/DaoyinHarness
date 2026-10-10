@@ -45,10 +45,10 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   workspace_restore: { description: "Restore an attached workspace to one of its immutable snapshots.", mutating: true, inputSchema: object({ workspaceId, snapshotId: { type: "string", pattern: "^snp_[a-f0-9]{24}$" } }, ["workspaceId", "snapshotId"]) },
   file_list: { description: "List files and directories inside an attached workspace. Omit path for the workspace root; never use / or . as path.", mutating: false, inputSchema: object({ workspaceId, path, glob: { type: "string", maxLength: 256 } }, ["workspaceId"]) },
   file_stat: { description: "Read file, directory or safe symlink metadata.", mutating: false, inputSchema: object({ workspaceId, path }, ["workspaceId", "path"]) },
-  file_read: { description: "Read a bounded text range with its actual file digest. Binary files and files over the text budget return size and digest without text; use artifact_create for binary content. Read an existing file before overwriting or patching it.", mutating: false, inputSchema: object({ workspaceId, path, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, maximumBytes: { type: "integer", minimum: 1, maximum: 1000000 } }, ["workspaceId", "path"]) },
-  file_search: { description: "Search workspace paths or text using literal, regular expression or glob matching.", mutating: false, inputSchema: object({ workspaceId, query: { type: "string", minLength: 1, maxLength: 4000 }, searchMode: { type: "string", enum: ["literal", "regex", "glob"] }, path, glob: { type: "string", maxLength: 256 } }, ["workspaceId", "query", "searchMode"]) },
+  file_read: { description: "Read a bounded text range with its actual file digest. Locate symbols with file_search first, then read the relevant implementation and callers. Reuse available same-digest read receipts; overlapping reads report prior coverage without blocking a fresh read. Binary files and files over the text budget return size and digest without text; use artifact_create for binary content. Read an existing file before overwriting or patching it.", mutating: false, inputSchema: object({ workspaceId, path, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 }, maximumBytes: { type: "integer", minimum: 1, maximum: 1000000 } }, ["workspaceId", "path"]) },
+  file_search: { description: "Search workspace paths or text using literal, regular expression or glob matching. Search named symbols or error text within a known path before scanning unrelated directories. Use regex for alternatives such as name1|name2; literal searches treat punctuation literally. Batch independent searches when their inputs are already known.", mutating: false, inputSchema: object({ workspaceId, query: { type: "string", minLength: 1, maxLength: 4000 }, searchMode: { type: "string", enum: ["literal", "regex", "glob"] }, path, glob: { type: "string", maxLength: 256 } }, ["workspaceId", "query", "searchMode"]) },
   file_write: { description: "Atomically create or replace a text or base64-encoded binary file. Read existing content first; the execution layer rejects unread or stale overwrites. Returns actual changed/no-op and bounded change evidence.", mutating: true, inputSchema: object({ workspaceId, path, content: { type: "string", maxLength: 1000000 }, contentBase64: { type: "string", maxLength: 1400000 } }, ["workspaceId", "path"]) },
-  file_patch: { description: "Apply an exact replacement or strict unified text diff with a/path and b/path headers; no Git installation is needed. For renames use file_move; for binary content use file_write. Read each existing target first; reject stale versions, empty or ambiguous exact context. Returns actual changed/no-op and a bounded changed-region preview, not a correctness verdict.", mutating: true, inputSchema: object({ workspaceId, path, expected: { type: "string", maxLength: 1000000 }, replacement: { type: "string", maxLength: 1000000 }, patch: { type: "string", maxLength: 1000000 } }, ["workspaceId"]) },
+  file_patch: { description: "Apply an exact replacement or strict unified text diff with a/path and b/path headers; no Git installation is needed. A unified diff can combine related hunks and files into one call after reading all targets. For renames use file_move; for binary content use file_write. Read each existing target first; reject stale versions, empty or ambiguous exact context. Returns actual changed/no-op and a bounded changed-region preview, not a correctness verdict.", mutating: true, inputSchema: object({ workspaceId, path, expected: { type: "string", maxLength: 1000000 }, replacement: { type: "string", maxLength: 1000000 }, patch: { type: "string", maxLength: 1000000 } }, ["workspaceId"]) },
   file_mkdir: { description: "Create a directory inside an attached workspace.", mutating: true, inputSchema: object({ workspaceId, path }, ["workspaceId", "path"]) },
   file_move: { description: "Move a file or directory within one attached workspace.", mutating: true, inputSchema: object({ workspaceId, from: path, to: path }, ["workspaceId", "from", "to"]) },
   file_remove: { description: "Remove a workspace path. This never deletes snapshots or external resources.", mutating: true, inputSchema: object({ workspaceId, path }, ["workspaceId", "path"]) },
@@ -59,9 +59,9 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   git_checkout: { description: "Checkout an existing revision in an attached workspace without accessing the host repository.", mutating: true, inputSchema: object({ workspaceId, revision: { type: "string", minLength: 1, maxLength: 200 } }, ["workspaceId", "revision"]) },
   git_commit: { description: "Create a local workspace commit. It does not push to a remote.", mutating: true, inputSchema: object({ workspaceId, message: { type: "string", minLength: 1, maxLength: 500 } }, ["workspaceId", "message"]) },
   git_export_patch: { description: "Export the current Git changes as an immutable patch artifact.", mutating: true, inputSchema: object({ workspaceId }, ["workspaceId"]) },
-  process_run: { description: "Run a bounded foreground executable with an argument array inside the workspace gVisor sandbox. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, stdin: { type: "string", maxLength: 1000000 }, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args"]) },
-  process_start: { description: "Start a background or PTY process inside the workspace gVisor sandbox. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, processMode, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args", "processMode"]) },
-  process_read: { description: "Read incremental output from a workspace process by cursor.", mutating: false, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, cursor: { type: "integer", minimum: 0 } }, ["workspaceId", "processId"]) },
+  process_run: { description: "Run a bounded foreground executable with an argument array inside the workspace gVisor sandbox. Use process_start and bounded process_read waiting for lengthy installs or checks, so one foreground command does not consume the entire turn. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, stdin: { type: "string", maxLength: 1000000 }, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args"]) },
+  process_start: { description: "Start a background or PTY process inside the workspace gVisor sandbox. Use process_read with returned processId, cursor and bounded waitMs to observe new output and eventual exit; starting a process does not prove completion. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, processMode, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args", "processMode"]) },
+  process_read: { description: "Read incremental output from a workspace process using its returned cursor to avoid repeated logs. Optional waitMs waits until new output, process exit or the bounded wait limit; default is no waiting. A running state is not evidence that the command completed.", mutating: false, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, cursor: { type: "integer", minimum: 0 }, waitMs: { type: "integer", minimum: 0, maximum: 30000 } }, ["workspaceId", "processId"]) },
   process_write: { description: "Write bounded stdin to a running PTY process.", mutating: true, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, stdin: { type: "string", maxLength: 1000000 } }, ["workspaceId", "processId", "stdin"]) },
   process_stop: { description: "Stop a running workspace process and its process group.", mutating: true, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, signal: { type: "string", enum: ["TERM", "KILL", "INT"] } }, ["workspaceId", "processId"]) },
   process_list: { description: "List recent processes in an attached workspace.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
@@ -73,7 +73,11 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   deployment_rollback: { description: "Roll back to a previous immutable deployment after an explicit current-turn request.", mutating: true, inputSchema: object({ deploymentId: { type: "string", pattern: "^dep_[a-f0-9]{24}$" } }, ["deploymentId"]) },
 };
 
-export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all cloud development and artifact tasks. A session may attach multiple resources; every file, Git and process call must name the intended workspaceId. Use IDs from the current attached-resource context or workspace_create; if unknown, first call resource_list and inspect attached, never invent an ID. File paths are workspace-relative, for example input.csv or src/app.py; omit path when listing or searching the workspace root, never use / or . as a file path. process cwd may be omitted or . for the workspace root. workspace_create always requires runtimeId: Node.js uses node22, Python uses python313, Go uses go125 and Rust uses rust190; choose node22 only when the user did not specify a language. Read before editing and use snapshots for durable checkpoints. Commands run only in the workspace gVisor sandbox and accept executable plus argument arrays, never host shell text. Each process_run or process_start creates a new container: the base image is read-only, /tmp is temporary, and /workspace including runtime-managed user dependencies and caches persists across commands. Public network access is available through the audited egress boundary; private, loopback, metadata and platform addresses remain forbidden. Never put credentials in files, arguments or messages. Git push, deployment, payment, external writes and destructive external actions require an explicit current-turn request. A command exit code, artifact digest, deployment health event or official evaluator is the evidence of completion; do not infer success from intent.`;
+export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all cloud development and artifact tasks. A session may attach multiple resources; every file, Git and process call must name the intended workspaceId. Use IDs from the current attached-resource context or workspace_create; if unknown, first call resource_list and inspect attached, never invent an ID. File paths are workspace-relative, for example input.csv or src/app.py; omit path when listing or searching the workspace root, never use / or . as a file path. process cwd may be omitted or . for the workspace root. workspace_create always requires runtimeId: Node.js uses node22, Python uses python313, Go uses go125 and Rust uses rust190; choose node22 only when the user did not specify a language. Read before editing and use snapshots for durable checkpoints. Commands run only in the workspace gVisor sandbox and accept executable plus argument arrays, never host shell text. Each process_run or process_start creates a new container: the base image is read-only, /tmp is temporary, and /workspace including runtime-managed user dependencies and caches persists across commands. Public network access is available through the audited egress boundary; private, loopback, metadata and platform addresses remain forbidden. Never put credentials in files, arguments or messages. Git push, deployment, payment, external writes and destructive external actions require an explicit current-turn request. A command exit code, artifact digest, deployment health event or official evaluator is the evidence of completion; do not infer success from intent.
+
+Work toward the requested outcome within the shared call and time budgets. Search named symbols or error text in relevant paths, then read bounded implementation, caller and verification ranges. Batch independent read-only observations whose inputs are already known. Reuse available same-digest observations rather than walking overlapping ranges one call at a time; omitted or truncated context is not available evidence, so retrieve only what is missing. Once evidence supports a concrete diagnosis, choose the smallest authorized change or check instead of continuing general exploration. Read-only tasks do not require a mutation. For related edits already understood, prefer one coherent unified patch over a separate model round for each hunk, and reserve capacity to inspect the diff and validate the result.
+
+For code changes, identify the existing callers and public data formats affected by the change. Preserve their compatibility unless the user requested a migration. Choose focused validation that covers the reported behavior and relevant existing behavior, rather than checking only the new path. File change receipts establish execution, not correctness. Follow the repository's declared runtime, dependency and verification configuration before installing packages; do not repeatedly improvise dependency versions or install the whole environment for one check. For lengthy commands use process_start and process_read with the returned cursor and bounded waitMs, observe actual exit and output, and keep time for the requested work and final validation. If a necessary environment condition cannot be established within the allowance, preserve the patch and report that concrete validation blocker.`;
 
 function owner(identity: ExecutionIdentity): { actor: string; space: string } {
   if (identity.space.kind === "public") throw new CloudError(403, "RESOURCE_ACCOUNT_REQUIRED", "Please sign in before using cloud resources.");
@@ -136,6 +140,7 @@ const RESOURCE_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   RESOURCE_NOT_ATTACHED: "目标资源未挂载到当前会话，未执行操作。请调用 resource_list 核对当前 attached 资源和真实 ID。",
   RESOURCE_NOT_FOUND: "当前账号无法使用该资源，未执行操作。请调用 resource_list 核对当前账号和会话可用的真实资源 ID。",
   PROCESS_TIMEOUT: "命令超过执行时限，本次未获得成功结果。安装或写入可能已留下部分状态；请先检查工作区和已有结果，确认原因或改变执行条件后再决定下一步，不要原样重复同一长时间命令。",
+  PROCESS_OBSERVATION_FAILED: "暂时无法确认原进程的输出或状态，未重新启动进程。保留 processId 和 cursor，通过只读观察核对原进程；不能把观察失败当作命令失败或重复安装。",
 };
 
 function invalidWorkspacePath(name: ResourceToolName, input: Record<string, unknown>): boolean {
@@ -173,11 +178,27 @@ const CAMPFIRE_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   resource_campfire_status: "查询制作状态",
 };
 
-export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, ensureActive: (identity: ExecutionIdentity, signal?: AbortSignal) => Promise<void>): CloudToolBinding[] {
+interface ReadRange { startLine: number; endLine: number }
+interface FileReadCoverage { digest: string; ranges: ReadRange[] }
+
+function mergedReadRanges(ranges: ReadRange[]): ReadRange[] {
+  const merged: ReadRange[] = [];
+  for (const range of [...ranges].sort((left, right) => left.startLine - right.startLine)) {
+    const previous = merged.at(-1);
+    if (previous !== undefined && range.startLine <= previous.endLine + 1) previous.endLine = Math.max(previous.endLine, range.endLine);
+    else merged.push({ ...range });
+  }
+  // Forget excess ranges rather than claiming that an unobserved gap was read.
+  return merged.slice(-8);
+}
+
+export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, ensureActive: (identity: ExecutionIdentity, signal?: AbortSignal) => Promise<void>,
+  executionBudget?: { remainingTimeMs: () => number; closeoutReserveMs: number }): CloudToolBinding[] {
   if (identity.space.kind === "public") return [];
   const blockedProcessWorkspaces = new Map<string, string>();
   // Run-local observations only. Hashes come from receipts, never model input.
   const observedFiles = new Map<string, Map<string, string | null>>();
+  const readCoverage = new Map<string, Map<string, FileReadCoverage>>();
   const deploymentMutationsEnabled = process.env.HARNESS_DEPLOYMENT_EXECUTOR_ENABLED === "1";
   return RESOURCE_TOOL_NAMES.filter(name => identity.allowedTools.includes(name) &&
     !CAMPFIRE_UI_ACTIONS.has(name) &&
@@ -203,6 +224,26 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
           const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : undefined;
           const blockedCode = startsProcess && workspaceId ? blockedProcessWorkspaces.get(workspaceId) : undefined;
           if (blockedCode) return { ok: false, code: blockedCode, message: NETWORK_FAILURE_MESSAGES[blockedCode]!, retryable: false };
+          let boundedProcessInput = input;
+          if (executionBudget !== undefined && (startsProcess || name === "process_read")) {
+            const remainingMs = executionBudget.remainingTimeMs();
+            if (!Number.isFinite(remainingMs) || remainingMs < 0 || !Number.isSafeInteger(executionBudget.closeoutReserveMs) || executionBudget.closeoutReserveMs < 0) {
+              throw new CloudError(500, "PROCESS_TIME_BUDGET_INVALID", "Process execution time budget is invalid.");
+            }
+            // Keep short checks available near the deadline; reserving the
+            // maximum model timeout unconditionally would deny useful work.
+            const reserveMs = Math.min(executionBudget.closeoutReserveMs, Math.floor(remainingMs / 3));
+            const availableMs = Math.floor(remainingMs - reserveMs);
+            if (startsProcess && availableMs < 100) return { ok: false, code: "PROCESS_BUDGET_INSUFFICIENT", retryable: false,
+              message: "剩余运行时间需要保留给结果核对和收尾，未启动新进程。复用已有结果，明确尚未验证部分。" };
+            if (name === "process_run" && typeof input.timeoutMs === "number" && input.timeoutMs > availableMs) {
+              return { ok: false, code: "PROCESS_BUDGET_INSUFFICIENT", retryable: false,
+                message: `前台命令要求的等待时间超过当前可用 ${availableMs} 毫秒，未启动。选择更短的必要检查，或用 process_start 启动一次长操作，再用 process_read 的 waitMs 有界等待原进程；不要重复安装。` };
+            }
+            if (startsProcess) boundedProcessInput = { ...input,
+              timeoutMs: Math.min(typeof input.timeoutMs === "number" ? input.timeoutMs : name === "process_run" ? 60_000 : availableMs, availableMs) };
+            else if (typeof input.waitMs === "number") boundedProcessInput = { ...input, waitMs: Math.min(input.waitMs, Math.max(0, availableMs)) };
+          }
           let result: Record<string, unknown>;
           try {
             // Output framing follows the current user's request, not a model guess
@@ -210,7 +251,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             const requestedFraming = run.userMessage.replace(/(?:不要|不用|不做|非)\s*(?:横屏|方屏|正方形|16[:：]9|1[:：]1)/gu, "");
             const aspectRatio = /1[:：]1|方屏|正方形/u.test(requestedFraming) ? "1:1"
               : /16[:：]9|横屏/u.test(requestedFraming) ? "16:9" : "9:16";
-            const executionInput = name === "resource_campfire_plan" ? { ...input, aspectRatio } : input;
+            const executionInput = name === "resource_campfire_plan" ? { ...input, aspectRatio } : boundedProcessInput;
             const observed = workspaceId ? observedFiles.get(workspaceId) : undefined;
             const versionGuard = name === "file_write" || (name === "file_patch" && typeof input.patch !== "string")
               ? { expectedDigest: typeof input.path === "string" ? observed?.get(input.path) ?? null : null }
@@ -242,10 +283,36 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
           }
           await ensureActive(identity, signal);
           if (workspaceId) {
-            if (["workspace_restore", "file_move", "file_remove", "git_checkout", "git_branch"].includes(name)) observedFiles.delete(workspaceId);
+            if (["workspace_restore", "file_move", "file_remove", "git_checkout", "git_branch"].includes(name)) {
+              observedFiles.delete(workspaceId);
+              readCoverage.delete(workspaceId);
+            }
             const observed = observedFiles.get(workspaceId) ?? new Map<string, string | null>();
             if (name === "file_read" && typeof result.path === "string" && typeof result.digest === "string" && /^sha256:[a-f0-9]{64}$/u.test(result.digest)) {
               observed.set(result.path, result.digest);
+              // Record actual complete text receipts, never requested ranges or
+              // metadata-only/binary/truncated responses. Every read still runs.
+              const { startLine, endLine } = result;
+              if (typeof result.content === "string" && result.truncated !== true &&
+                  typeof startLine === "number" && Number.isSafeInteger(startLine) && startLine >= 1 &&
+                  typeof endLine === "number" && Number.isSafeInteger(endLine) && endLine >= startLine) {
+                const filePath = result.path;
+                const digest = result.digest;
+                const files = readCoverage.get(workspaceId) ?? new Map<string, FileReadCoverage>();
+                const earlier = files.get(filePath);
+                const previousRanges = earlier?.digest === digest ? earlier.ranges : [];
+                const coveredByPrevious = previousRanges.some(range => range.startLine <= startLine && range.endLine >= endLine);
+                result = { ...result, readCoverage: { digest, previousRanges, coveredByPrevious,
+                  notice: coveredByPrevious
+                    ? "Earlier successful text receipts already cover this range at the same digest. Reuse their content when available; if current context omitted it, use this fresh result. Coverage is not correctness evidence."
+                    : "Coverage lists bounded earlier successful text receipts at this digest, not a content cache or proof of correctness. Reuse available observations and read only missing context." } };
+                files.set(filePath, { digest, ranges: mergedReadRanges([...previousRanges, { startLine, endLine }]) });
+                if (files.size > 64) {
+                  const oldestPath = files.keys().next().value;
+                  if (oldestPath !== undefined) files.delete(oldestPath);
+                }
+                readCoverage.set(workspaceId, files);
+              }
             }
             const mutation = result.mutation as { changes?: Array<{ path?: unknown; afterDigest?: unknown }> } | undefined;
             for (const change of mutation?.changes ?? []) {

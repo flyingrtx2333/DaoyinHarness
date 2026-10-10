@@ -1,0 +1,58 @@
+# ADR-0043: Bounded task progress and process observation
+
+- Date: 2026-10-10
+- Status: Implemented; real-model acceptance recorded separately.
+
+## Evidence
+
+Actual cloud runs retained complete relevant code while repeatedly reading
+overlapping ranges. Another run produced a useful patch, then spent its time on
+successive dependency installations. The model knew the shared call count but
+not the active runtime's remaining time. Existing compatibility constraints were
+also available but ignored. These facts do not establish a tool failure or prove
+that a prompt change alone can resolve semantic mistakes.
+
+## Decision
+
+Keep the shared request and tool limits. The host exposes an optional trusted
+remaining-time callback to parent and child Engines; the callback follows the
+existing active timer and permission pauses. The Engine reports that fact and
+reminds the model to allocate delivery, verification and closeout capacity once
+half its initial allowance remains. Tools stay available until the existing last
+reserved request. No write quota, language rule or correctness state machine is
+added to the shared kernel.
+
+The cloud resource adapter reserves up to one maximum cloud model request for
+closeout when admitting new processes, capped at one third of remaining time
+so short checks remain possible near the deadline. A foreground request whose explicit
+timeout exceeds available time is rejected before launch with a bounded-budget
+explanation. An unspecified foreground timeout is at most 60 seconds. Background
+process timeouts are bounded by available time and retain their actual timeoutAt
+receipt. Existing processes can still be observed or stopped. Manual resource
+API calls retain their existing execution limits. External observer deadlines
+are separate and are not guessed from user text or benchmark IDs.
+
+Add optional process_read.waitMs, an integer from 0 through 30000. It waits for
+new output or a non-running state, returning the actual cursor, state and exit
+code. Default reads remain immediate. Each observation joins the existing
+workspace queue; waits between observations hold no resource lock. waitMs limits
+polling wait, not existing queue or Docker I/O time. Observation failure does not
+prove process failure, and never relaunches the command.
+
+File-read receipts may include bounded previous read ranges at the same actual
+digest. They describe complete successful tool observations, not a content cache
+or a guarantee that those observations survived context trimming. Fresh reads
+are never blocked. Version guards and append-only transcripts remain unchanged.
+
+Resource capability guidance owns coding workflow: targeted search, reuse of
+available observations, coherent authorized changes, existing callers and data
+format compatibility, project-declared environment preparation and focused
+validation. Non-coding and read-only tasks do not require a source change. No
+dataset hints, dependencies, gold patches or task-specific branches are added.
+
+## Validation
+
+Use bounded real account/model/tool/storage scenarios and the existing frozen
+official SWE sample. Record source revision, model calls, actual artifacts and
+outcomes independently; static checks do not prove model behavior. No mock,
+legacy test or transcript-replay suite is an acceptance gate.

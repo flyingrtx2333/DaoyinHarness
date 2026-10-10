@@ -382,6 +382,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
       deadline = undefined;
       remainingRunMs = Math.max(1, remainingRunMs - (Date.now() - activeSince));
     };
+    const remainingTimeMs = (): number => Math.max(0, remainingRunMs - (deadline === undefined ? 0 : Date.now() - activeSince));
     resumeRunDeadline();
     const done = (async () => {
       let preparingWorkspaceContext = false;
@@ -448,7 +449,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         };
         const orchestrationAvailable = identity.space.kind !== "public" && options.repository.acceptChildRun !== undefined && options.repository.listChildRuns !== undefined;
         const projectBindings = generalResourcesMode === "enforce" ? [] : createProjectTools(identity, run, ensureActive);
-        const resourceBindings = generalResourcesMode === "enforce" ? createResourceTools(identity, run, ensureActive) : [];
+        const resourceBindings = generalResourcesMode === "enforce" ? createResourceTools(identity, run, ensureActive,
+          { remainingTimeMs, closeoutReserveMs: CLOUD_MODEL_TIMEOUT_MS }) : [];
         const runBindings = [...profile.tools, ...(memoryRuntime?.bindings ?? []), ...episodicBindings, ...projectBindings, ...resourceBindings];
         const bindings = new Map(runBindings.map((binding) => [binding.definition.name, binding]));
         const videoConfirmationTool = identity.space.kind === "public" ? undefined
@@ -654,7 +656,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           !isMemoryToolName(definition.name) && !isEpisodicMemoryToolName(definition.name)), { authorize });
         const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
           tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}`, signal: controller.signal,
-          remainingModelCalls: () => maxModelCalls - modelCalls, chargeTool, createModel: createMeteredModel, ensureActive });
+          remainingModelCalls: () => maxModelCalls - modelCalls, remainingTimeMs, chargeTool, createModel: createMeteredModel, ensureActive });
         const tools = new ToolRegistry([...wrappedDefinitions,
           ...(capabilitySearchTool === undefined ? [] : [capabilitySearchTool]),
           ...(videoConfirmationTool === undefined ? [] : [videoConfirmationTool]),
@@ -694,6 +696,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}${videoConfirmationTool === undefined ? "" : `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}`}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}`,
           maxSteps: Math.max(1, maxModelCalls - modelCalls), maxToolCalls: 24,
           remainingModelCalls: () => Math.max(0, maxModelCalls - modelCalls),
+          remainingTimeMs,
         });
         preparingWorkspaceContext = resourceBindings.length > 0;
         const workspaceContext = resourceBindings.length ? await attachedWorkspaceContext(identity, run.sessionId, controller.signal) : undefined;

@@ -76,6 +76,7 @@ export function registerResourceRoutes(app: FastifyInstance, options: {
       workspaceId: { type: "string", pattern: "^wsp_[a-f0-9]{24}$" },
       snapshotId: { type: "string", pattern: "^snp_[a-f0-9]{24}$" }, artifactId: { type: "string", pattern: "^art_[a-f0-9]{24}$" },
       deploymentId: { type: "string", pattern: "^dep_[a-f0-9]{24}$" }, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" },
+      waitMs: { type: "integer", minimum: 0, maximum: 30000 },
     } } },
  }, async (request) => {
  const identity = options.identityFor(request);

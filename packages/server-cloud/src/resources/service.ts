@@ -92,6 +92,8 @@ function requestedAudit(request: ResourceControlRequest): JsonValue {
     try { const url = new URL(item); return url.username || url.password ? "[REDACTED_CREDENTIAL_URL]" : item; } catch { return item; }
   });
   if (typeof request.timeoutMs === "number") value.timeoutMs = request.timeoutMs;
+  if (typeof request.waitMs === "number") value.waitMs = request.waitMs;
+  if (typeof request.cursor === "number") value.cursor = request.cursor;
   if (typeof request.maximumBytes === "number") value.maximumBytes = request.maximumBytes;
   if (typeof request.offset === "number") value.offset = request.offset;
   if (request.query) value.queryDigest = `sha256:${createHash("sha256").update(request.query).digest("hex")}`;
@@ -343,7 +345,7 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
       ? await resolveSecrets(auth, (await repository.workspace(auth, workspaceId)).runtime.secretRefs, signal) : [];
     const result = await executor({ action: "process", operation: request.action.slice(8), workspaceId, processId: request.processId,
       runId: request.sourceRun, executable: request.executable, args: request.args, cwd: request.cwd, stdin: request.stdin,
-      mode: request.processMode, timeoutMs: request.timeoutMs, cursor: request.cursor, environment: request.environment, secretValues }, signal);
+      mode: request.processMode, timeoutMs: request.timeoutMs, cursor: request.cursor, waitMs: request.waitMs, environment: request.environment, secretValues }, signal);
     if (request.action === "process_start" && typeof result.processId === "string") {
       await repository.recordProcess(auth, { id: result.processId, workspaceId,
         runId: required(request.sourceRun, "sourceRun"), executable: required(request.executable, "executable"),

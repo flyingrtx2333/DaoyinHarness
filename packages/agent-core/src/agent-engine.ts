@@ -65,6 +65,8 @@ export interface AgentEngineOptions {
   maxSteps?: number;
   /** Trusted shared-run allowance, including routing, condensation and child requests. */
   remainingModelCalls?: () => number;
+  /** Trusted active execution time; excludes host-managed permission pauses. */
+  remainingTimeMs?: () => number;
   /** 单回合累计工具调用上限（防止无限调用，默认 32） */
   maxToolCalls?: number;
   /** 上下文中保留的最大历史轮数 */
@@ -195,6 +197,7 @@ export class AgentEngine {
   readonly #compactor: ContextCompactor | null;
   readonly #maxSteps: number;
   readonly #remainingModelCalls: (() => number) | undefined;
+  readonly #remainingTimeMs: (() => number) | undefined;
   readonly #maxToolCalls: number;
   readonly #maxContextCharacters: number;
   readonly #maxContextMessages: number;
@@ -224,6 +227,7 @@ export class AgentEngine {
     });
     this.#maxSteps = limit(options.maxSteps ?? 16, 1, 100, "step limit");
     this.#remainingModelCalls = options.remainingModelCalls;
+    this.#remainingTimeMs = options.remainingTimeMs;
     this.#maxToolCalls = limit(options.maxToolCalls ?? 32, 1, 200, "tool limit");
     this.#maxContextCharacters = limit(options.maxContextCharacters ?? 96_000, 8_000, 400_000, "context character limit");
     this.#maxContextMessages = limit(options.maxContextMessages ?? 36, 6, 100, "context message limit");
@@ -300,6 +304,7 @@ export class AgentEngine {
       if (!Number.isSafeInteger(shared) || shared < 0) throw new AgentPolicyError("MODEL_CALL_LIMIT", "共享模型调用额度无效，已停止新增请求。");
       return Math.min(local, shared);
     };
+    const initialAllowance = remainingCalls();
     const summarize = async ({ source, maxSummaryCharacters, signal: parent = signal }: SummaryRequest): Promise<string> => {
       // Condensation shares this turn's request budget and leaves room for real task work.
       if (summaryAttempted || remainingCalls() <= 2) {
@@ -412,9 +417,9 @@ export class AgentEngine {
               ? "当前仍允许工具；停止无关探索，对照原始用户要求检查实际产物和修改范围，必要时执行聚焦验证。已有核对证据可复用；发现问题时在现有额度内修正并核对，不能把写入成功代替结果有效。用户明确要求不追加验证时遵从，并说明未验证。"
               : "当前不再允许工具；如实区分已执行的变更、已有的核对证据和未验证部分。缺少必要验收时不能声称目标已经验证完成，预算不足的未完成目标报告 partial。")
           : "";
-        const deliveryStep = !finalStep && tools.length > 0 && remaining <= 3;
+        const deliveryStep = !finalStep && tools.length > 0 && remaining <= Math.max(3, Math.ceil(initialAllowance / 2));
         const deliveryInstruction = deliveryStep && !verificationStep
-          ? "\n\n运行时阶段切换：当前进入工具仍可用的交付阶段，之后才是关闭工具的结果报告。" +
+          ? "\n\n运行预算检查：剩余额度需要同时覆盖必要交付、核对和结果报告，当前仍允许工具。" +
             "停止扩展无关探索，复用已有观察，对照原始用户目标选择剩余额度内最小的合法交付或核对动作。" +
             "查询或问答目标可以用已有依据只读交付，不要求写入；必要依据不足时只补关键观察，不能猜测结果、强行变更或把准备工作说成完成。" +
             "确有必要前提缺失时报告 blocked；仅因预算结束而未完成时报告 partial。"
@@ -424,9 +429,17 @@ export class AgentEngine {
           "completed 表示你判断用户目标已完成（不涉及任务动作的普通问答也使用 completed）；partial 表示仍有未完成事项，包括调用、步骤或时间预算结束；blocked 表示已有观察确认缺少必要依据、权限或其他执行条件。" +
           "仅因本轮预算结束而停止时使用 partial；若已有独立于预算的必要条件缺失证据，使用 blocked 并说明具体阻碍。" +
           "此标记仅是你的结果报告，不替代工具证据或实际验收。工具调用附带的正文不得添加此标记。";
+        const remainingTimeMs = this.#remainingTimeMs?.();
+        if (remainingTimeMs !== undefined && (!Number.isFinite(remainingTimeMs) || remainingTimeMs < 0)) {
+          throw new AgentPolicyError("AGENT_TIME_BUDGET_INVALID", "运行时间额度无效，已停止新增请求。");
+        }
+        const timeNotice = remainingTimeMs === undefined ? "" :
+          `当前运行的实际剩余执行时间约 ${Math.floor(remainingTimeMs / 1000)} 秒，包含模型等待和工具执行，下一步还会减少。` +
+          "安排操作时保留结果核对和收尾时间；已启动的长操作应读取原操作状态，不能因为等待而重复启动。";
         const budgetNotice = `\n\n可信运行预算：当前本 Agent 包括本次请求在内最多还可使用 ${remaining} 次模型调用；` +
           `本次请求之后最多还可使用 ${remaining - 1} 次。` +
           (this.#remainingModelCalls === undefined ? "" : "路由、摘要和子任务消耗同一共享预算。") +
+          timeNotice +
           (!finalStep && tools.length > 0
             ? `当前不是最后一次回答，本 Agent 的局部工具调用上限尚余 ${this.#maxToolCalls - attempts} 次；共享任务的实际可用额度仍以执行策略为准。` +
               "若目标尚未完成且存在可执行的合法下一步，应继续推进；不要仅因预计无法完成全部目标而把尚有余额说成预算已用尽。" +

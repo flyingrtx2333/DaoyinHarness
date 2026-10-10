@@ -33,6 +33,9 @@ const scenarios = [
   { name: 'unified-multi-file-edit', calls: 12, files: { 'first.txt': 'environment=DEV\nowner=one\n', 'second.txt': 'environment=DEV\nowner=two\n' },
     message: '先读取 first.txt 和 second.txt，然后用一次 file_patch 的统一差异补丁（patch 参数）将两个文件的 environment=DEV 改成 environment=TEST，保留各自 owner。不要用进程或整文件重写绕过文件工具。查看实际回执的两个修改路径和差异，再读取结果确认。',
     expected: { 'first.txt': 'environment=TEST\nowner=one\n', 'second.txt': 'environment=TEST\nowner=two\n' } },
+  { name: 'bounded-async-verification', calls: 12, files: { 'invoice.py': 'quantity = 2\nunit_price = 7\nprint(quantity * unit_price)\n' },
+    message: '读取 invoice.py，再读取它的第一行，核对实际回执是否标注此前相同版本的已读范围。将 quantity 改为 3，保留其他行为。然后用 process_start 启动一次 Python 后台检查：先等待 5 秒，再执行 invoice.py。用 process_read 的 waitMs 和真实 cursor 等待该原进程，确认退出码及金额为 21，不要重新启动检查。不操作其他资源。',
+    expected: { 'invoice.py': 'quantity = 3\nunit_price = 7\nprint(quantity * unit_price)\n' } },
 ];
 if (selected && !scenarios.some(scenario => scenario.name === selected)) throw new Error('Unknown real scenario.');
 const cases = scenarios.filter(scenario => selected === undefined || scenario.name === selected);
@@ -97,6 +100,12 @@ try {
     }
     if (scenario.name === 'stale-version-recovery') item.checks.actualStaleRejection = item.events.some(event => event.type === 'tool.failed' && event.payload.code === 'FILE_STALE_VERSION');
     if (scenario.name === 'unified-multi-file-edit') item.checks.twoActualChanges = patches.some(event => event.payload.evidence.result.mutation?.changes?.filter(change => change.changed).length === 2);
+    if (scenario.name === 'bounded-async-verification') {
+      item.checks.priorCoverage = completed.some(event => event.payload.toolName === 'file_read' && event.payload.evidence.result.readCoverage?.coveredByPrevious === true);
+      item.checks.singleProcess = completed.filter(event => event.payload.toolName === 'process_start').length === 1;
+      item.checks.actualWait = completed.some(event => event.payload.toolName === 'process_read' && event.payload.evidence.result.observation?.waitMs > 0);
+      item.checks.verifiedExit = completed.some(event => event.payload.toolName === 'process_read' && event.payload.evidence.result.state === 'exited' && event.payload.evidence.result.exitCode === 0 && /\b21\b/u.test(event.payload.evidence.result.output ?? ''));
+    }
     item.status = Object.values(item.checks).every(Boolean) ? 'passed' : 'failed'; item.finishedAt = new Date().toISOString(); await save();
     console.log(JSON.stringify({ name: item.name, status: item.status, runId: item.runId, checks: item.checks, sharedModelCalls: item.sharedModelCalls }));
     if (item.status !== 'passed') throw new Error('REAL_CASE_FAILED');

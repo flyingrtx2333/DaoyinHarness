@@ -58,6 +58,7 @@ export interface ResourceControlRequest {
   processMode?: "foreground" | "background" | "pty";
   timeoutMs?: number;
   cursor?: number;
+  waitMs?: number;
   signal?: string;
   environment?: Record<string, string>;
   mediaType?: string;
@@ -128,6 +129,7 @@ export interface ExecutorProcessRequest {
   mode?: "foreground" | "background" | "pty" | undefined;
   timeoutMs?: number | undefined;
   cursor?: number | undefined;
+  waitMs?: number | undefined;
   environment?: Record<string, string> | undefined;
   revision?: string | undefined;
   message?: string | undefined;
