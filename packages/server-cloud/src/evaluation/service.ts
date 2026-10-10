@@ -43,13 +43,11 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
   const actors = new WeakMap<FastifyRequest, Authority>();
   let active: { id: string; controller: AbortController; done: Promise<void>; caseId: string; repetition: number; stage: string } | undefined;
   let closing = false;
-  const heartbeat = setInterval(() => { try { options.store.renew(); } catch { closing = true; active?.controller.abort(); } }, 10_000);
-  heartbeat.unref();
   async function check(authority: Authority, parent?: AbortSignal): Promise<void> {
-    options.store.assertOwner();
+    options.store.assertOpen();
     const signal = parent ? AbortSignal.any([parent, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000);
     if (!await options.authorize(authority, signal)) throw new EvaluationError(403, "SUPERADMIN_REQUIRED", "超级管理员身份已失效。");
-    signal.throwIfAborted(); options.store.assertOwner();
+    signal.throwIfAborted(); options.store.assertOpen();
   }
   app.addHook("onRequest", async (request, reply) => {
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
@@ -100,7 +98,7 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
     } catch { try { options.store.state(id, controller.signal.aborted ? "cancelled" : "failed"); } catch { closing = true; } }
     finally { if (active?.id === id) active = undefined; }
   }
-  app.get("/health", async (_request, reply) => { try { options.store.assertOwner(); } catch { closing = true; } return reply.code(closing ? 503 : 200).send({ status: closing ? "unavailable" : "ok", execution: "platform-runtime-only" }); });
+  app.get("/health", async (_request, reply) => { try { options.store.assertOpen(); } catch { closing = true; } return reply.code(closing ? 503 : 200).send({ status: closing ? "unavailable" : "ok", execution: "platform-runtime-only" }); });
   app.get("/catalog", async request => {
     const actual = options.runtime ? await options.runtime.catalog(actors.get(request)!) : null;
     return { version: EVALUATOR_VERSION, revision: options.revision, templates: liveTemplates,
@@ -187,6 +185,6 @@ export function createEvaluationService(options: EvaluationServiceOptions) {
     return { ...run, metrics: metrics(run), dispatchedCalls: observedCalls(run), reservedCalls: options.store.counts(run.id),
       completeEvidence: run.status === "completed" && run.completed === run.planned && run.trials.every(trial => !!trial.runId && trial.modelCallsKnown === true) };
   });
-  app.addHook("onClose", async () => { closing = true; clearInterval(heartbeat); active?.controller.abort("service-close"); await active?.done; });
+  app.addHook("onClose", async () => { closing = true; active?.controller.abort("service-close"); await active?.done; });
   return app;
 }

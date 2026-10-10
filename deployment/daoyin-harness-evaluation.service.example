@@ -1,4 +1,4 @@
-# Install only after source tests, build and role/network acceptance.
+# Install after relevant packaging checks and actual account/network acceptance.
 # Provision daoyin-eval separately; do not reuse the production Agent environment.
 [Unit]
 Description=Daoyin isolated Harness evaluation service
@@ -11,7 +11,7 @@ User=daoyin-eval
 Group=daoyin-eval
 WorkingDirectory=/opt/daoyin-harness-evaluation/current
 EnvironmentFile=/etc/daoyin-harness-evaluation/environment
-ExecStart=/usr/bin/node /opt/daoyin-harness-evaluation/current/evaluation.mjs
+ExecStart=/usr/bin/flock --nonblock --no-fork /var/lib/daoyin-harness-evaluation/service.lock /usr/bin/node /opt/daoyin-harness-evaluation/current/evaluation.mjs
 UMask=0077
 StateDirectory=daoyin-harness-evaluation
 StateDirectoryMode=0700

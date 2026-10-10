@@ -18,7 +18,7 @@ export interface TelemetryTraceSummary {
 }
 /** Separate evaluation DB, NOT the runtime's production cloud_* database. */
 export class EvaluationStore {
-  readonly #db: DatabaseSync; readonly #owner = randomUUID();
+  readonly #db: DatabaseSync; #closed = false;
   public constructor(path: string) {
     this.#db = new DatabaseSync(path);
     const tables = this.#db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
@@ -26,7 +26,6 @@ export class EvaluationStore {
       this.#db.close(); throw new EvaluationError(503, "EVAL_DATABASE_SCOPE", "必须使用独立评估数据库，禁止复用业务或云端会话库。");
     }
     this.#db.exec(`PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
-      CREATE TABLE IF NOT EXISTS evaluation_lease(id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, expires INTEGER NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS evaluation_runs(id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, session_id TEXT NOT NULL,
         request_id TEXT NOT NULL, input_hash TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
         body TEXT NOT NULL, UNIQUE(actor_id,request_id)) STRICT;
@@ -46,9 +45,6 @@ export class EvaluationStore {
       CREATE INDEX IF NOT EXISTS audit_recent_runs ON audit_events(occurred_at DESC) WHERE event_type='turn.started';`);
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      const old = this.#db.prepare("SELECT expires FROM evaluation_lease WHERE id=1").get();
-      if (old && Number(old.expires) > Date.now()) throw new EvaluationError(409, "EVAL_ALREADY_RUNNING", "评估服务已有有效实例。");
-      this.#db.prepare("INSERT INTO evaluation_lease VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,expires=excluded.expires").run(this.#owner, Date.now() + 30_000);
       const rows = this.#db.prepare("SELECT body FROM evaluation_runs WHERE status IN ('running','cancelling')").all();
       for (const row of rows) {
         const run = JSON.parse(String(row.body)) as Experiment;
@@ -58,13 +54,12 @@ export class EvaluationStore {
       this.#db.exec("COMMIT");
     } catch (error) { this.#db.exec("ROLLBACK"); this.#db.close(); throw error; }
   }
-  public assertOwner(): void {
-    const row = this.#db.prepare("SELECT owner,expires FROM evaluation_lease WHERE id=1").get();
-    if (!row || row.owner !== this.#owner || Number(row.expires) <= Date.now()) throw new EvaluationError(503, "EVAL_LEASE_LOST", "评估执行实例已失效。");
+  public assertOpen(): void {
+    if (this.#closed) throw new EvaluationError(503, "EVAL_STORE_CLOSED", "评估存储已关闭。");
   }
   #transaction<T>(fn: () => T): T {
     this.#db.exec("BEGIN IMMEDIATE");
-    try { this.assertOwner(); const value = fn(); this.assertOwner(); this.#db.exec("COMMIT"); return value; }
+    try { this.assertOpen(); const value = fn(); this.assertOpen(); this.#db.exec("COMMIT"); return value; }
     catch (error) { this.#db.exec("ROLLBACK"); throw error; }
   }
   public ingestAudit(events: readonly AgentEvent[]): number {
@@ -104,10 +99,9 @@ export class EvaluationStore {
     const events = this.auditRun(runId);
     return events.length ? { runId, events } : null;
   }
-  public renew(): void { this.#transaction(() => { this.#db.prepare("UPDATE evaluation_lease SET expires=? WHERE id=1 AND owner=?").run(Date.now() + 30_000, this.#owner); }); }
   public close(): void {
-    try { this.#db.prepare("UPDATE evaluation_lease SET expires=0 WHERE id=1 AND owner=?").run(this.#owner); }
-    finally { this.#db.close(); }
+    if (this.#closed) return;
+    this.#db.close(); this.#closed = true;
   }
   public ingestTelemetry(spans: readonly StoredTelemetrySpan[]): number {
     return this.#transaction(() => {
@@ -129,7 +123,7 @@ export class EvaluationStore {
     windowHours: number; traces: number; errors: number; errorRate: number; p50Ms: number | null; p95Ms: number | null;
     operations: Array<{ name: string; count: number; errors: number; averageMs: number }>;
   } {
-    this.assertOwner();
+    this.assertOpen();
     const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
     const roots = this.#db.prepare("SELECT duration_ms,status FROM telemetry_spans WHERE parent_span_id='' AND started_at>=? ORDER BY duration_ms").all(cutoff);
     const durations = roots.map(row => Number(row.duration_ms));
@@ -171,7 +165,7 @@ export class EvaluationStore {
    * ```
    */
   public telemetryTraces(hours: number, offset = 0): TelemetryTraceSummary[] {
-    this.assertOwner();
+    this.assertOpen();
     const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
     return this.#db.prepare(`SELECT root.trace_id,root.name,root.service_name,root.service_version,root.started_at,
       root.duration_ms,root.status,COUNT(all_spans.span_id) AS span_count,
@@ -190,7 +184,7 @@ export class EvaluationStore {
       }));
   }
   public telemetryTrace(traceId: string): StoredTelemetrySpan[] {
-    this.assertOwner();
+    this.assertOpen();
     const rows = this.#db.prepare(`SELECT trace_id,span_id,parent_span_id,name,service_name,service_version,
       started_at,duration_ms,status,attributes FROM telemetry_spans WHERE trace_id=? ORDER BY started_at,span_id`).all(traceId);
     if (!rows.length) throw new EvaluationError(404, "TRACE_NOT_FOUND", "链路不存在或已超过保留期。");
@@ -217,13 +211,13 @@ export class EvaluationStore {
     });
   }
   public get(id: string): Experiment {
-    this.assertOwner();
+    this.assertOpen();
     const row = this.#db.prepare("SELECT body FROM evaluation_runs WHERE id=?").get(id);
     if (!row) throw new EvaluationError(404, "EVAL_NOT_FOUND", "评估不存在。");
     return JSON.parse(String(row.body)) as Experiment;
   }
   public findRequest(actorId: string, requestId: string): Experiment | null {
-    this.assertOwner();
+    this.assertOpen();
     const row = this.#db.prepare("SELECT body FROM evaluation_runs WHERE actor_id=? AND request_id=?").get(actorId, requestId);
     return row ? JSON.parse(String(row.body)) as Experiment : null;
   }
@@ -233,7 +227,7 @@ export class EvaluationStore {
     return { actorId: String(row.actor_id), sessionId: String(row.session_id) };
   }
   public list(offset = 0, actorId?: string): Experiment[] {
-    this.assertOwner();
+    this.assertOpen();
     const rows = actorId === undefined
       ? this.#db.prepare("SELECT body FROM evaluation_runs ORDER BY created_at DESC,id DESC LIMIT 20 OFFSET ?").all(offset)
       : this.#db.prepare("SELECT body FROM evaluation_runs WHERE actor_id=? ORDER BY created_at DESC,id DESC LIMIT 20 OFFSET ?").all(actorId, offset);
