@@ -691,6 +691,9 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           },
         };
         // Keep the provider even without memory.read: revoked dependencies cannot re-enter through history.
+        // Keep this turn's relevant evidence semantics when the last request
+        // disables tools; instruction history does not grant execution access.
+        const guidanceTools = new Set<string>();
         const engine = new AgentEngine({
           model, tools, events: engineEvents, compactionStore: stores.compactions,
           modelTimeoutMs: CLOUD_MODEL_TIMEOUT_MS,
@@ -700,7 +703,8 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
               render: () => `${SYSTEM_PROMPT}\n\n应用规则：\n${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}${memoryRuntime?.bindings.length ? `\n\n${AUTONOMOUS_MEMORY_INSTRUCTIONS}` : ""}${episodicBindings.length ? `\n\n${EPISODIC_MEMORY_INSTRUCTIONS}` : ""}${orchestrationDefinitions.length ? `\n\n${CLOUD_ORCHESTRATION_INSTRUCTIONS}` : ""}` },
             { id: "cloud_capability_guidance", kind: "dynamic", priority: 200,
               render: ({ tools: mounted }) => {
-                const names = mounted.map(tool => tool.name);
+                for (const tool of mounted) guidanceTools.add(tool.name);
+                const names = [...guidanceTools];
                 return (profile.instructionsForTools?.(names) ?? profile.instructions) +
                   (names.includes(VIDEO_CONFIRMATION_TOOL) ? `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}` : "");
               } },
