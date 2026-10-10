@@ -560,9 +560,9 @@ export class AgentEngine {
         if (!content) return this.#fail(append, "MODEL_EMPTY_RESPONSE", "模型没有返回可显示的结果。");
         if (verificationHints.length > 0 && !verificationRequested && stop === undefined && remainingCalls() > 1 &&
             reply.taskOutcome !== "blocked" && reply.taskOutcome !== "partial") {
-          // The draft is retained, not a terminal result. Request inspection at
-          // most once, charged to the same allowance; never replay any tool.
-          current.push({ role: "assistant", content });
+          // Retain the draft as commentary in the transcript, outside the
+          // complete tool request/result groups used for the next request.
+          // Request inspection once within the same allowance; never replay tools.
           await append("assistant.commentary", { contentBlockId, text: content, source: "model", stage: "before_model", toolCallIds: [] });
           verificationNextStep = true;
           continue;
