@@ -414,11 +414,11 @@ export class AgentEngine {
           "按照原始用户要求交付结果，直接说明实际完成的事项、验证结果与未完成事项。不要仿写工具记录或生成待执行的调用；建议的后续操作不是已执行证据。" +
           "根据返回中的错误、退出码与截断信息判断哪些事实已确认，不把局部成功说成全部完成。" : "";
         const memoryText = memorySnapshot?.text ? `\n\n${memorySnapshot.text}` : "";
-        const systemPrompt = { stableText: context.prompt.stableText, dynamicText: context.prompt.dynamicText + memoryText + budgetNotice + closing,
+        let systemPrompt = { stableText: context.prompt.stableText, dynamicText: context.prompt.dynamicText + memoryText + budgetNotice + closing,
           sections: [...context.prompt.sections.map((section) => ({ id: section.id, kind: section.kind })),
             ...(memoryText ? [{ id: "confirmed_memory", kind: "dynamic" as const }] : []),
             ...(budgetNotice ? [{ id: "shared_model_budget", kind: "dynamic" as const }] : [])] };
-        const budget: ModelContextBudget = {
+        let budget: ModelContextBudget = {
           systemMessage: { role: "system", content: context.systemMessage.content + memoryText + budgetNotice + closing },
           history, current, ...(memoryCheckpoint === undefined ? {} : { runtimeNote: memoryCheckpoint }),
           overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
@@ -457,7 +457,7 @@ export class AgentEngine {
             if (remainingCalls() <= 0) throw new AgentPolicyError("MODEL_CALL_LIMIT", "本轮模型调用预算已用尽。");
             modelRequests++;
             const raw = await modelResponse(() => this.#model.complete({ messages, tools,
-              systemPrompt: responseRecoveryNotice ? { ...systemPrompt, dynamicText: systemPrompt.dynamicText + responseRecoveryNotice } : systemPrompt, signal: modelSignal,
+              systemPrompt, signal: modelSignal,
               onTextDelta: async (delta) => {
                 modelSignal.throwIfAborted();
                 if (typeof delta !== "string" || streamed.length + delta.length > 16_000) throw new Error("Invalid model stream.");
@@ -482,7 +482,17 @@ export class AgentEngine {
               if (publishedStreamed) await append("assistant.commentary", { contentBlockId, text: publishedStreamed, source: "model", stage: "before_model", toolCallIds: [] });
               responseRecoveries++;
               contentBlockId = `block_${crypto.randomUUID()}`; streamed = ""; publishedStreamed = "";
-              responseRecoveryNotice = "\n\n运行时恢复：上一次模型响应未完整返回，未执行该响应中的任何工具。继续使用已有真实工具结果；不要重复已成功的业务操作。本次至多调用两个工具，工具名称与 JSON 参数必须符合当前 schema；不要补写无效的历史工具响应。";
+              if (!responseRecoveryNotice) {
+                responseRecoveryNotice = "\n\n运行时恢复：上一次模型响应未完整返回，未执行该响应中的任何工具。继续使用已有真实工具结果；不要重复已成功的业务操作。本次至多调用两个工具，工具名称与 JSON 参数必须符合当前 schema；不要补写无效的历史工具响应。";
+                systemPrompt = { ...systemPrompt, dynamicText: systemPrompt.dynamicText + responseRecoveryNotice,
+                  sections: [...systemPrompt.sections, { id: "response_recovery", kind: "dynamic" as const }] };
+                // Keep the exact system mirror and its full recovery text inside the current bounds.
+                budget = { ...budget,
+                  systemMessage: { role: "system", content: budget.systemMessage.content + responseRecoveryNotice },
+                  overheadCharacters: JSON.stringify({ tools, sections: systemPrompt.sections }).length + 256,
+                };
+                messages = boundModelContext(budget);
+              }
               await append("phase.updated", { phase: "synthesizing", step,
                 displayText: "模型响应中断，正在自动继续…",
                 detail: { recovery: "incomplete-model-response", attempt: responseRecoveries, failureCode: responseFailure, replayedTools: 0 },
@@ -491,7 +501,7 @@ export class AgentEngine {
             }
             // Only a definite pre-output context rejection can be retried. No tools are replayed.
             if (signal.aborted || streamed || recoveryUsed || remainingCalls() <= 1 ||
-                modelFailure(error).code !== "MODEL_CONTEXT_TOO_LARGE") throw error;
+                responseFailure !== "MODEL_CONTEXT_TOO_LARGE") throw error;
             const previousSize = JSON.stringify(messages).length;
             const reduced: ModelContextBudget = { ...budget,
               maxCharacters: Math.max(2000, Math.floor((previousSize + budget.overheadCharacters) * 0.6)),
@@ -507,6 +517,7 @@ export class AgentEngine {
             contextCharacters = reduced.maxCharacters;
             contextMessages = reduced.maxMessages;
             toolResultCharacters = reduced.maxToolResultCharacters;
+            budget = reduced;
             messages = candidate;
             await append("phase.updated", { phase: "synthesizing", step,
               displayText: "模型上下文超出限制，正在缩减历史后继续…",
