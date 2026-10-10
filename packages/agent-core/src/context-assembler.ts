@@ -114,7 +114,7 @@ export class ContextAssembler {
   }
 
   public historicalDialogue(events: readonly AgentEvent[], compaction?: SessionCompaction): ModelConversationItem[] {
-    return this.#boundedDialogue(this.#historicalTurns(events, compaction));
+    return this.historicalDialogueSources([{ events, ...(compaction === undefined ? {} : { compaction }) }]);
   }
 
   public historicalDialogueSources(sources: readonly { events: readonly AgentEvent[]; compaction?: SessionCompaction }[]): ModelConversationItem[] {

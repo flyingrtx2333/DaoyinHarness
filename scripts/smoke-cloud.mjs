@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, readdir, unlink, rmdir } from "node:fs/promises";

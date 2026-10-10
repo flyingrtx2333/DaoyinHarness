@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

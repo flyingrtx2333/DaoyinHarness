@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 /* global document, innerWidth, innerHeight -- Browser evaluate callbacks. */
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";

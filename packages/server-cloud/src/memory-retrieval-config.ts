@@ -3,8 +3,6 @@ import { PlatformMemoryEmbeddingProvider, PostgresHybridMemoryRetriever } from "
 import { LexicalMemoryRetriever } from "./memory-retrieval-lexical.js";
 import type { MemoryRetriever } from "./memory-retrieval.js";
 
-export type MemoryRetrievalMode = "lexical" | "hybrid";
-
 export interface MemoryRetrieverConfig {
   readonly platformUrl?: string;
   readonly appServiceToken?: string;

@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 /* global document, window */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";

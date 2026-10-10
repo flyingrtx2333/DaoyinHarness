@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 /* Windows browser acceptance: built workbench, fixture account/API/media. */
 /* global document, innerWidth */
 import assert from "node:assert/strict";

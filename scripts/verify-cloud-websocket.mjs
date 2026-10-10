@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 /* Windows browser acceptance: real built UI, mocked HTTP/WebSocket, NO external services. */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";

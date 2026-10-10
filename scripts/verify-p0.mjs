@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 // Run from Windows PowerShell: node scripts/verify-p0.mjs
 // Validation only: no Git writes, releases, production URLs, or provider calls.
 import { spawnSync } from "node:child_process";

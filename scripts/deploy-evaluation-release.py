@@ -47,24 +47,6 @@ def environment(path):
     return values
 
 
-def eval_model():
-    try:
-        data = json.loads(command(['docker', 'inspect', 'daoyintech-builder-evaluation']))[0]
-        values = dict(item.split('=', 1) for item in data['Config']['Env'] if '=' in item)
-    except Exception:
-        return {}
-    if not all(values.get(k) for k in ('BUILDER_EVAL_ENDPOINT', 'BUILDER_EVAL_API_KEY', 'BUILDER_EVAL_MODEL')):
-        return {}
-    endpoint = values['BUILDER_EVAL_ENDPOINT'].rstrip('/')
-    if not endpoint.startswith('https://'):
-        return {}
-    if not endpoint.endswith('/chat/completions'):
-        endpoint += '/chat/completions'
-    return {'DAOYIN_EVAL_MODEL_ENDPOINT': endpoint,
-            'DAOYIN_EVAL_MODEL_KEY': values['BUILDER_EVAL_API_KEY'],
-            'DAOYIN_EVAL_MODEL': values['BUILDER_EVAL_MODEL']}
-
-
 def hosts():
     result = []
     for path in VHOSTS.glob('*.conf'):
@@ -123,13 +105,9 @@ def configure():
                            'DAOYIN_EVAL_PORT': '4711', 'DAOYIN_OTEL_INGEST_TOKEN': telemetry_key})
     patch_environment(CLOUD_ENV, {'DAOYIN_OTEL_EXPORT_URL': 'http://127.0.0.1:4711/v1/traces',
                                   'DAOYIN_OTEL_EXPORT_TOKEN': telemetry_key})
-    # Reuse only the dedicated evaluation model, never a business provider or service key.
-    model = eval_model()
-    if model and not current.get('DAOYIN_EVAL_MODEL_KEY'):
-        patch_environment(ENV, model)
     patch_environment(MAIN_ENV, {'HARNESS_EVALUATION_SERVICE_URL': PLATFORM_ORIGIN + '/api/internal/harness-evaluation-runner',
                                 'HARNESS_EVALUATION_SERVICE_TOKEN': key, 'HARNESS_EVALUATION_ORIGIN': WORKBENCH_ORIGIN})
-    print(json.dumps({'evaluationConfigured': True, 'dedicatedModelConfigured': bool(environment(ENV).get('DAOYIN_EVAL_MODEL_KEY'))}))
+    print(json.dumps({'evaluationConfigured': True}))
 
 
 def verify_files(directory, revision):
@@ -257,7 +235,6 @@ def main():
         print(json.dumps({'node': command([NODE, '--version']), 'vhosts': hosts(),
                           'runtime': str((ROOT / 'current').resolve()),
                           'workbench': str((ROOT / 'workbench/current').resolve()),
-                          'dedicatedEvaluationModelAvailable': bool(eval_model()),
                           'evaluationAlreadyConfigured': ENV.exists()}))
     elif args.action == 'configure':
         configure()

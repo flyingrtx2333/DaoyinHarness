@@ -11,12 +11,12 @@ const objectSchema = (properties: Record<string, JsonValue>, required: string[])
   required,
 });
 
-function stringArg(input: Record<string, unknown>, name: string, allowEmpty = false): string {
+function stringArg(input: Record<string, unknown>, name: string): string {
   const value = input[name];
-  if (typeof value !== "string" || (!allowEmpty && value.trim().length === 0)) {
-    throw Object.assign(new Error(`${name} must be ${allowEmpty ? "a string" : "a non-empty string"}.`), { code: "ORCHESTRATION_INPUT_INVALID" });
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw Object.assign(new Error(`${name} must be a non-empty string.`), { code: "ORCHESTRATION_INPUT_INVALID" });
   }
-  return allowEmpty ? value : value.trim();
+  return value.trim();
 }
 
 function optionalString(input: Record<string, unknown>, name: string): string | undefined {

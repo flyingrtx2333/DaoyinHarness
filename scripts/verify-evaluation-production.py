@@ -46,7 +46,12 @@ def main():
     for name, url, expected in [('runtime-ready', 'http://127.0.0.1:4700/health/ready', 'ready'),
                                  ('evaluation-ready', 'http://127.0.0.1:4711/health', 'ok')]:
         status, data = fetch(url)
-        check(name, status == 200 and json.loads(data).get('status') == expected)
+        body = json.loads(data) if status == 200 else {}
+        check(name, status == 200 and body.get('status') == expected)
+        if name == 'evaluation-ready':
+            execution = body.get('execution')
+            check('evaluation-platform-runtime-only', execution == 'platform-runtime-only')
+            report['evaluationExecution'] = execution
     status, html = fetch(ORIGIN + '/')
     check('workbench-http', status == 200)
     local = ROOT / 'workbench/current'
@@ -76,7 +81,6 @@ def main():
         'x-eval-service-token': values['DAOYIN_EVAL_SERVICE_TOKEN'],
         'x-eval-actor': '999999', 'x-eval-session': '0' * 48})
     check('service-token-without-valid-admin-denied', status == 403)
-    report['liveModelConfigured'] = bool(values.get('DAOYIN_EVAL_MODEL_KEY'))
     report['status'] = 'passed-read-only-deployed-checks'
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

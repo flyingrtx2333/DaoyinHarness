@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 // Invoked only by verify-p0.mjs. Creates fixture data and restores its OWN dump.
 // Does not accept a production backup or configurable database destination.
 import assert from "node:assert/strict";

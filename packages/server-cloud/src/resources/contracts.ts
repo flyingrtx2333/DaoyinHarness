@@ -14,7 +14,7 @@ export const RESOURCE_TOOL_NAMES = [
 ] as const;
 
 export type ResourceToolName = typeof RESOURCE_TOOL_NAMES[number];
-export type ResourceAction = ResourceToolName | "readiness" | "migrate_projects" | "reconcile" | "cancel_run";
+export type ResourceAction = ResourceToolName | "readiness" | "cancel_run";
 
 export interface ResourceControlRequest {
   action: ResourceAction;
@@ -88,15 +88,6 @@ export interface ResourceControlRequest {
   missingShots?: string[];
   shotIndex?: number;
   prompt?: string;
-}
-
-export interface ExecutorFileEntry {
-  path: string;
-  kind: "file" | "directory" | "symlink";
-  mode: number;
-  size: number;
-  modifiedAt: string;
-  target?: string;
 }
 
 export interface ResolvedSecret { ref: string; value: string }

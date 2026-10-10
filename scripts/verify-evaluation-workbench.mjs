@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 /* Windows acceptance: real compiled UI, simulated admin/API/results. No production/model calls. */
 /* global window -- evaluated only inside Playwright's browser context */
 import assert from "node:assert/strict";

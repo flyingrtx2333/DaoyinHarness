@@ -1,3 +1,4 @@
+import "./test-policy.mjs"; // Historical simulation retained; execution is disabled.
 /* global document, innerWidth, innerHeight -- Playwright page.evaluate callbacks run in the browser. */
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
