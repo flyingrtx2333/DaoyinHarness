@@ -184,7 +184,7 @@ export class CampfireService {
       actions.sort((a,b)=>a.startSeconds-b.startSeconds);
       const data:Data={pipelineVersion:1,sourceDigest:asset.digest!,analysisStatus:"completed",analysisProgress:100,
         durationSeconds:duration,width:inspected.width!,height:inspected.height!,analysis:{summary:summaries.join("\n"),actions:actions.map(a=>({...a})),
-        coverage:"连续20秒窗口，每窗六个实际解码帧；动作边界在附近三秒窗口再次采样精修，非逐帧识别"},receipts,analyzedAt:new Date().toISOString()};
+        coverage:video ? "连续20秒窗口，每窗六个实际解码帧；动作边界在附近三秒窗口再次采样精修，非逐帧识别" : "单张实际图片，仅识别可见内容，不推断连续动作"},receipts,analyzedAt:new Date().toISOString()};
       await this.#append(auth,id,"campfire.analysis.completed",data,request);
     }, signal);
   }
