@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { defaultRuntimeSpec, type ExecutionIdentity, type WorkspaceEntry } from "@daoyin/harness-contracts";
 import type { JsonValue } from "@daoyin/harness-protocol";
 import { validateStoryInput } from "../story-profile.js";
+import { CAMPFIRE_REFERENCE_PRESETS } from "./campfire-presets.js";
 import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
 import type { ContentStore } from "./content-store.js";
 import type { ExecutorProcessRequest, ResourceControlRequest } from "./contracts.js";
@@ -302,6 +303,16 @@ export class CampfireService {
     }
     if (request.action === "resource_campfire_list") {
       const limit = request.limit ?? 100;
+      const systemPresets: Data[] = [];
+      if (request.filterRole === "reference_video") for (const preset of CAMPFIRE_REFERENCE_PRESETS) {
+        if (!await this.content.has(preset.digest)) fail("CAMPFIRE_PRESET_UNAVAILABLE", "系统参考视频暂不可用，请稍后重试。", 503);
+        const {key, ...media} = preset;
+        const asset: Data = {...media, role:"reference_video", mediaType:"video/mp4", systemPreset:key};
+        // Provision immutable account-owned handles; media bytes remain shared by digest.
+        const id = await this.repository.createBusiness(auth,preset.title,"campfire.media.ready",asset,`system-reference:${key}`);
+        const {digest: _digest, ...metadata} = asset;
+        systemPresets.push({...metadata,id});
+      }
       let before: { createdAt: string; id: string } | undefined;
       if (request.shopId && (await this.#manifest(auth, request.shopId)).role !== "shop_profile") fail("CAMPFIRE_SHOP_INVALID", "请选择本店资料。");
       if (request.pageCursor) {
@@ -321,7 +332,7 @@ export class CampfireService {
         const metadata = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "content" && key !== "digest"));
         return { ...metadata, id: row.id };
       });
-      return { summary: "已读取 Harness 营火素材页", items, hasMore, nextCursor, untrusted: true };
+      return { summary: "已读取 Harness 营火素材页", items, systemPresets, hasMore, nextCursor, untrusted: true };
     }
     if (request.action === "resource_media_read") {
       const asset = await this.#manifest(auth, idOf(request));

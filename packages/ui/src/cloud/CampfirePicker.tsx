@@ -32,6 +32,8 @@ export function CampfirePicker({ client, initialSelection, initialRequirements, 
     return () => controller.abort();
   }, [client, reload]);
   const shops = items.filter(item => item.role === "shop_profile"); const references = items.filter(item => item.role === "reference_video");
+  const systemReferences = references.filter(item => item.systemPreset);
+  const uploadedReferences = references.filter(item => !item.systemPreset);
   async function loadMore(filterRole: "shop_profile" | "reference_video"): Promise<void> {
     const pageCursor = filterRole === "shop_profile" ? shopCursor : referenceCursor; if (!pageCursor || busy) return;
     setBusy(true); setError("");
@@ -66,14 +68,16 @@ export function CampfirePicker({ client, initialSelection, initialRequirements, 
           <header className="asset-toolbar"><h3>参考视频</h3><button type="button" className="campfire-reference-upload" disabled={busy} onClick={() => input.current?.click()}><WorkbenchIcon name="upload" />{progress === undefined ? "上传参考视频" : `上传中 ${progress}%`}</button></header>
           <input ref={input} className="composer-file-input" tabIndex={-1} type="file" accept="video/mp4" aria-label="上传营火参考视频" disabled={busy} onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} />
           {loadingReferences && <p role="status">正在读取参考视频…</p>}
-          {!loadingReferences && !references.length && !error && <p className="campfire-reference-empty">暂无参考视频，可上传视频或不使用参考。</p>}
+          {!loadingReferences && !references.length && !error && <p className="campfire-reference-empty">暂无可用参考视频，请重新加载。</p>}
+          {[{title:"系统预设",items:systemReferences},{title:"我上传的",items:uploadedReferences}].filter(group=>group.items.length).map(group=><section key={group.title} aria-label={group.title}><h3>{group.title}</h3>
           <div className="campfire-reference-masonry">
-            {references.map(reference => <article key={reference.id} className={`campfire-reference-card${reference.id === referenceId ? " is-selected" : ""}`}>
+            {group.items.map(reference => <article key={reference.id} className={`campfire-reference-card${reference.id === referenceId ? " is-selected" : ""}`}>
               <button type="button" className="campfire-reference-preview" aria-label={`预览参考视频：${reference.title}`} onClick={() => setPreview(reference)}><CampfireThumbnail client={client} asset={reference} /></button>
               <button type="button" className="campfire-reference-select" aria-label={`选择参考视频：${reference.title}`} aria-pressed={reference.id === referenceId} disabled={busy} onClick={() => setReferenceId(current => current === reference.id ? "" : reference.id)}><span aria-hidden="true">{reference.id === referenceId ? "✓" : ""}</span></button>
               <div className="campfire-reference-caption"><span title={reference.title}>{reference.title.replace(/\.mp4$/iu, "")}</span>{typeof reference.durationSeconds === "number" && <small>{Math.round(reference.durationSeconds)}秒</small>}</div>
             </article>)}
           </div>
+          </section>)}
           {referenceCursor && <button type="button" disabled={busy} onClick={() => { void loadMore("reference_video"); }}>加载更多参考视频</button>}
         </section>
       </div>

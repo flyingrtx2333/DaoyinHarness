@@ -1,7 +1,7 @@
 import type { WorkbenchClient } from "./client.js";
 
 export type CampfireRole = "shop_profile" | "shop_document" | "shop_image" | "shop_video" | "reference_video" | "narration_audio" | "background_music" | "output_video";
-export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number; width?: number; height?: number; version?: number; analysisStatus?: "queued" | "running" | "completed" | "failed"; analysisProgress?: number; message?: string; analysis?: { summary: string; actions: Array<{label:string;startSeconds:number;endSeconds:number;confidence:number}> }; origin?: "ai"; generated?: boolean; generatedSegments?: number[] }
+export interface CampfireAsset { id: string; title: string; role: CampfireRole; mediaType: string; shopId?: string; size: number; content?: string; durationSeconds?: number; width?: number; height?: number; version?: number; analysisStatus?: "queued" | "running" | "completed" | "failed"; analysisProgress?: number; message?: string; analysis?: { summary: string; actions: Array<{label:string;startSeconds:number;endSeconds:number;confidence:number}> }; systemPreset?: string; origin?: "ai"; generated?: boolean; generatedSegments?: number[] }
 export interface CampfireSelection { shopId: string; shopTitle: string; referenceId?: string; referenceTitle?: string; requirements?: string }
 export const CAMPFIRE_LABELS: Record<CampfireRole, string> = { shop_profile: "店铺资料", shop_document: "店铺文档", shop_image: "实拍图片", shop_video: "实拍视频", reference_video: "参考视频", narration_audio: "旁白音轨", background_music: "背景音乐", output_video: "剪辑成片" };
 const roles = Object.keys(CAMPFIRE_LABELS);
@@ -17,10 +17,10 @@ export function mergeCampfireAssets(previous: CampfireAsset[], incoming: Campfir
 }
 export async function campfireList(client: WorkbenchClient, options: CampfirePageOptions = {}, signal?: AbortSignal): Promise<{ items: CampfireAsset[]; nextCursor: string | null }> {
   const epoch = client.accountScope;
-  const result = await client.resource<{ items: unknown[]; hasMore?: boolean; nextCursor?: string | null }>({ action: "resource_campfire_list", ...options }, signal);
+  const result = await client.resource<{ items: unknown[]; systemPresets?: unknown[]; hasMore?: boolean; nextCursor?: string | null }>({ action: "resource_campfire_list", ...options }, signal);
   if (epoch !== client.accountScope) throw new Error("账号已变化，请刷新当前账号素材。");
   if (result.hasMore && typeof result.nextCursor !== "string") throw new Error("素材分页未完成，请刷新后重试。");
-  return { items: result.items.map(campfireAsset), nextCursor: result.hasMore ? result.nextCursor! : null };
+  return { items: mergeCampfireAssets((result.systemPresets ?? []).map(campfireAsset), result.items.map(campfireAsset)), nextCursor: result.hasMore ? result.nextCursor! : null };
 }
 export async function campfireProfile(client: WorkbenchClient, title: string, content: string, previous?: CampfireAsset): Promise<CampfireAsset> {
   return campfireAsset((await client.resource<{ asset: unknown }>({ action: "resource_media_profile", title, content, ...(previous ? { resourceId: previous.id, expectedVersion: previous.version ?? 1 } : {}) })).asset);
