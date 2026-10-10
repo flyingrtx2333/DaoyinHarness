@@ -49,3 +49,15 @@
 生产侧验证回执：主平台容器 `/tmp/harness-auto-campfire-validation.json`、`/tmp/harness-vertical-campfire-validation.json`、`/tmp/harness-framing-policy-validation.json`；独立媒体验证 `/root/auto-campfire-output-verification.json`。业务事件与资源仍由正常存储持久化，临时回执不替代业务记录。
 
 实际成片是 22.1 秒，不能据此宣称精确满足 15 秒。此处验证自动配音、真实素材工具链、默认竖屏与不重复确认；未验证浏览器播放交互或主观成片质量。小样本通过不保证所有供应商请求永不失败。用量记录可查，价格归集未完整核验，不将尚未定价的零值解释为免费。
+
+## 后续修复：参考卡片与画幅交付（2026-10-10）
+
+用户真实运行 `run_c8fbfc4e-8dd9-46f6-8597-8d5d5d474d38` 已收到 framingPolicy，仍在交付时把模型输入的 16:9 与实际 9:16 描述成需确认的差异。此前计划保存小样本不能证明完整出片交付话术。现从模型 plan 工具定义移除 aspectRatio 参数，由执行适配层依据当前用户要求落实；资源服务与网关仍校验实际画幅。交付指令要求以实际计划/成片为准，不把默认规则包装成异常。
+
+参考视频卡片此前调用完整 inspect，错误被吞并统一显示“视频暂不可用”，没有重试；截图本身不足以证明那次是超时。现使用 metadataOnly 读取账号授权下的持久化资料和系统预设 COS 地址，不创建解析工作区、不抽帧；失败显示“资料加载失败，点击重试”，与播放器不可用区分。资源服务保持完整 inspect 的实际媒体解析行为。
+
+修复版本：Harness/UI/资源服务 `e72ed3968f2a61fedca93fb46b6c55cd1b99c204`，主平台契约 `7ddff58c3f791b3151302d4610471ce968511f2c`。独立 Linux 必要类型/构建检查、服务就绪、公网 UI revision 和产物摘要检查通过。实际账号读取截图中的系统参考 `res_258a1964b150b4265a0ebc08` 返回名称“自助烧烤 · 超值畅吃”和 COS 地址，耗时 278ms；店铺资料耗时 237ms。COS 实际视频范围读取返回 HTTP 206。
+
+浏览器控制两次超时于 CDP `Emulation.setFocusEmulationEnabled`，原生窗口连接返回 `cgWindowNotFound`；未完成浏览器播放、点击重试及窄屏视觉验收，不以 API 或构建结果替代这些证据。
+
+完整出片真实场景 `run_14be0c95-cae5-46a7-9fa9-5862eb37cb0c`（`deepseek-flash`）：读取真实计划 `res_deaa8ae72a42708721786001`，按已有素材、切点与音轨另存并渲染默认画幅成片。实际 status、inspect 两次、list、plan、render 均完成；新计划 `res_5e84cda7fb9972ff2ab82aa9`，新输出 `res_858517dab86bf32b30eecdf4`，1080×1920、30fps、22.1 秒。最终回复正确交付竖屏成片，无默认画幅确认或内部参数差异话术；未调用 narrate、AI 补镜头或确认工具。验证回执在主平台容器 `/tmp/harness-delivery-response-validation.json`。这是一个完整出片样本，不构成全部未来回复的保证。
