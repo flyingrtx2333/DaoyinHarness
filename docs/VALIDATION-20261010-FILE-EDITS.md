@@ -1,6 +1,6 @@
 # 2026-10-10 文件编辑基础能力真实验收
 
-最终代码与云端 runtime/executor：`20121af3aa419a2710fb80ac4adf12cc75898b0d`。真实四例全部通过。SWE-bench 推理运行于此前已修复核心回执和观察保护的 `f2be8565fd449a25ab10c873f757c5cd0b95b938`，不将该成绩标成最终换行修订的成绩。
+最终代码与云端 runtime/executor：`20121af3aa419a2710fb80ac4adf12cc75898b0d`。真实四例全部通过。SWE-bench 包含此前 `f2be8565fd449a25ab10c873f757c5cd0b95b938` 和最终 `20121af3aa419a2710fb80ac4adf12cc75898b0d` 的两轮，分别记录。最终版本官方补丁评分 **1/3**，没有把此前 2/3 标成最终成绩。
 
 ## 实现与范围
 
@@ -35,13 +35,13 @@
 
 冻结 Verified 数据集 `c104f840cc67f8b6eec6f759ebc8b2693d585d4a` 的原三例，准确 base commit、仅题目输入，无 gold/test patch 注入推理。每例 12 次共享调用、420 秒，三例实际推理共 36 次共享调用（33 Agent + 3 路由）。补丁通过普通云端能力导出成不可变制品，随后独立官方 swebench 3.0.15 评测。
 
-初次官方评测第二题通过，第一题失败，第三题环境构建 conda 退出 137；评测 VM 内核证据确认 OOM。只将独立 VM 从 4 GiB 改为 8 GiB，重新评测同一批既有补丁，没有再次推理。最终官方结果：`graded-small-sample`，三个补丁均成功应用，覆盖与清理完整，没有 error/incomplete；**2/3 resolved**：pytest-dev__pytest-5631 和 sympy__sympy-12481 通过，pytest-dev__pytest-5787 未通过。
+**此前 f2be856 轮：**初次官方评测第二题通过，第一题失败，第三题环境构建 conda 退出 137；评测 VM 内核证据确认 OOM。只将独立 VM 从 4 GiB 改为 8 GiB，重新评测同一批既有补丁，没有再次推理。此前 f2be856 轮的最终官方结果：`graded-small-sample`，三个补丁均成功应用，覆盖与清理完整，没有 error/incomplete；**2/3 resolved**：pytest-dev__pytest-5631 和 sympy__sympy-12481 通过，pytest-dev__pytest-5787 未通过。
 
-第一题的补丁已成功应用，失败为异常链 round-trip 重建为 ReprExceptionInfo，官方两个 FAIL_TO_PASS 用例失败。模型也留下未导入 ExceptionChainRepr 的已知缺陷并耗尽预算，不能将工具成功或 turn.completed 当成用户任务成功。
+**此前 f2be856 第一题：**补丁已成功应用，失败为异常链 round-trip 重建为 ReprExceptionInfo，官方两个 FAIL_TO_PASS 用例失败。模型也留下未导入 ExceptionChainRepr 的已知缺陷并耗尽预算，不能将工具成功或 turn.completed 当成用户任务成功。
 
 ## 用量与成本
 
-本轮包含调试、失败重测、最终四例及三例 SWE 推理，14 个实际 run，127 条网关操作对应 127 条成功、CNY CALCULATED 账单记录。总成本 `1.25990820 CNY`；输入 token 1,514,317，输出 token 27,969。最终四例 31 次、`0.22086664 CNY`；SWE 推理 36 次、`0.61126472 CNY`。不含此前历史测试和评测虚拟机资源成本；token 数按账单原字段，不推断文本长度或未配置价格。
+本轮包含调试、失败重测、最终四例及三例 SWE 推理，17 个实际 run，160 条网关操作对应 159 条成功且 CNY CALCULATED 的账单记录，以及 1 条 MODEL_RESPONSE_INCOMPLETE 失败、账务分类 FAILED_FREE 的记录。已记录成本 `1.77812456 CNY`；账单字段输入 token 2,113,604，输出 token 36,951（包含该失败记录的已记录 token，不推断供应商最终结算）。最终四例 31 次、`0.22086664 CNY`；此前 f2be856 SWE 推理 36 次、`0.61126472 CNY`；最终 20121af SWE 推理 33 次、`0.51821636 CNY`。不含此前历史测试和评测虚拟机资源成本；token 数按账单原字段，不推断文本长度或未配置价格。
 
 ## 静态检查、部署与边界
 
@@ -55,9 +55,30 @@ macOS 限定 TypeScript/ESLint、脚本语法和 diff whitespace 检查通过；
 
 - `.cache/file-edits-live/2026-10-10T12-57-11.099Z_5802964f/report.json` — `3e40f44bab4d3f4ae6d66685229f161bbf7625210260c94a63d30c8d8b91660d`
 - `.cache/swebench-cloud-live/2026-10-10T12-32-47.741Z_d5bce3e2/report.json` — `187cf00697268c041fa519e038bde7f9de1c7043d771afefdceb8e03ce0c748b`
-- `.cache/file-edits-live/accounting-final.json` — `6e0b428eebaf066b818ce161349af9d2b13e9119679fb0e362f8999f8fca24f3`
+- `.cache/file-edits-live/accounting-final.json` — `cf34f41bd3779178630a805edf464fbcdd1b5bf1607596ae96659b858536c5e0`
 
 - `.cache/swebench-grade/2026-10-10T12-53-49.127Z_93cbfabd/report.json` — `1af2651910018bf8e77ace3d522bd6df5bed5055e2037eaead88f947ba63d2cf`
 - `/Users/xiangjunsheng/DaoyinHarness/.cache/swebench-grade/2026-10-10T12-53-49.127Z_93cbfabd/daoyin-cloud-f2be8565fd44.daoyin-verified-3-88bc9eda.json` — `cb4e53252a1658e54b183c32cee4cd026d74aac4c05e51d4fcd4d0cde82ea60b`
 
 官方评测自身的题目测试由独立环境执行；未在 Harness 执行遗留回归套件。官方已清理本次容器，独立评测 VM 在完成后关闭，不更改其他 Docker 服务或 context。
+
+## 最终部署版本的 SWE 结果
+
+`20121af3aa419a2710fb80ac4adf12cc75898b0d`；同模型、同原三题、同 12 次共享调用/420 秒上限。实际 33 次共享调用，没有在失败后重新求解题目。
+
+| 题目 | 官方补丁结果 | Agent 流程事实 |
+| --- | --- | --- |
+| pytest-dev__pytest-5787 | unresolved | 新异常链两个 FAIL_TO_PASS 均通过，但旧行为有两项 PASS_TO_PASS 回归：test_xdist_longrepr_to_str_issue_241 与 test_deserialization_failure 抛 KeyError: reprtraceback；模型用完 12 次调用，未实际验证 |
+| pytest-dev__pytest-5631 | resolved | 9 次共享调用，含一次 MODEL_RESPONSE_INCOMPLETE；依赖安装/验证等待期间触及 420 秒观察截止，run 已取消。通过的是停止时的源码补丁，不能标为 Agent 成功完成任务 |
+| sympy__sympy-12481 | empty_patch | 12 次调用全部用于定位与读取，模型明确报告未修改、未测试；实际导出为空补丁，没有代填修复 |
+
+三个实际产物均提交官方 swebench 3.0.15：resolved 1、unresolved 1、empty 1，error/incomplete 0；官方覆盖完整、清理完整。小样本结果变化表明解题过程仍不稳定，不能声称整体可靠性已解决。后续问题在预算分配、依赖准备与兼容性验证；本轮没有为题目加入强制修改策略或参考补丁。
+
+原推理报告保留 cloud-inference-incomplete。对已取消的第二题，仅通过普通账号导出停止后的真实文件，原 run 保持 cancelled；原模型事件和报告未重写。导出前后源文件指纹均为 `8e9390ba0ccdf205326e487545e5bb5b6ee2e01c7bfa403a2d19077c4686b237`，新增模型调用和源码编辑均为 0。一次只读进程的响应不确定，通过原 requestId 的持久化 operation.completed 和不可变输出恢复，没有重放原操作。derived report 记录该恢复，官方评分只说明产物，不将取消流程改为成功。
+
+最终轮证据 SHA-256：
+- `.cache/swebench-cloud-live/2026-10-10T13-07-23.002Z_ff6d105e/report.json` — `d83dd43990b9f97ef326f24fd1e0b02b134562888f3d4e0e1f1c9664a5141d9c`
+- `.cache/swebench-cloud-live/2026-10-10T13-07-23.002Z_ff6d105e/terminal-export-recovery/report.json` — `9bcf42e21380b5f92e1a56405cfc49b3724a877083bac7358701c5c2148dbf9c`
+- `.cache/swebench-cloud-live/2026-10-10T13-07-23.002Z_ff6d105e/terminal-export-recovery/recovery.json` — `749be0cc7719d29f5551af5a95da05217dc55a58e8ee99ef35aa863f2c928fba`
+- `.cache/swebench-cloud-live/2026-10-10T13-07-23.002Z_ff6d105e/terminal-export-recovery/resumption-provenance.json` — `0f695de96a84da74a70cb28930555fad63d44b687115d0f19a7d2960fbdbb2aa`
+- `.cache/swebench-grade/2026-10-10T13-27-16.450Z_2144a248/report.json` — `1460d0ddb9287d911cf74e1b2faf1350b75000566764e4a531b7d3320351b550`
