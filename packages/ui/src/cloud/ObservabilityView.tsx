@@ -250,7 +250,7 @@ export function ObservabilityView({ client }: { client: EvaluationClient }): Rea
     {metrics && <div className="observability-metrics"><article><span>任务次数</span><strong>{metrics.traces}</strong></article><article><span>失败率</span><strong>{(metrics.errorRate * 100).toFixed(metrics.errorRate ? 1 : 0)}%</strong></article><article><span>通常完成时间</span><strong>{duration(metrics.p50Ms)}</strong></article><article><span>95% 完成时间</span><strong>{duration(metrics.p95Ms)}</strong></article></div>}
     {state === "loading" && runs.length === 0 && <p className="observability-state" role="status">正在读取审计记录…</p>}
     {state === "ready" && runs.length === 0 && <p className="observability-state">当前时间范围内还没有新的完整审计记录。</p>}
-    {runs.length > 0 && <AuditDashboard runs={runs} hours={hours} selected={selected} onSelect={setSelected} />}
+    {runs.length > 0 && <AuditDashboard runs={runs} hours={metrics?.windowHours ?? hours} selected={selected} onSelect={setSelected} />}
     {runs.length > 0 && <div className="observability-layout audit-layout">
       <section className="observability-panel"><h2>最近任务</h2><div className="trace-list">{runs.map(run => <button type="button" className="trace-row audit-run-row" aria-current={selected === run.traceId ? "true" : undefined} onClick={() => setSelected(run.traceId)} key={run.traceId}>
         <span data-status={run.status === "completed" ? "ok" : run.status === "running" ? "running" : "error"}>{statusLabel[run.status]}</span><strong title={run.userMessage}>{clip(run.userMessage.replace(/^\[营火内置剪辑[^\]]*\]\s*/u, ""), 80)}</strong><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString("zh-CN")}</time><small>{run.modelCalls} 次模型 · {run.toolCalls} 次工具 · {run.eventCount} 条事件</small>

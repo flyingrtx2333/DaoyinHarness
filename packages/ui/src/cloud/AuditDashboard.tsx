@@ -6,7 +6,7 @@ const colors: Record<AuditRunSummary["status"], string> = { completed: "#177a4c"
 const title = (run: AuditRunSummary): string => run.userMessage.replace(/^\[营火内置剪辑[^\]]*\]\s*/u, "") || "未命名任务";
 
 export function AuditDashboard({ runs, hours, selected, onSelect }: {
-  runs: readonly AuditRunSummary[]; hours: number; selected?: string; onSelect: (traceId: string) => void;
+  runs: readonly AuditRunSummary[]; hours: number; selected: string | undefined; onSelect: (traceId: string) => void;
 }): React.JSX.Element {
   // The existing endpoint returns at most 30 traces. Never label this sample as all tasks.
   const end = Date.now();
