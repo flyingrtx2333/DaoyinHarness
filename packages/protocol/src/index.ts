@@ -130,6 +130,8 @@ export interface ToolEvidence {
   result: JsonValue;
   artifacts: string[];
   diagnostics: string[];
+  /** Capability-owned changed resource to inspect; not a claim of task validation. */
+  verificationHint?: { resourceId: string; paths?: string[] };
 }
 
 export interface AgentEventPayloads {

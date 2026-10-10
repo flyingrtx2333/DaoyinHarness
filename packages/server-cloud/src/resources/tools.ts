@@ -1,5 +1,5 @@
 import type { ExecutionIdentity } from "@daoyin/harness-contracts";
-import type { JsonValue } from "@daoyin/harness-protocol";
+import type { JsonValue, ToolEvidence } from "@daoyin/harness-protocol";
 import type { CloudRun } from "../repository.js";
 import type { CloudToolBinding } from "../app.js";
 import { CloudError } from "../repository.js";
@@ -140,6 +140,18 @@ function invalidWorkspacePath(name: ResourceToolName, input: Record<string, unkn
   });
 }
 
+function resourceVerificationHint(name: ResourceToolName, input: Record<string, unknown>, result: Record<string, unknown>): ToolEvidence["verificationHint"] {
+  const resourceId = input.workspaceId;
+  if (typeof resourceId !== "string" || !/^wsp_[a-f0-9]{24}$/u.test(resourceId)) return undefined;
+  if (name === "workspace_restore") return { resourceId };
+  if (!name.startsWith("file_") || !RESOURCE_DEFINITIONS[name].mutating) return undefined;
+  // Only successful execution receipts identify changed paths. A unified patch
+  // without a path receipt leaves its verification scope at the workspace.
+  const paths = [...new Set([result.path, result.from, result.to].filter((value): value is string =>
+    typeof value === "string" && value.length <= 512 && !value.includes("\0") && workspacePath.test(value)))].slice(0, 2);
+  return { resourceId, ...(paths.length ? { paths } : {}) };
+}
+
 const CAMPFIRE_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   resource_campfire_list: "查询营火素材",
   resource_campfire_inspect: "查看真实素材",
@@ -211,7 +223,9 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             result = { ...result, framingPolicy: "本轮用户未明确要求横屏或方形时，执行层应用默认9:16竖屏。这是正常默认行为，不是参数错误；无需再次确认画幅，直接继续制作。" };
           }
           await ensureActive(identity, signal);
-          return { ok: true, summary: typeof result.summary === "string" ? result.summary : `${name} completed.`, evidence: { schemaVersion: 1, toolName: name, result: result as JsonValue, artifacts: [], diagnostics: [] } };
+          const verificationHint = resourceVerificationHint(name, input, result);
+          return { ok: true, summary: typeof result.summary === "string" ? result.summary : `${name} completed.`, evidence: { schemaVersion: 1, toolName: name, result: result as JsonValue, artifacts: [], diagnostics: [],
+            ...(verificationHint === undefined ? {} : { verificationHint }) } };
         },
       },
       requiredPermissions: ["agent.use"],

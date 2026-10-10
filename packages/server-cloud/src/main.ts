@@ -49,16 +49,39 @@ let heartbeat: ReturnType<typeof setInterval> | undefined;
 let closing: Promise<void> | undefined;
 let telemetry: Telemetry = disabledTelemetry;
 
+async function shutdownStage(stage: "app.close" | "telemetry.shutdown" | "lease.release" | "repository.close",
+    operation: () => Promise<void> | undefined): Promise<void> {
+  const startedAt = performance.now();
+  const record = (status: "started" | "waiting" | "completed" | "error"): void => {
+    try {
+      process.stderr.write(JSON.stringify({ event: "cloud.shutdown", stage, status,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        activeResources: [...new Set(process.getActiveResourcesInfo())].sort(),
+      }) + "\n");
+    } catch { /* Diagnostics must not prevent ordered resource cleanup. */ }
+  };
+  record("started");
+  const monitor = setInterval(() => record("waiting"), 10_000);
+  monitor.unref();
+  try {
+    await operation();
+    record("completed");
+  } catch (error) {
+    record("error");
+    throw error;
+  } finally { clearInterval(monitor); }
+}
+
 function close(): Promise<void> {
   if (closing !== undefined) return closing;
   if (heartbeat !== undefined) clearInterval(heartbeat);
   closing = (async () => {
-    try { await app?.close(); }
+    try { await shutdownStage("app.close", () => app?.close()); }
     finally {
-      try { await telemetry.shutdown(); }
+      try { await shutdownStage("telemetry.shutdown", () => telemetry.shutdown()); }
       finally {
-        try { await repository.releaseRuntimeLease(); }
-        finally { await repository.close(); }
+        try { await shutdownStage("lease.release", () => repository.releaseRuntimeLease()); }
+        finally { await shutdownStage("repository.close", () => repository.close()); }
       }
     }
   })();

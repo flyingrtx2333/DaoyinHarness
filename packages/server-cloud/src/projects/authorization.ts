@@ -28,5 +28,29 @@ export function registerProjectAuthorization(app:FastifyInstance,options:{
   await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(socket,resolve);});
   await chmod(socket,0o660);
  });
- app.addHook("onClose",async()=>{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await unlink(socket).catch(()=>undefined);});
+ app.addHook("onClose",async()=>{
+  const record=(stage:"project_authorization.listener.close"|"project_authorization.socket.unlink",
+   status:"started"|"completed"|"error",startedAt:number):void=>{
+   try{
+    process.stderr.write(JSON.stringify({event:"cloud.shutdown",stage,status,
+     elapsedMs:Math.round(performance.now()-startedAt),
+     activeResources:[...new Set(process.getActiveResourcesInfo())].sort()})+"\n");
+   }catch{/* Diagnostics must not change authorization-server cleanup. */}
+  };
+  const listenerStartedAt=performance.now();
+  record("project_authorization.listener.close","started",listenerStartedAt);
+  try{
+   server.closeAllConnections();
+   await new Promise<void>(resolve=>server.close(()=>resolve()));
+   record("project_authorization.listener.close","completed",listenerStartedAt);
+  }catch(error){
+   record("project_authorization.listener.close","error",listenerStartedAt);
+   throw error;
+  }
+  const unlinkStartedAt=performance.now();
+  record("project_authorization.socket.unlink","started",unlinkStartedAt);
+  await unlink(socket).then(
+   ()=>record("project_authorization.socket.unlink","completed",unlinkStartedAt),
+   ()=>record("project_authorization.socket.unlink","error",unlinkStartedAt));
+ });
 }

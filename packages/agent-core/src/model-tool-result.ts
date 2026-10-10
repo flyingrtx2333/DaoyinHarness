@@ -68,7 +68,8 @@ export function modelToolResult(result: ToolExecution, maxCharacters = MAX_MODEL
     throw new Error("Invalid tool result context budget.");
   }
   const complete = result.ok
-    ? { ok: true, summary: result.summary, result: result.evidence.result }
+    ? { ok: true, summary: result.summary,
+      ...(result.evidence.verificationHint === undefined ? {} : { verificationHint: result.evidence.verificationHint }), result: result.evidence.result }
     : { ok: false, code: result.code, message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) };
   const serialized = JSON.stringify(complete);
   if (serialized.length <= maxCharacters) return serialized;
@@ -80,7 +81,10 @@ export function modelToolResult(result: ToolExecution, maxCharacters = MAX_MODEL
   };
   const textBudget = Math.min(1024, Math.floor(maxCharacters / 8));
   if (result.ok) {
-    const envelope = { ok: true, summary: boundedString(result.summary, textBudget), modelContext };
+    const envelope = { ok: true, summary: boundedString(result.summary, textBudget), modelContext,
+      ...(result.evidence.verificationHint === undefined ? {} : {
+        verificationHint: boundedJson(result.evidence.verificationHint, textBudget),
+      }) };
     const budget = maxCharacters - JSON.stringify(envelope).length - 16;
     return JSON.stringify({ ...envelope, result: boundedJson(result.evidence.result, budget) });
   }

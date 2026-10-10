@@ -816,8 +816,18 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
   app.addHook("preClose", async () => {
     closing = true;
     const running = [...active.values()];
+    const startedAt = performance.now();
+    const record = (status: "started" | "completed"): void => {
+      try {
+        process.stderr.write(JSON.stringify({ event: "cloud.shutdown", stage: "active.preClose", status,
+          elapsedMs: Math.round(performance.now() - startedAt), runningAtStart: running.length,
+          activeRemaining: active.size }) + "\n");
+      } catch { /* Diagnostics must not prevent cancellation or task settlement. */ }
+    };
+    record("started");
     for (const item of running) item.controller.abort("runtime");
     await Promise.allSettled(running.map((item) => item.done));
+    record("completed");
   });
   return app;
 }

@@ -151,6 +151,7 @@ type ToolEvidence = {
   result: unknown;
   artifacts: string[];
   diagnostics: string[];
+  verificationHint?: { resourceId: string; paths?: string[] };
 };
 
 type ToolDisplay = {
@@ -161,6 +162,10 @@ type ToolDisplay = {
 ```
 
 `ToolEvidence` is persisted for Agent reasoning and diagnostics. `ToolDisplay` is safe for normal UI rendering. Raw JSON, validation traces, credentials, absolute secret paths and stack traces never become assistant messages.
+
+`verificationHint` is an optional capability-owned target for inspecting a changed deliverable. It is persisted with the successful receipt and retained in bounded model context. It does not certify task acceptance. The cloud workspace adapter supplies it for successful file changes and workspace restores; process execution, snapshots and arbitrary mutating tools do not automatically request verification. The kernel treats identifiers and paths as data and does not infer task semantics from language, commands or benchmark names.
+
+When changed deliverables exist, the Agent keeps one tool-enabled inspection opportunity within its existing call budget before the tool-free report. A premature final draft can request that opportunity once; completed tools are never replayed. Existing verification evidence can be reused, and explicit user instructions against additional verification are respected. Budget exhaustion still yields an honest completed/partial/blocked self-assessment, separate from the execution terminal event; no generic semantic validator guarantees task correctness.
 
 After a terminal tool failure, the Agent must generate a normal final response that states what succeeded, what failed, whether work was preserved, and the next safe action. Only explicit security or policy violations use `critical` presentation.
 

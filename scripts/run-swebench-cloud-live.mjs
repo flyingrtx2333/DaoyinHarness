@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createCloudAccountClient, readHiddenCredentials, sanitizeEvidence } from "./cloud-live-client.mjs";
+import { createCloudAccountClient, readHiddenCredentials, requestCloudObservation, sanitizeEvidence } from "./cloud-live-client.mjs";
 import { loadPreparedSources, uploadPreparedSource } from "./swebench-source-upload.mjs";
 
 const root = resolve(import.meta.dirname, "..");
@@ -73,11 +73,13 @@ const accountModelAttempts = (item, events) => {
   report.sharedModelCalls = report.modelCalls + report.routingModelCalls;
 };
 const controller = new AbortController();
+const inferenceDeadline = performance.now() + report.limits.totalMs;
 const timer = setTimeout(() => controller.abort(new Error("Cloud inference total deadline exceeded.")), report.limits.totalMs);
 const stop = () => controller.abort(new Error("Operator cancelled cloud inference."));
 process.once("SIGINT", stop); process.once("SIGTERM", stop);
 const client = createCloudAccountClient({ signal: controller.signal });
 let currentRun;
+let observationDeadline;
 let stage = "sign-in";
 const started = performance.now();
 const makeControl = (item, evidenceOutput) => async (action, input = {}, timeoutMs = 120_000) => {
@@ -283,7 +285,17 @@ try {
   const credentials = await readHiddenCredentials({ signal: controller.signal });
   report.account = await client.login(credentials);
   credentials.password = "";
-  const call = async (path, body, options) => (await client.request(path, body, options)).result;
+  const call = async (path, body, options = {}) => {
+    if (body !== undefined) return (await client.request(path, body, options)).result;
+    return (await requestCloudObservation(client, path, { ...options,
+      signal: options.signal === null ? null : options.signal ?? controller.signal,
+      deadline: options.deadline ?? observationDeadline ?? inferenceDeadline,
+      onRecovery: async receipt => {
+        (report.observationRecovery ??= []).push({ path, runId: currentRun ?? null, ...receipt });
+        await save();
+      },
+    })).result;
+  };
   const runtime = async () => {
     const observed = await call("/runtime");
     if (observed?.build?.revision !== expected) throw Object.assign(new Error("Running revision changed; remaining inference stopped."), { code: "SWE_RUNTIME_REVISION_MISMATCH" });
@@ -355,17 +367,37 @@ try {
       const cleanupCall = async (path, body) => {
         const remaining = Math.floor(deadline - performance.now());
         if (remaining < 100) throw new Error("Bounded cancellation/evidence deadline reached.");
-        return (await client.request(path, body, { signal: null, timeoutMs: Math.min(5000, remaining) })).result;
+        return call(path, body, { signal: null, timeoutMs: Math.min(5000, remaining), deadline });
       };
       item.terminalConfirmed = false;
       try {
-        await cleanupCall(`/runs/${item.runId}/cancel`, {});
-        item.cancellationRequested = true;
-        let run;
-        while (performance.now() < deadline - 5000) {
-          run = (await cleanupCall(`/runs/${item.runId}`)).run;
+        const observeRun = async () => {
+          const run = (await cleanupCall(`/runs/${item.runId}`)).run;
           if (run?.id !== item.runId || run.sessionId !== item.sessionId) throw new Error("Cancellation receipt scope mismatch.");
-          if (["completed", "failed", "cancelled", "interrupted"].includes(run.status)) { item.terminalConfirmed = true; break; }
+          if (!["running", "queued", "completed", "failed", "cancelled", "interrupted"].includes(run.status)) {
+            throw new Error("Cancellation receipt has an unknown run state.");
+          }
+          item.terminalConfirmed = ["completed", "failed", "cancelled", "interrupted"].includes(run.status);
+          return run;
+        };
+        let run = await observeRun();
+        if (!item.terminalConfirmed) {
+          item.cancellationAttempted = true;
+          await save();
+          try {
+            await cleanupCall(`/runs/${item.runId}/cancel`, {});
+            item.cancellationRequested = true;
+          } catch (cancelError) {
+            item.cancellationFailure = { code: String(cancelError.code ?? cancelError.name), name: cancelError.name,
+              ...(cancelError.publicFailure ? { publicFailure: cancelError.publicFailure } : {}) };
+            await save();
+            if ([401, 402, 403].includes(cancelError.publicFailure?.status)) throw cancelError;
+          }
+        }
+        while (!item.terminalConfirmed && performance.now() < deadline - 5000) {
+          // A lost cancellation response is not permission to replay its POST.
+          run = await observeRun();
+          if (item.terminalConfirmed) break;
           await new Promise(resolve => setTimeout(resolve, 250));
         }
         if (item.terminalConfirmed) {
@@ -398,7 +430,9 @@ try {
         item.finalEvidenceCollected = true;
       } catch (cleanupError) {
         item.cleanupFailure = { code: String(cleanupError.code ?? cleanupError.name),
-          message: "Cancellation or final cloud receipt could not be confirmed within the bounded cleanup window." };
+          message: "Cancellation or final cloud receipt could not be confirmed within the bounded cleanup window.",
+          ...(cleanupError.publicFailure ? { publicFailure: cleanupError.publicFailure } : {}),
+          ...(cleanupError.observationRecovery ? { observationRecovery: cleanupError.observationRecovery } : {}) };
       }
       item.lifecycleIncomplete = !item.terminalConfirmed || !item.finalEvidenceCollected;
       if (item.lifecycleIncomplete) report.lifecycleIncomplete = true;
@@ -504,6 +538,7 @@ try {
         }
       }
       const caseDeadline = performance.now() + report.limits.perCaseMs;
+      observationDeadline = caseDeadline;
       while (["running", "queued"].includes(run.status) && performance.now() < caseDeadline) {
         controller.signal.throwIfAborted();
         await collect();
@@ -514,6 +549,7 @@ try {
         throw Object.assign(new Error("Case deadline reached; cancellation will be requested; accepted run was not resubmitted."), { code: "SWE_CASE_TIMEOUT" });
       }
       currentRun = undefined;
+      observationDeadline = undefined;
       item.terminalConfirmed = true;
       await collect();
       await runtime();
@@ -558,7 +594,8 @@ try {
         model_name_or_path: `daoyin-cloud-${expected.slice(0, 12)}`, model_patch: patch });
       else item.status = "no-successful-model-inference";
       if (["interrupted", "cancelled"].includes(run.status)) {
-        throw fail("SWE_RUNTIME_INTERRUPTED", "The accepted run was interrupted or cancelled; retained its terminal evidence and patch and stopped remaining case admission.");
+        throw Object.assign(new Error("The accepted run was interrupted or cancelled; retained its terminal evidence and patch and stopped remaining case admission."),
+          { code: "SWE_RUNTIME_INTERRUPTED" });
       }
     } catch (error) {
       item.status = "blocked-or-incomplete";
@@ -567,11 +604,13 @@ try {
         item.workspaceCreateRecovery.failureCode = String(error.code ?? error.name);
       }
       item.error = { code: String(error.code ?? error.name), stage, message: String(error.message).slice(0, 700),
-        ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}) };
+        ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}),
+        ...(error.observationRecovery ? { observationRecovery: error.observationRecovery } : {}) };
       if (!currentRun && item.requestId && !item.runId) {
         // A timed-out POST may have been accepted. Read its receipt once; never resubmit it.
         try {
-          const receipt = (await client.request(`/sessions/${item.sessionId}/runs`, undefined, { signal: null, timeoutMs: 15_000 })).result;
+          const receipt = await call(`/sessions/${item.sessionId}/runs`, undefined, { signal: null, timeoutMs: 15_000, totalTimeoutMs: 15_000,
+            deadline: performance.now() + 15_000 });
           const accepted = receipt.runs?.find(run => run.requestId === item.requestId);
           if (accepted) { item.runId = accepted.id; item.recoveredAcceptedReceipt = true; currentRun = accepted.id; }
           else { item.lifecycleIncomplete = true; report.lifecycleIncomplete = true; }
@@ -584,13 +623,14 @@ try {
       if ([401, 402, 403].includes(error.publicFailure?.status) || ["SWE_MODEL_ACCESS_BLOCKED", "SWE_RUNTIME_INTERRUPTED"].includes(error.code) ||
           stage === "ordinary-isolated-runtime-build" || infrastructureFailure(error.code ?? error.publicFailure?.code) ||
           item.lifecycleIncomplete || controller.signal.aborted) throw error;
-    } finally { item.durationMs = Math.round(performance.now() - began); await save(); }
+    } finally { observationDeadline = undefined; item.durationMs = Math.round(performance.now() - began); await save(); }
   }
   report.status = predictions.length === selectedIds.length ? "cloud-inference-exported-awaiting-official-grading" : "cloud-inference-incomplete";
 } catch (error) {
   report.status = controller.signal.aborted ? "cancelled-or-timeout" : "blocked";
   report.error = { code: String(error.code ?? error.name), stage, message: String(error.message).slice(0, 700),
-    ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}) };
+    ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}),
+    ...(error.observationRecovery ? { observationRecovery: error.observationRecovery } : {}) };
 } finally {
   clearTimeout(timer); client.close(); report.finishedAt = new Date().toISOString();
   report.durationMs = Math.round(performance.now() - started); report.submittedIds = predictions.map(row => row.instance_id);

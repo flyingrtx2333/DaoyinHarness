@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const SENSITIVE_KEY = /token|password|passwd|cookie|secret|authorization|credential|csrf|accountscope/i;
 const SENSITIVE_TEXT = /(?:bearer\s+[a-z0-9._~+/-]{8,}|\bsk-[a-z0-9_-]{8,}\b|saishi_agent_[A-Za-z0-9_-]{64})/giu;
@@ -10,6 +11,79 @@ export function sanitizeEvidence(value) {
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) =>
     [key, SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeEvidence(item)]));
   return value;
+}
+
+/** Retry only an observation of the same endpoint; never login, submit or replay a write. */
+export async function requestCloudObservation(client, path, {
+  signal, timeoutMs = 20_000, totalTimeoutMs = 30_000, deadline, maxAttempts = 3, onRecovery,
+} = {}) {
+  if (!client || typeof client.request !== 'function' || typeof path !== 'string' ||
+      !path.startsWith('/') || path.startsWith('//') || path.startsWith('/api/') || path.includes('..') ||
+      !Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 650_000 ||
+      !Number.isSafeInteger(totalTimeoutMs) || totalTimeoutMs < 100 || totalTimeoutMs > 650_000 ||
+      !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5 ||
+      (deadline !== undefined && !Number.isFinite(deadline)) || (onRecovery !== undefined && typeof onRecovery !== 'function')) {
+    throw new Error('Invalid bounded cloud observation request.');
+  }
+  signal?.throwIfAborted();
+  const began = performance.now();
+  const until = Math.min(began + totalTimeoutMs, deadline ?? Infinity);
+  const recovery = { method: 'GET', attempts: [], maxAttempts, totalTimeoutMs, writesReplayed: 0 };
+  let lastError;
+  const record = async entry => {
+    recovery.attempts.push(entry);
+    try { await onRecovery?.(sanitizeEvidence(entry)); }
+    catch (error) {
+      recovery.stopReason = 'recovery-evidence-failed';
+      error.observationRecovery = recovery;
+      throw error;
+    }
+  };
+  const stop = reason => {
+    recovery.stopReason = reason;
+    const error = lastError ?? Object.assign(new Error('Cloud observation deadline exceeded.'), { code: 'CLOUD_OBSERVATION_TIMEOUT' });
+    error.observationRecovery = recovery;
+    throw error;
+  };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    signal?.throwIfAborted();
+    const remaining = Math.floor(until - performance.now());
+    if (remaining < 100) stop('deadline');
+    try {
+      const response = await client.request(path, undefined, { timeoutMs: Math.min(timeoutMs, remaining), signal });
+      signal?.throwIfAborted();
+      if (performance.now() >= until) stop('deadline');
+      if (recovery.attempts.length) await record({ attempt, status: 'recovered', elapsedMs: Math.round(performance.now() - began) });
+      signal?.throwIfAborted();
+      if (performance.now() >= until) stop('deadline');
+      return response;
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (error.observationRecovery === recovery) throw error;
+      lastError = error;
+      const status = error.publicFailure?.status;
+      const code = error.publicFailure?.code ?? error.code;
+      const causeCode = error.cause?.code;
+      const denied = [401, 402, 403].includes(status);
+      const transient = !denied && ([408, 425, 429, 500, 502, 503, 504].includes(status) ||
+        (status === undefined && (error.name === 'TimeoutError' || code === 'CLOUD_REQUEST_UNCERTAIN' ||
+          ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH',
+            'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET'].includes(code ?? causeCode))));
+      const retryAfterMs = Number.isFinite(error.publicFailure?.retryAfterSeconds)
+        ? Math.max(0, Math.ceil(error.publicFailure.retryAfterSeconds * 1000)) : 0;
+      const waitMs = Math.max(Math.min(2000, 500 * 2 ** (attempt - 1)), retryAfterMs);
+      const reason = denied ? 'authorization-or-quota-denied' : !transient ? 'non-transient-failure' :
+        attempt === maxAttempts ? 'attempt-limit' : performance.now() + waitMs + 100 >= until ? 'deadline' : undefined;
+      await record({ attempt, status: reason ? 'stopped' : 'retrying-read-only', elapsedMs: Math.round(performance.now() - began),
+        failure: { source: error.publicFailure ? 'cloud-response' : 'transport', name: error.name,
+          ...(code ? { code } : {}), ...(causeCode ? { causeCode } : {}),
+          ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}) },
+        ...(reason ? { reason } : { waitMs }) });
+      signal?.throwIfAborted();
+      if (reason) stop(reason);
+      await delay(waitMs, undefined, { signal: signal ?? undefined });
+    }
+  }
 }
 
 /** One hidden JSON line. Neither credentials nor terminal input are printed. */
@@ -108,19 +182,22 @@ export function createCloudAccountClient({ origin = 'https://harness.daoyintech.
       if (size > 3_000_000) { await response.body?.cancel().catch(() => {}); throw new Error('Cloud response exceeds its bound.'); }
       chunks.push(Buffer.from(chunk));
     }
+    const retryAfter = response.headers.get('retry-after');
+    const retryAfterSeconds = retryAfter && /^[0-9]{1,8}$/u.test(retryAfter) ? Number(retryAfter) :
+      retryAfter && Number.isFinite(Date.parse(retryAfter)) ? Math.max(0, (Date.parse(retryAfter) - Date.now()) / 1000) : undefined;
+    const retryAfterReceipt = retryAfterSeconds === undefined ? {} : { retryAfterSeconds };
     let result;
     try { result = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {
       if (!response.ok) throw Object.assign(new Error('Cloud HTTP request failed before a JSON response.'), {
-        code: 'HTTP_ERROR', publicFailure: { status: response.status, path, code: 'HTTP_ERROR', jsonResponse: false },
+        code: 'HTTP_ERROR', publicFailure: { status: response.status, path, code: 'HTTP_ERROR', jsonResponse: false, ...retryAfterReceipt },
       });
       throw Object.assign(new Error('Cloud response is not JSON.'), { code: 'CLOUD_RESPONSE_NOT_JSON' });
     }
     if (!response.ok) {
       const candidate = result?.error?.code ?? result?.detail?.code;
       const code = typeof candidate === 'string' && /^[A-Z0-9_]{1,100}$/u.test(candidate) ? candidate : 'HTTP_ERROR';
-      const retryAfter = response.headers.get('retry-after');
       throw Object.assign(new Error('Cloud HTTP request failed.'), { code, publicFailure: { status: response.status, path, code,
-        ...(retryAfter && /^[0-9]{1,8}$/u.test(retryAfter) ? { retryAfterSeconds: Number(retryAfter) } : {}) } });
+        ...retryAfterReceipt } });
     }
     requestSignal.throwIfAborted();
     return { status: response.status, result };
