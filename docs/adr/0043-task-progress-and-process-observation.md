@@ -34,7 +34,11 @@ are separate and are not guessed from user text or benchmark IDs.
 
 Add optional process_read.waitMs, an integer from 0 through 30000. It waits for
 new output or a non-running state, returning the actual cursor, state and exit
-code. Default reads remain immediate. Each observation joins the existing
+code. Manual API reads remain immediate; Agent reads default to a ten-second
+wait when omitted, and can request zero for immediate observation. An actual
+model run ignored the optional waiting parameter and used two immediate polls;
+the useful default belongs to the capability adapter rather than another prompt.
+Each observation joins the existing
 workspace queue; waits between observations hold no resource lock. waitMs limits
 polling wait, not existing queue or Docker I/O time. Observation failure does not
 prove process failure, and never relaunches the command.

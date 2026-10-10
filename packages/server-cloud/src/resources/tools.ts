@@ -61,7 +61,7 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   git_export_patch: { description: "Export the current Git changes as an immutable patch artifact.", mutating: true, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   process_run: { description: "Run a bounded foreground executable with an argument array inside the workspace gVisor sandbox. Use process_start and bounded process_read waiting for lengthy installs or checks, so one foreground command does not consume the entire turn. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, stdin: { type: "string", maxLength: 1000000 }, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args"]) },
   process_start: { description: "Start a background or PTY process inside the workspace gVisor sandbox. Use process_read with returned processId, cursor and bounded waitMs to observe new output and eventual exit; starting a process does not prove completion. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, processMode, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args", "processMode"]) },
-  process_read: { description: "Read incremental output from a workspace process using its returned cursor to avoid repeated logs. Optional waitMs waits until new output, process exit or the bounded wait limit; default is no waiting. A running state is not evidence that the command completed.", mutating: false, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, cursor: { type: "integer", minimum: 0 }, waitMs: { type: "integer", minimum: 0, maximum: 30000 } }, ["workspaceId", "processId"]) },
+  process_read: { description: "Read incremental output from a workspace process using its returned cursor to avoid repeated logs. Agent reads wait up to 10000ms for new output or process exit when waitMs is omitted; set waitMs=0 for an immediate read, or at most 30000ms for a longer bounded wait. A running state is not evidence that the command completed.", mutating: false, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, cursor: { type: "integer", minimum: 0 }, waitMs: { type: "integer", minimum: 0, maximum: 30000 } }, ["workspaceId", "processId"]) },
   process_write: { description: "Write bounded stdin to a running PTY process.", mutating: true, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, stdin: { type: "string", maxLength: 1000000 } }, ["workspaceId", "processId", "stdin"]) },
   process_stop: { description: "Stop a running workspace process and its process group.", mutating: true, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, signal: { type: "string", enum: ["TERM", "KILL", "INT"] } }, ["workspaceId", "processId"]) },
   process_list: { description: "List recent processes in an attached workspace.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
@@ -224,7 +224,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
           const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : undefined;
           const blockedCode = startsProcess && workspaceId ? blockedProcessWorkspaces.get(workspaceId) : undefined;
           if (blockedCode) return { ok: false, code: blockedCode, message: NETWORK_FAILURE_MESSAGES[blockedCode]!, retryable: false };
-          let boundedProcessInput = input;
+          let boundedProcessInput = name === "process_read" ? { ...input, waitMs: input.waitMs ?? 10_000 } : input;
           if (executionBudget !== undefined && (startsProcess || name === "process_read")) {
             const remainingMs = executionBudget.remainingTimeMs();
             if (!Number.isFinite(remainingMs) || remainingMs < 0 || !Number.isSafeInteger(executionBudget.closeoutReserveMs) || executionBudget.closeoutReserveMs < 0) {
@@ -242,7 +242,8 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             }
             if (startsProcess) boundedProcessInput = { ...input,
               timeoutMs: Math.min(typeof input.timeoutMs === "number" ? input.timeoutMs : name === "process_run" ? 60_000 : availableMs, availableMs) };
-            else if (typeof input.waitMs === "number") boundedProcessInput = { ...input, waitMs: Math.min(input.waitMs, Math.max(0, availableMs)) };
+            else if (typeof boundedProcessInput.waitMs === "number") boundedProcessInput = { ...boundedProcessInput,
+              waitMs: Math.min(boundedProcessInput.waitMs, Math.max(0, availableMs)) };
           }
           let result: Record<string, unknown>;
           try {
