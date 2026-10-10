@@ -49,15 +49,15 @@ function timestamp(seconds: number): string {
 }
 export function campfireCaptions(segments: CampfireSegment[], width: number, height: number, narrationCaptions?: CampfireCaption[], generatedIndices: readonly number[] = [], artText: readonly CampfireArtText[] = []): string {
   const portrait = height > width;
-  const fontSize = portrait ? 58 : 48;
-  const lineLength = portrait ? 16 : 28;
+  const fontSize = portrait ? 72 : 60;
+  const lineLength = portrait ? 14 : 24;
   const artSize = portrait ? 96 : 88;
   const artStyles = [
     ["warm", "&H0048E8FF", "&H00243A85", 7, 4],
     ["fresh", "&H00FFFFFF", "&H00B85E20", 6, 3],
     ["gold", "&H0066D9F5", "&H001A1823", 5, 5],
   ].map(([name, color, outline, border, shadow]) => `Style: Art_${name},Noto Sans CJK SC,${artSize},${color},${color},${outline},&H80000000,-1,0,0,0,100,100,2,0,1,${border},${shadow},5,80,80,80,1`).join("\n");
-  const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Noto Sans CJK SC,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,70,70,${portrait ? 160 : 80},1\n${artStyles}\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+  const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Noto Sans CJK SC,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,70,70,${portrait ? 240 : 110},1\n${artStyles}\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
   const cues: string[] = [];
   const wordSegmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
   let elapsed = 0;
