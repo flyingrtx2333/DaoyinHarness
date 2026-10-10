@@ -128,7 +128,7 @@ function eventDuration(row: AuditRow, timings: ReadonlyMap<string, ToolTiming>, 
     const request = [...events].reverse().find((item): item is Extract<AgentEvent, { type: "model.requested" }> => item.type === "model.requested" && item.eventSeq < firstSeq);
     const response = request && events.find((item): item is Extract<AgentEvent, { type: "model.responded" }> =>
       item.type === "model.responded" && item.eventSeq > lastSeq && item.payload.modelCallId === request.payload.modelCallId);
-    if (response) return `模型耗时 ${duration(response.payload.latencyMs)}`;
+    if (response) return duration(response.payload.latencyMs);
   }
   if (event.type === "tool.started" || event.type === "tool.progress" || event.type === "tool.completed" || event.type === "tool.failed") {
     const timing = timings.get(event.payload.toolCallId);
