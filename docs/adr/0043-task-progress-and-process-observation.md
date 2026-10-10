@@ -60,6 +60,24 @@ matching uses adjacent characters rather than matching every individual characte
 inside a phrase. Tool names remain searchable. Eligibility and intent checks are
 unchanged. This fixes scoring semantics without pinning a particular task's packs.
 
+A subsequent real run still selected process tools without the file tools needed
+for its workspace task. The runtime capability declares the available resource
+catalog and file packs as prerequisites. Routing admits a selected root and its
+transitive dependencies together within the existing six-pack, 48-tool and
+48,000-character bounds, or omits that root. Context and high-risk eligibility
+remain authoritative: an unavailable prerequisite cannot be reintroduced through
+a dependency. Catalogs reject dependency cycles. Read-only expansion uses the
+same complete-closure rule and cannot introduce write or high-risk prerequisites.
+No task wording or benchmark-specific pack pinning is added.
+
+The day's 35 semantic-routing operations included 26 cancellations around
+1,416 milliseconds and nine completions between 1,308 and 1,408 milliseconds,
+while ordinary model requests had a median of 3,108 milliseconds. These observed
+records support correcting the former 1.5-second semantic deadline, independently
+of dependency routing. Semantic work receives a bounded ten-second allowance
+alongside the host abort signal, with a twelve-second bridge transport bound.
+Those limits are execution policy, not a provider latency percentile guarantee.
+
 Profiles may provide a capability-scoped instruction renderer. The unified
 workbench supplies its business instructions only while its actual business
 tools are mounted, using the existing dynamic system-prompt registry. General

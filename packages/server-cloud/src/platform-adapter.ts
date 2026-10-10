@@ -9,7 +9,7 @@ import { createSaishiProfile, isSaishiIdentity } from "./saishi-profile.js";
 import { createStoryProfile, isStoryIdentity } from "./story-profile.js";
 import { createWorkbenchProfile, isWorkbenchIdentity } from "./workbench-profile.js";
 import { readModelStream } from "./model-stream.js";
-import { CLOUD_MODEL_TRANSPORT_TIMEOUT_MS } from "./model-limits.js";
+import { CLOUD_MODEL_TRANSPORT_TIMEOUT_MS, CLOUD_CAPABILITY_TRANSPORT_TIMEOUT_MS } from "./model-limits.js";
 import { readModelErrorPayload, structuredModelError } from "./model-error.js";
 import { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import { RESOURCE_TOOL_NAMES } from "./resources/contracts.js";
@@ -169,7 +169,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
     const secret = privateApp ? options.appServiceToken : options.serviceToken;
     if (!secret) throw new CloudError(503, "APP_BRIDGE_DISABLED", "私有业务插件尚未配置。");
     if ((!privateApp && ["profile", "call", "authorize-tool"].includes(path)) || (privateApp && path === "search")) throw new Error("Invalid bridge path.");
-    const duration = path === "model" ? CLOUD_MODEL_TRANSPORT_TIMEOUT_MS : path === "search" ? 90_000 : ["profile", "call", "authorize-tool"].includes(path) ? (path === "call" ? 100_000 : 30_000) : 5_000;
+    const duration = path === "model" ? CLOUD_MODEL_TRANSPORT_TIMEOUT_MS : path === "capability-semantic" ? CLOUD_CAPABILITY_TRANSPORT_TIMEOUT_MS : path === "search" ? 90_000 : ["profile", "call", "authorize-tool"].includes(path) ? (path === "call" ? 100_000 : 30_000) : 5_000;
     const signal = AbortSignal.any([parent, AbortSignal.timeout(duration)]);
     try {
       const response = await transport(new URL(`/api/internal/${privateApp ? "agent-apps" : "agent-public"}/v1/${path}`, base), {

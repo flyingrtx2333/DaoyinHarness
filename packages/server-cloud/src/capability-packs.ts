@@ -129,6 +129,11 @@ export function capabilityPacksFor(tools: readonly ToolDescriptor[]): Capability
       });
     }
   }
+  // Process work needs the workspace's resource identity and file capability.
+  // Depend only on packs actually supplied by the authorized tool catalog.
+  const runtime = packs.find(pack => pack.id === "resource.runtime");
+  if (runtime !== undefined) runtime.dependencies = ["resource.catalog", "resource.files"]
+    .filter(id => packs.some(pack => pack.id === id));
   return packs;
 }
 

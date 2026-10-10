@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ToolDescriptor } from "@daoyin/harness-tools/registry";
+import { CLOUD_CAPABILITY_TIMEOUT_MS } from "./model-limits.js";
 
 /** 能力包风险等级：只读查询、普通写入、高危/付费/破坏性操作 */
 export type CapabilityRisk = "read" | "write" | "high";
@@ -131,6 +132,8 @@ export function validateCapabilityCatalog(packs: readonly CapabilityPackManifest
       throw new Error("Invalid capability dependency.");
     }
   }
+  const byId = new Map(packs.map(pack => [pack.id, pack]));
+  if (packs.some(pack => dependencyClosure(pack, byId) === undefined)) throw new Error("Cyclic capability dependency.");
 }
 export function splitCapabilityIntents(raw: string): string[] {
   const protectedValues: string[] = [];
@@ -276,11 +279,31 @@ function descriptorSize(tool: ToolDescriptor): number {
 }
 function digest(packs: readonly CapabilityPackManifest[]): string {
   return createHash("sha256").update(JSON.stringify(
-    packs.map((pack) => [pack.id, pack.version, pack.toolNames]))).digest("hex");
+    packs.map((pack) => [pack.id, pack.version, pack.toolNames, pack.dependencies]))).digest("hex");
 }
+/** Dependencies are execution prerequisites, not optional ranking suggestions. */
+function dependencyClosure(root: CapabilityPackManifest, byId: ReadonlyMap<string, CapabilityPackManifest>): CapabilityPackManifest[] | undefined {
+  const complete = new Set<string>(), visiting = new Set<string>(), result: CapabilityPackManifest[] = [];
+  const visit = (pack: CapabilityPackManifest): boolean => {
+    if (complete.has(pack.id)) return true;
+    if (visiting.has(pack.id)) return false;
+    visiting.add(pack.id);
+    for (const id of pack.dependencies) {
+      const dependency = byId.get(id);
+      if (dependency === undefined || !visit(dependency)) return false;
+    }
+    visiting.delete(pack.id);
+    complete.add(pack.id);
+    result.push(pack);
+    return true;
+  };
+  return visit(root) ? result : undefined;
+}
+
 function bound(candidates: readonly { pack: CapabilityPackManifest; score: number }[],
-  tools: readonly ToolDescriptor[], pinned: ReadonlySet<string>): CapabilityPackManifest[] {
+  tools: readonly ToolDescriptor[], pinned: ReadonlySet<string>, eligible: readonly CapabilityPackManifest[]): CapabilityPackManifest[] {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
+  const byId = new Map(eligible.map(pack => [pack.id, pack]));
   const size = (pack: CapabilityPackManifest): number =>
     pack.toolNames.reduce((sum, name) => sum + descriptorSize(byName.get(name)!), 0);
   const ordered = [...candidates].sort((left, right) => {
@@ -290,13 +313,20 @@ function bound(candidates: readonly { pack: CapabilityPackManifest; score: numbe
       left.pack.id.localeCompare(right.pack.id);
   });
   const selected: CapabilityPackManifest[] = [];
+  const selectedIds = new Set<string>(), selectedNames = new Set<string>();
   let toolCount = 0, schemaCharacters = 0;
   for (const item of ordered) {
-    const additions = item.pack.toolNames.filter((name) =>
-      byName.has(name) && !selected.some((pack) => pack.toolNames.includes(name)));
+    const closure = dependencyClosure(item.pack, byId);
+    if (closure === undefined) continue;
+    const addedPacks = closure.filter(pack => !selectedIds.has(pack.id));
+    const additions = [...new Set(addedPacks.flatMap(pack => [...pack.toolNames]))]
+      .filter(name => byName.has(name) && !selectedNames.has(name));
     const characters = additions.reduce((sum, name) => sum + descriptorSize(byName.get(name)!), 0);
-    if (selected.length >= 6 || toolCount + additions.length > 48 || schemaCharacters + characters > 48_000) continue;
-    selected.push(item.pack); toolCount += additions.length; schemaCharacters += characters;
+    if (selected.length + addedPacks.length > 6 || toolCount + additions.length > 48 || schemaCharacters + characters > 48_000) continue;
+    selected.push(...addedPacks);
+    for (const pack of addedPacks) selectedIds.add(pack.id);
+    for (const name of additions) selectedNames.add(name);
+    toolCount += additions.length; schemaCharacters += characters;
   }
   return selected;
 }
@@ -356,7 +386,7 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
   }
   const eligibilityMs = elapsed(eligibilityStarted), retrievalStarted = performance.now();
   const clauses = splitCapabilityIntents(input.message);
-  const semanticSignal = AbortSignal.any([input.signal, AbortSignal.timeout(1_500)]);
+  const semanticSignal = AbortSignal.any([input.signal, AbortSignal.timeout(CLOUD_CAPABILITY_TIMEOUT_MS)]);
   let fallback: CapabilityRouteDecision["fallback"] = "none";
   const lexicalRanked = rank(input.message, clauses, eligible, (input.continuity ?? "").slice(0, 1_500));
   const vectorTask = input.semantic?.retrieve && eligible.length ? input.semantic.retrieve({
@@ -416,13 +446,7 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
     const pack = byId.get(packId);
     if (pack && !scored.some((item) => item.pack.id === packId)) scored.push({ pack, score: 2 });
   }
-  for (const item of [...scored]) for (const dependency of item.pack.dependencies) {
-    const pack = byId.get(dependency);
-    if (pack && !scored.some((candidate) => candidate.pack.id === dependency)) {
-      scored.push({ pack, score: item.score });
-    }
-  }
-  const selected = bound(scored, input.tools, pinned), selectedPackIds = new Set(selected.map((pack) => pack.id));
+  const selected = bound(scored, input.tools, pinned, eligible), selectedPackIds = new Set(selected.map((pack) => pack.id));
   const names = new Set(selected.flatMap((pack) => [...pack.toolNames])
     .filter((name) => input.tools.some((tool) => tool.name === name)));
   const byName = new Map(input.tools.map((tool) => [tool.name, tool]));
@@ -460,13 +484,18 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
         .filter((item) => !selectedPackIds.has(item.pack.id)).slice(0, 2).map((item) => item.pack);
       const addedPackIds: string[] = [];
       for (const pack of additions) {
-        if (selectedPackIds.size >= 6) break;
-        const addedNames = pack.toolNames.filter((name) => byName.has(name) && !names.has(name));
+        const closure = dependencyClosure(pack, byId);
+        if (closure === undefined || closure.some(dependency => dependency.risk !== "read" && !selectedPackIds.has(dependency.id))) continue;
+        const addedPacks = closure.filter(dependency => !selectedPackIds.has(dependency.id));
+        const addedNames = [...new Set(addedPacks.flatMap(dependency => [...dependency.toolNames]))]
+          .filter(name => byName.has(name) && !names.has(name));
         const addedCharacters = addedNames.reduce((sum, name) => sum + descriptorSize(byName.get(name)!), 0);
-        if (!addedNames.length || names.size + addedNames.length > 48 ||
+        if (!addedNames.length || selectedPackIds.size + addedPacks.length > 6 || names.size + addedNames.length > 48 ||
             decision.schemaCharacters + addedCharacters > 48_000) continue;
-        selectedPackIds.add(pack.id);
-        addedPackIds.push(pack.id);
+        for (const dependency of addedPacks) {
+          selectedPackIds.add(dependency.id);
+          addedPackIds.push(dependency.id);
+        }
         for (const name of addedNames) names.add(name);
         decision.schemaCharacters += addedCharacters;
       }
