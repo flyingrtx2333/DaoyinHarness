@@ -1,7 +1,7 @@
 // Three bounded actual model runs. Each assertion is backed by the actual account, tools and persistent receipts.
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createCloudAccountClient, readHiddenCredentials, requestCloudObservation, sanitizeEvidence } from './cloud-live-client.mjs';
@@ -9,14 +9,46 @@ import { validationBudget } from './validation-budget.mjs';
 
 const args = process.argv.slice(2);
 const value = flag => args[args.indexOf(flag) + 1];
-if (args.length !== 5 || !args.includes('--run') || !args.includes('--budget-dir') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '')) throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_NEW_DIRECTORY.');
+const resuming = args.includes('--resume-report');
+if (args.length !== (resuming ? 7 : 5) || !args.includes('--run') || !args.includes('--budget-dir') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') ||
+    resuming && typeof value('--resume-report') !== 'string') throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY [--resume-report PATH].');
+let sourceReport;
+let sourceCase;
+let sourceRun;
+let sourceReceipt;
+if (resuming) {
+  const path = resolve(value('--resume-report'));
+  const raw = await readFile(path);
+  sourceReport = JSON.parse(raw);
+  sourceCase = sourceReport.cases?.find(item => item.failedOperation?.status === 'failed' && !item.completedOperation);
+  sourceRun = sourceReport.runs?.find(run => run.runId === sourceCase?.runId);
+  const requirement = sourceCase?.cacheBefore?.declarations?.find(item => item.path === 'requirements.txt');
+  if (sourceReport.status !== 'incomplete' || sourceReport.modelCalls !== 8 || sourceReport.runs?.length !== 1 ||
+      !/^ses_[a-f0-9-]{36}$/u.test(sourceReport.fixture?.sessionId ?? '') ||
+      !/^wsp_[a-f0-9]{24}$/u.test(sourceReport.fixture?.originalWorkspaceId ?? '') ||
+      !/^run_[a-f0-9-]{36}$/u.test(sourceRun?.runId ?? '') ||
+      !/^op_[a-f0-9]{24}$/u.test(sourceCase?.failedOperation?.id ?? '') ||
+      sourceCase.sessionId !== sourceReport.fixture.sessionId || sourceCase.failedOperation.workspaceId !== sourceReport.fixture.originalWorkspaceId ||
+      sourceCase.failedOperation.error !== 'ENVIRONMENT_DECLARATION_MISSING' || sourceRun.status !== 'completed' ||
+      !/^sha256:[a-f0-9]{64}$/u.test(requirement?.digest ?? '') || typeof requirement.content !== 'string' || requirement.truncated) {
+    throw new Error('Resume requires the original bounded, completed partial run and known declaration failure; no fixture or operation will be replayed.');
+  }
+  sourceReceipt = { path, sha256: createHash('sha256').update(raw).digest('hex'), revision: sourceReport.revision,
+    modelCalls: sourceReport.modelCalls, status: sourceReport.status, priorRunId: sourceRun.runId,
+    priorSessionId: sourceReport.fixture.sessionId, priorWorkspaceId: sourceReport.fixture.originalWorkspaceId,
+    failedOperationId: sourceCase.failedOperation.id, requirementsDigest: requirement.digest };
+}
 const revision = value('--expected-revision');
 const driverRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(import.meta.dirname, '..'), encoding: 'utf8' }).trim();
+const driverSha256 = createHash('sha256').update(await readFile(import.meta.filename)).digest('hex');
 const budget = validationBudget(value('--budget-dir'));
 const output = resolve('.cache/execution-architecture-live', new Date().toISOString().replaceAll(':', '-') + '_' + randomUUID().slice(0, 8));
 await mkdir(output, { recursive: true, mode: 0o700 });
-const report = { revision, driverRevision, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
-  cases: [], runs: [], startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: { maxScenarioRequests: 20, reservedSweRequests: 72, requiredRemainingRequests: 92, runCalls: [8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
+const report = { revision, driverRevision, driverSha256, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
+  cases: [], runs: [], ...(sourceReceipt ? { resume: sourceReceipt } : {}), budgetDirectory: budget.directory,
+  startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: {
+    maxScenarioRequests: resuming ? 18 : 20, reservedSweRequests: 72, requiredRemainingRequests: resuming ? 90 : 92,
+    runCalls: [resuming ? 6 : 8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
 const save = () => writeFile(join(output, 'report.json'), JSON.stringify(sanitizeEvidence(report), null, 2) + '\n', { mode: 0o600 });
 const client = createCloudAccountClient();
 const call = async (path, body, options = {}) => (body === undefined ? await requestCloudObservation(client, path, options) : await client.request(path, body, options)).result;
@@ -129,24 +161,43 @@ try {
   report.limits.maxCny = report.budget.maxMicroCny / 1000000;
   invariant(report.budget.maxRequests === 100 && report.budget.maxMicroCny === 5000000, 'The separately authorized 100-request / 5-CNY ledger is required.');
   invariant(report.model.provider === 'deepseek' && report.model.model === 'deepseek-flash', 'Frozen actual model differs from the authorized model.');
-  invariant(report.budget.maxRequests - report.budget.requestsReserved >= report.limits.requiredRemainingRequests, 'Insufficient request allowance for the 20-call mechanisms and reserved 72-call SWE sample.');
+  invariant(report.budget.maxRequests - report.budget.requestsReserved >= report.limits.requiredRemainingRequests, 'Insufficient request allowance for the bounded mechanisms and reserved 72-call SWE sample.');
   invariant((await call('/runtime')).build?.revision === revision, 'Expected cloud revision not deployed.');
   report.status = 'running'; await save();
   const originalExport = 'import sys\nfrom decimal import Decimal\nif sys.version_info[:2] != (3, 11):\n    raise RuntimeError("project requires Python 3.11")\nfrom architecture_dependency import FACTOR\ndef total():\n    return sum([Decimal("3"), Decimal("4")])\nif __name__ == "__main__":\n    print(total())\n';
   const check = 'from decimal import Decimal\nfrom export import total\nassert total() == Decimal("7.7"), ("service-fee total", total())\nprint("focused-check-passed")\n';
-  item = await fixture('准备重试、环境缓存与任务边界', { '.python-version': '3.11\n', 'export.py': originalExport,
+  let observedOriginalFailure;
+  let first;
+  if (resuming) {
+    item = { name: '原会话环境准备修复与继续验证', sessionId: sourceReceipt.priorSessionId,
+      workspaceId: sourceReceipt.priorWorkspaceId, originalWorkspaceId: sourceReceipt.priorWorkspaceId,
+      operations: [], runs: [], status: 'resuming' };
+    report.fixture = { name: item.name, sessionId: item.sessionId, originalWorkspaceId: item.originalWorkspaceId, operations: item.operations };
+    const prior = (await call(`/runs/${sourceReceipt.priorRunId}`)).run;
+    invariant(prior.id === sourceReceipt.priorRunId && prior.sessionId === item.sessionId && !['running', 'queued'].includes(prior.status), 'Original run has not reached a known terminal state.');
+    observedOriginalFailure = (await control(item, 'environment_read', { operationId: sourceReceipt.failedOperationId, waitMs: 0 })).operation;
+    invariant(observedOriginalFailure?.id === sourceReceipt.failedOperationId && observedOriginalFailure.status === 'failed' && observedOriginalFailure.workspaceId === item.originalWorkspaceId &&
+      observedOriginalFailure.error === 'ENVIRONMENT_DECLARATION_MISSING', 'Original preparation no longer matches the observed declaration failure.');
+    report.resume.requirements = await control(item, 'file_read', { path: 'requirements.txt' });
+    const requirements = report.resume.requirements.content ?? report.resume.requirements.text;
+    invariant(typeof requirements === 'string' && 'sha256:' + createHash('sha256').update(requirements).digest('hex') === sourceReceipt.requirementsDigest,
+      'Existing declaration differs from its actual previous digest; do not overwrite it or repeat the previous task.');
+    first = await run(item, `继续原任务。原工作区是 ${item.originalWorkspaceId}；之前实际失败的环境操作 ${sourceReceipt.failedOperationId} 仅因缺少依赖声明失败。requirements.txt 已正确写入，保留它和其他产物，不重建工作区、不重复之前失败请求、不再次写 requirements.txt。先读取保存的计划、现有声明和原 operation 实际结果，再从 runtime_list 选择项目声明的 Python 3.11。environment_prepare 必须显式传 retryFromOperationId="${sourceReceipt.failedOperationId}"、installDependencies=true，源 workspaceId="${item.originalWorkspaceId}"，以新请求创建候选。观察同一新 operation，成功后在新工作区真实核对 Python 3.11、architecture_dependency 导入位置和 cacheKey。保留 export.py 修改和 focused check 为下一轮未完成项，如实报告 partial。`, 6, { continueFromRunId: sourceReceipt.priorRunId });
+  } else {
+    item = await fixture('准备重试、环境缓存与任务边界', { '.python-version': '3.11\n', 'export.py': originalExport,
     'check_export.py': check, 'CONTRIBUTING.md': 'Declared runtime: .python-version. Focused check: python check_export.py. Keep interpreter constraints and assertions unchanged.\n',
     'vendor/architecture_dependency-0.1.0-py3-none-any.whl': { contentBase64: wheel() } });
-  const first = await run(item, `工作区 ${item.workspaceId} 的长期目标是让 export.py 输出含 10% 服务费的总额并实际验证。本轮只做环境准备，保留代码修改与 focused check 为未完成步骤并报告 partial。先用 task_plan 保存长期目标和两个阶段，检查真实运行时和项目声明，用 runtime_list 选择 Python 3.11。先请求一次 installDependencies=true 的 environment_prepare，验证缺少依赖声明时会得到真实失败回执；观察同一 operation，不重放请求。随后从现有 vendor 文件确定本项目唯一依赖，在原工作区创建 requirements.txt 指向实际 wheel。用真实失败 operationId 作为 retryFromOperationId 明确重试，等待新候选成功，实际确认 Python 3.11 和 architecture_dependency 导入成功，记录 environment_inspect 的 cacheKey 与真实证据。不要修改 export.py 或 check_export.py；代码修复与验证在下一轮继续。`, 8);
+    first = await run(item, `工作区 ${item.workspaceId} 的长期目标是让 export.py 输出含 10% 服务费的总额并实际验证。本轮只做环境准备，保留代码修改与 focused check 为未完成步骤并报告 partial。先用 task_plan 保存长期目标和两个阶段，检查真实运行时和项目声明，用 runtime_list 选择 Python 3.11。先请求一次 installDependencies=true 的 environment_prepare，验证缺少依赖声明时会得到真实失败回执；观察同一 operation，不重放请求。随后从现有 vendor 文件确定本项目唯一依赖，在原工作区创建 requirements.txt 指向实际 wheel。用真实失败 operationId 作为 retryFromOperationId 明确重试，等待新候选成功，实际确认 Python 3.11 和 architecture_dependency 导入成功，记录 environment_inspect 的 cacheKey 与真实证据。不要修改 export.py 或 check_export.py；代码修复与验证在下一轮继续。`, 8);
+  }
   const firstCase = { name: '环境声明失败后显式修复重试', sessionId: item.sessionId, workspaceId: item.workspaceId, runId: first.runId, status: 'failed' };
   report.cases.push(firstCase);
   const operations = [...results(first, 'environment_prepare'), ...results(first, 'environment_read')].map(result => result?.operation).filter(Boolean);
-  const failed = operations.find(operation => operation.status === 'failed');
+  const failed = observedOriginalFailure ?? operations.find(operation => operation.status === 'failed');
   const completed = operations.find(operation => operation.status === 'completed');
   const started = first.events.filter(event => event.type === 'tool.started' && event.payload.toolName === 'environment_prepare');
   firstCase.failedOperation = failed; firstCase.completedOperation = completed;
   firstCase.explicitRetry = started.some(event => event.payload.input?.retryFromOperationId === failed?.id);
-    firstCase.cacheBefore = await control(item, 'environment_inspect');
+  firstCase.cacheBefore = await control(item, 'environment_inspect');
   firstCase.dependency = await control(item, 'process_run', { executable: 'python', args: ['-c', 'import sys,site,architecture_dependency; assert sys.version_info[:2]==(3,11); print(architecture_dependency.FACTOR); print(site.getusersitepackages()); print(architecture_dependency.__file__)'], cwd: '.', timeoutMs: 30000 });
   firstCase.originalSource = await control(item, 'file_read', { workspaceId: item.originalWorkspaceId, path: 'export.py' });
   invariant(failed && completed && failed.id !== completed.id && firstCase.explicitRetry && item.workspaceId !== item.originalWorkspaceId, 'Known failure and new successful candidate were not both observed.');
