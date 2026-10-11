@@ -65,6 +65,8 @@ export interface CapabilityRouteDecision {
   eligiblePackCount: number;
   /** 最终命中的能力包 ID 列表 */
   selectedPackIds: string[];
+  /** Previously accepted routing restored within current eligibility and schema limits. */
+  continuation?: { sourceRunId: string; retainedPackIds: string[] };
   /** 暴露给大模型的动态工具总数（上限 48） */
   exposedToolCount: number;
   /** 注入 Prompt 的 Tool Schema 字符总数（上限 48,000） */
@@ -98,6 +100,8 @@ export interface CapabilityRouteResult {
 interface RouteInput {
   message: string; continuity?: string; packs: readonly CapabilityPackManifest[]; tools: readonly ToolDescriptor[];
   availableContext?: readonly string[]; explicitHighRiskPackIds?: readonly string[]; pinnedPackIds?: readonly string[];
+  /** Trusted host input after validating the continuation's session, resources and current authorization. */
+  continuation?: { sourceRunId: string; packIds: readonly string[] };
   semantic?: CapabilitySemanticProvider; signal: AbortSignal;
 }
 interface Ranked { pack: CapabilityPackManifest; rrf: number; normalized: number; continuity: number }
@@ -301,14 +305,16 @@ function dependencyClosure(root: CapabilityPackManifest, byId: ReadonlyMap<strin
 }
 
 function bound(candidates: readonly { pack: CapabilityPackManifest; score: number }[],
-  tools: readonly ToolDescriptor[], pinned: ReadonlySet<string>, eligible: readonly CapabilityPackManifest[]): CapabilityPackManifest[] {
+  tools: readonly ToolDescriptor[], pinned: ReadonlySet<string>, eligible: readonly CapabilityPackManifest[],
+  continued: ReadonlySet<string>): CapabilityPackManifest[] {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const byId = new Map(eligible.map(pack => [pack.id, pack]));
   const size = (pack: CapabilityPackManifest): number =>
     pack.toolNames.reduce((sum, name) => sum + descriptorSize(byName.get(name)!), 0);
   const ordered = [...candidates].sort((left, right) => {
+    const leftContinued = continued.has(left.pack.id) ? 1 : 0, rightContinued = continued.has(right.pack.id) ? 1 : 0;
     const leftPinned = pinned.has(left.pack.id) ? 1 : 0, rightPinned = pinned.has(right.pack.id) ? 1 : 0;
-    return rightPinned - leftPinned ||
+    return rightContinued - leftContinued || rightPinned - leftPinned ||
       right.score / (1 + size(right.pack) / 8_000) - left.score / (1 + size(left.pack) / 8_000) ||
       left.pack.id.localeCompare(right.pack.id);
   });
@@ -426,7 +432,9 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
       confidence.set(packId, Math.max(confidence.get(packId) ?? 0, intent.confidence));
     }
   }
-  const pinned = new Set([...(input.pinnedPackIds ?? []), ...explicitPackIds(input.message, eligible)]);
+  // Historical selection is coordination state, not authorization: eligibility above is current.
+  const continuationIds = new Set((input.continuation?.packIds ?? []).filter(id => eligible.some(pack => pack.id === id)));
+  const pinned = new Set([...(input.pinnedPackIds ?? []), ...explicitPackIds(input.message, eligible), ...continuationIds]);
   let scored = ranked.map((item) => {
     const rerank = semantic === undefined ? item.normalized : (semantic.rerankScores[item.pack.id] ?? 0);
     const classifier = confidence.get(item.pack.id) ?? 0;
@@ -446,13 +454,16 @@ export async function routeCapabilities(input: RouteInput): Promise<CapabilityRo
     const pack = byId.get(packId);
     if (pack && !scored.some((item) => item.pack.id === packId)) scored.push({ pack, score: 2 });
   }
-  const selected = bound(scored, input.tools, pinned, eligible), selectedPackIds = new Set(selected.map((pack) => pack.id));
+  // Keep the accepted task's available capabilities before adding freshly ranked suggestions.
+  const selected = bound(scored, input.tools, pinned, eligible, continuationIds), selectedPackIds = new Set(selected.map((pack) => pack.id));
   const names = new Set(selected.flatMap((pack) => [...pack.toolNames])
     .filter((name) => input.tools.some((tool) => tool.name === name)));
   const byName = new Map(input.tools.map((tool) => [tool.name, tool]));
   const decision: CapabilityRouteDecision = {
     algorithmVersion: "hybrid-v1", catalogDigest: digest(input.packs), eligiblePackCount: eligible.length,
     selectedPackIds: [...selectedPackIds], exposedToolCount: names.size,
+    ...(input.continuation === undefined ? {} : { continuation: { sourceRunId: input.continuation.sourceRunId,
+      retainedPackIds: [...continuationIds].filter(id => selectedPackIds.has(id)) } }),
     schemaCharacters: [...names].reduce((sum, name) => sum + descriptorSize(byName.get(name)!), 0),
     intents: (semantic?.intents ?? []).filter((intent) => intent.confidence >= 0.55).map((intent) => ({
       label: intent.label, confidence: intent.confidence,

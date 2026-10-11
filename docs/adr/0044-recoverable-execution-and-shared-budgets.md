@@ -49,6 +49,11 @@ requests remain authoritative. Unbound historical requests retain legacy limits.
 Run creation accepts optional limits or legacy maxModelCalls, never both.
 continueFromRunId creates a new authorized run and budget for the same session
 and resource scope, restoring plan and evidence without credential reissuance.
+An admitted continuation also restores capability pack identifiers from the
+source run's persisted routing decision. Current authorization, dependencies,
+per-turn risk admission and the existing tool/schema caps still apply; available
+prior packs are retained before fresh routing suggestions. The current user goal
+remains authoritative, and prior router objectives or prompts are not inherited.
 Schema changes are additive; historical events, runs and billing are not rewritten.
 
 ## Scope and publication

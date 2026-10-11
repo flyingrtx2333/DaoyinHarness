@@ -519,6 +519,21 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
             binding.requiredPermissions.every((permission) => identity.permissions.includes(permission));
         });
         const priorForRouting = capabilityRouterMode === "off" ? [] : await stores.events.read(run.sessionId);
+        let continuedCapabilities: { sourceRunId: string; packIds: string[] } | undefined;
+        if (run.admission?.continueFromRunId !== undefined && capabilityRouterMode !== "off") {
+          // Admission already atomically checked the latest terminal run and its resource scope.
+          // Recheck current authority and select only its persisted routing IDs, never old prompts.
+          await ensureActive(identity, controller.signal);
+          const source = await options.repository.getRun(identity, run.admission.continueFromRunId);
+          if (source.sessionId !== run.sessionId || source.status === "running") {
+            throw new CloudError(409, "CONTINUATION_STALE", "原任务不再是当前会话可继续的已结束任务。");
+          }
+          const sourceRoute = priorForRouting.findLast(event => event.type === "capability.routed" && event.turnId === source.id &&
+            event.accountId === stores.accountId && event.scopeId === stores.scopeId && event.sessionId === run.sessionId);
+          if (sourceRoute?.type === "capability.routed") {
+            continuedCapabilities = { sourceRunId: source.id, packIds: sourceRoute.payload.selectedPackIds };
+          }
+        }
         const continuity = priorForRouting.filter((event) => event.type === "turn.started")
           .slice(-2).map((event) => event.payload.userMessage).join("\n").slice(0, 1_500);
         const packs = capabilityPacksFor(routableDefinitions);
@@ -539,6 +554,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           capabilityRoute = routeSpan === undefined ? undefined : await routeCapabilities({
               message: run.userMessage, continuity, packs,
               tools: routableDefinitions, explicitHighRiskPackIds: highRiskPacks, pinnedPackIds: highRiskPacks,
+              ...(continuedCapabilities === undefined ? {} : { continuation: continuedCapabilities }),
               ...(meteredRoute === undefined ? {} : { semantic: meteredRoute }),
               signal: controller.signal,
             });

@@ -182,6 +182,7 @@ export interface AgentEventPayloads {
     catalogDigest: string;
     eligiblePackCount: number;
     selectedPackIds: string[];
+    continuation?: { sourceRunId: string; retainedPackIds: string[] };
     exposedToolCount: number;
     schemaCharacters: number;
     intents: Array<{ label: string; confidence: number; packIds: string[] }>;
