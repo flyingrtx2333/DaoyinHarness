@@ -23,21 +23,23 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
   const source = await cachePath(inferenceReport);
   const sourceText = await readFile(source, "utf8");
   const inference = JSON.parse(sourceText);
+  const callsPerCase = inference.limits?.perCaseModelCalls ?? 12;
+  if (![12, 24].includes(callsPerCase)) throw new Error("Unsupported bounded inference allowance.");
   if (inference.kind !== "swebench-verified-cloud-harness-inference" || inference.mode !== "real" ||
       inference.fakeModels !== false || inference.fabricatedBusinessResponses !== false ||
-      !(inference.modelCalls > 0) || inference.modelCalls > 36 || inference.lifecycleIncomplete === true ||
+      !Number.isSafeInteger(inference.modelCalls) || inference.modelCalls < 0 || inference.modelCalls > callsPerCase * 3 ||
       inference.datasetRevision !== "c104f840cc67f8b6eec6f759ebc8b2693d585d4a") {
     throw new Error("Official grading requires real Harness inference at the pinned dataset revision.");
   }
-  if (!Array.isArray(inference.cases) || inference.cases.some(item => !Number.isSafeInteger(item.modelCalls) || item.modelCalls < 0 || item.modelCalls > 12) ||
+  if (!Array.isArray(inference.cases) || inference.cases.some(item => !Number.isSafeInteger(item.modelCalls) || item.modelCalls < 0 || item.modelCalls > callsPerCase) ||
       inference.cases.reduce((sum, item) => sum + item.modelCalls, 0) !== inference.modelCalls) {
     throw new Error("Cloud inference model accounting does not match the bounded actual case exports.");
   }
   const sharedBudget = inference.modelAccounting?.sharedBudgetIncludesRouting === true;
   if (sharedBudget && (inference.cases.some(item => !Number.isSafeInteger(item.routingModelCalls) || item.routingModelCalls < 0 ||
-      !Number.isSafeInteger(item.sharedModelCalls) || item.sharedModelCalls !== item.modelCalls + item.routingModelCalls || item.sharedModelCalls > 12) ||
+      !Number.isSafeInteger(item.sharedModelCalls) || item.sharedModelCalls !== item.modelCalls + item.routingModelCalls || item.sharedModelCalls > callsPerCase) ||
       inference.cases.reduce((sum, item) => sum + item.routingModelCalls, 0) !== inference.routingModelCalls ||
-      inference.sharedModelCalls !== inference.modelCalls + inference.routingModelCalls || inference.sharedModelCalls > 36)) {
+      inference.sharedModelCalls !== inference.modelCalls + inference.routingModelCalls || inference.sharedModelCalls > callsPerCase * 3)) {
     throw new Error("Routing and Agent attempts do not match the bounded shared cloud budget.");
   }
   const runtimeText = await readFile(await cachePath(inference.runtimeEvidence?.file ?? ""), "utf8");
@@ -62,7 +64,13 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
     seen.add(item.instance_id);
     const observation = inference.cases?.find(value => value.instance_id === item.instance_id);
     const task = manifest.tasks.find(value => value.instance_id === item.instance_id);
-    if (!observation?.patch || !(observation.modelCalls > 0) || observation.modelCalls > 12 || !(observation.successfulModelResponses > 0) ||
+    if (!item.model_patch.trim() && (!observation?.patch || observation.modelCalls === 0 || !observation.successfulModelResponses)) {
+      // A failed or unadmitted instance has no solution. Grade its empty prediction
+      // independently; never manufacture an artifact or a successful inference claim.
+      if (observation?.patch && observation.patch.sha256 !== hash(item.model_patch)) throw new Error("Failure prediction conflicts with its retained patch.");
+      continue;
+    }
+    if (!observation?.patch || !(observation.modelCalls > 0) || observation.modelCalls > callsPerCase || !(observation.successfulModelResponses > 0) ||
         observation.persisted?.source !== "ordinary-cloud-session-events-API" ||
         observation.source?.cleanBeforeInference !== true || observation.source.commit !== task?.base_commit ||
         observation.patch.sha256 !== hash(item.model_patch) || observation.patch.artifactBlobHash !== `sha256:${hash(item.model_patch)}` ||
@@ -118,7 +126,7 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
       throw new Error("Cloud tool completion has no matching actual started action.");
     }
   }
-  if (!predictions.length) throw new Error("No actual predictions exist; do not substitute empty or gold patches.");
+  if (!predictions.length) throw new Error("No actual predictions exist; do not substitute gold patches.");
   const output = join(root, ".cache", "swebench-grade", new Date().toISOString().replaceAll(":", "-") + "_" + randomUUID().slice(0, 8));
   await mkdir(output, { recursive: true, mode: 0o700 });
   await cachePath(output);
@@ -129,7 +137,7 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
     runnerSha256: hash(await readFile(import.meta.filename)),
     inferenceReport: source, inferenceReportSha256: hash(sourceText), predictionsPath, predictionsSha256: hash(predictionsText),
     datasetRevision: inference.datasetRevision, datasetSha256: manifest.datasetSha256, graderVersion: "3.0.15",
-    selectedIds: ids, submittedIds: [...seen], missingInferenceIds: ids.filter(id => !seen.has(id)),
+    selectedIds: ids, perCaseModelCalls: callsPerCase, inferenceFailures: inference.inferenceFailures ?? [], inferenceLifecycleIncomplete: inference.lifecycleIncomplete === true, submittedIds: [...seen], missingInferenceIds: ids.filter(id => !seen.has(id)),
     limits: { workers: 1, perInstanceTestTimeoutSeconds: 900, totalProcessTimeoutMs: 5_400_000, capturedOutputBytes: 8_000_000 },
     environment: { platform: process.platform, arch: process.arch, execution: "independent trusted Docker daemon; not cloud gVisor inference" }, official: null, startedAt: new Date().toISOString() };
   const save = () => writeFile(join(output, "report.json"), JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });

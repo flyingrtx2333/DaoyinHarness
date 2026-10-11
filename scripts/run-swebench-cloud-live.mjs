@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createCloudAccountClient, readHiddenCredentials, requestCloudObservation, sanitizeEvidence } from "./cloud-live-client.mjs";
 import { loadPreparedSources, uploadPreparedSource } from "./swebench-source-upload.mjs";
+import { validationBudget } from "./validation-budget.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const revision = "c104f840cc67f8b6eec6f759ebc8b2693d585d4a";
@@ -13,13 +14,18 @@ const ids = ["pytest-dev__pytest-5787", "pytest-dev__pytest-5631", "sympy__sympy
 const sha = value => createHash("sha256").update(value).digest("hex");
 const infrastructureFailure = code => /^(?:EGRESS_|SANDBOX_|OCI_|WORKSPACE_(?:SUBNET_|NETWORK_)|RESOURCE_(?:EXECUTOR_|AUDIT_PERSISTENCE_FAILED|SERVICE_FAILED)|PROCESS_CLEANUP_|SWE_(?:BUDGET_|RUNTIME_|UNEXPECTED_DELEGATION|GIT_SETUP_))/u.test(code ?? "");
 const args = process.argv.slice(2);
-const expected = args[args.indexOf("--expected-revision") + 1];
-const selectedInstance = args.includes("--instance") ? args[args.indexOf("--instance") + 1] : undefined;
-if (args.length !== (selectedInstance === undefined ? 3 : 5) || !args.includes("--run") ||
-    args.indexOf("--expected-revision") < 0 || !/^[a-f0-9]{40}$/u.test(expected ?? "") ||
-    (args.includes("--instance") && !ids.includes(selectedInstance))) {
-  throw new Error("Use --run --expected-revision FULL_DEPLOYED_COMMIT [--instance PINNED_INSTANCE_ID]; normal account credentials are read through hidden stdin.");
+const flags = new Map();
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--run") { if (flags.has("--run")) throw new Error("Duplicate --run"); flags.set("--run", true); continue; }
+  if (!["--expected-revision", "--instance", "--calls", "--budget-dir"].includes(args[i]) || flags.has(args[i]) || !args[i + 1]) throw new Error("Invalid inference option.");
+  flags.set(args[i], args[++i]);
 }
+const expected = flags.get("--expected-revision");
+const selectedInstance = flags.get("--instance");
+const perCaseModelCalls = Number(flags.get("--calls"));
+if (!flags.has("--run") || !/^[a-f0-9]{40}$/u.test(expected ?? "") || ![12, 24].includes(perCaseModelCalls) ||
+    (selectedInstance !== undefined && !ids.includes(selectedInstance))) throw new Error("Use --run --expected-revision FULL_COMMIT --calls 12|24 --budget-dir TRUSTED_SERVER_DIRECTORY [--instance ID].");
+const budget = validationBudget(flags.get("--budget-dir"));
 const selectedIds = selectedInstance === undefined ? ids : [selectedInstance];
 const manifestPath = join(root, ".cache/swebench-verified-3/manifest.json");
 const dockerfilePath = join(root, "deployment/resource-runtimes/swe-python/Dockerfile");
@@ -56,7 +62,7 @@ const report = { kind: "swebench-verified-cloud-harness-inference", mode: "real"
   modelAccounting: { source: "persisted AgentEngine model.requested events", scope: "AgentEngine attempts only",
     routingSource: "persisted capability.model.requested events", sharedBudgetIncludesRouting: true,
     providerTotalCalls: "unknown; gateway attempts do not prove provider execution or settlement" },
-  limits: { cases: selectedIds.length, perCaseModelCalls: 12, totalModelCalls: 12 * selectedIds.length, perCaseMs: 420_000, totalMs: 1_800_000 },
+  limits: { cases: selectedIds.length, perCaseModelCalls, totalModelCalls: perCaseModelCalls * selectedIds.length, perCaseToolCalls: 24, cloudActiveMs: 600_000, perCaseMs: 420_000, totalMs: 1_800_000 },
   inferenceEnvironment: "ordinary account cloud API; locally prepared exact-base sources uploaded into independent Python/Git Dockerfile workspaces; isolated builder and gVisor",
   cases: [], status: "preflight", startedAt: new Date().toISOString() };
 const predictions = [];
@@ -301,6 +307,8 @@ try {
     if (observed?.build?.revision !== expected) throw Object.assign(new Error("Running revision changed; remaining inference stopped."), { code: "SWE_RUNTIME_REVISION_MISMATCH" });
     return observed;
   };
+  report.budget = await budget.inspect();
+  report.frozenModel = report.budget.configuration;
   report.runtime = await runtime();
   if (report.runtime?.build?.revision !== expected) throw new Error("Runtime revision differs from the exact deployed revision requested.");
   const runtimeText = JSON.stringify(sanitizeEvidence(report.runtime), null, 2) + "\n";
@@ -497,7 +505,7 @@ try {
       }
       stage = "actual-model-inference";
       await runtime();
-      if (report.sharedModelCalls + 12 > report.limits.totalModelCalls) throw Object.assign(new Error("Insufficient shared budget for an ordinary 12-call run."), { code: "SWE_BUDGET_ADMISSION_DENIED" });
+      if (report.sharedModelCalls + perCaseModelCalls > report.limits.totalModelCalls) throw Object.assign(new Error("Insufficient shared budget for an ordinary bounded run."), { code: "SWE_BUDGET_ADMISSION_DENIED" });
       item.input = `Work only in attached workspace ${item.workspaceId}, a Python repository at the exact issue base commit.\n` +
         "Fix the following issue by inspecting and changing actual source files. You may install needed dependencies and execute focused real repository tests through the workspace tools. " +
         "Do not delegate, start workflows, push, deploy, access business resources, fetch later source revisions, search for benchmark/reference patches, or request hints. " +
@@ -508,7 +516,10 @@ try {
       item.status = "run-admission-pending";
       item.admission = { status: "request-persisted", requestId, observedAt: new Date().toISOString(), mutatingResubmissions: 0 };
       await save();
-      const accepted = await call(`/sessions/${item.sessionId}/runs`, { requestId, message: item.input });
+      item.budgetAdmission = await budget.registerSession(item.sessionId);
+      const caseDeadline = performance.now() + report.limits.perCaseMs;
+      observationDeadline = caseDeadline;
+      const accepted = await call(`/sessions/${item.sessionId}/runs`, { requestId, message: item.input, limits: { maxModelCalls: perCaseModelCalls, maxToolCalls: 24, maxActiveMs: 600_000 } });
       if (!/^run_[a-f0-9-]{36}$/u.test(accepted.run?.id ?? "") || accepted.run.sessionId !== item.sessionId || accepted.run.requestId !== requestId) {
         throw new Error("Accepted cloud run receipt does not match the persisted admission request.");
       }
@@ -534,7 +545,7 @@ try {
           item.persisted = { source: "ordinary-cloud-session-events-API", events: allEvents.filter(event => event.turnId === item.runId).length,
             file: join(caseOutput, "cloud-events.json"), sha256: sha(text), lastEventSeq: cursor };
           await save();
-          if (item.sharedModelCalls > 12 || report.sharedModelCalls > report.limits.totalModelCalls) throw Object.assign(new Error("Actual persisted shared model calls exceeded the budget."), { code: "SWE_BUDGET_EXCEEDED" });
+          if (item.sharedModelCalls > perCaseModelCalls || report.sharedModelCalls > report.limits.totalModelCalls) throw Object.assign(new Error("Actual persisted shared model calls exceeded the budget."), { code: "SWE_BUDGET_EXCEEDED" });
           if (allEvents.some(event => event.type === "model.responded" && ["MODEL_AUTH_REQUIRED", "MODEL_ACCESS_DENIED", "MODEL_QUOTA_EXHAUSTED"].includes(event.payload.failureCode))) {
             throw Object.assign(new Error("Actual model authorization or quota failed; inference stopped."), { code: "SWE_MODEL_ACCESS_BLOCKED" });
           }
@@ -547,13 +558,12 @@ try {
           if (page === 255) throw new Error("Cloud transcript page limit exceeded.");
         }
       }
-      const caseDeadline = performance.now() + report.limits.perCaseMs;
-      observationDeadline = caseDeadline;
       while (["running", "queued"].includes(run.status) && performance.now() < caseDeadline) {
         controller.signal.throwIfAborted();
         await collect();
         await new Promise(resolve => setTimeout(resolve, 1000));
         run = (await call(`/runs/${item.runId}`)).run;
+        item.costAdmission = await budget.settleRun(item.runId);
       }
       if (["running", "queued"].includes(run.status)) {
         throw Object.assign(new Error("Case deadline reached; cancellation will be requested; accepted run was not resubmitted."), { code: "SWE_CASE_TIMEOUT" });
@@ -581,6 +591,27 @@ try {
         throw Object.assign(new Error("Actual model authorization or quota failed; remaining cases stopped."), { code: "SWE_MODEL_ACCESS_BLOCKED" });
       }
       stage = "actual-base-relative-patch-export";
+      const preparations = events.filter(event => event.type === "tool.completed" && ["environment_prepare", "environment_read"].includes(event.payload.toolName));
+      const observedPreparations = new Set();
+      for (const preparation of preparations) {
+        let result = preparation.payload.evidence?.result;
+        const operationId = result?.operation?.id;
+        if (operationId && observedPreparations.has(operationId)) continue;
+        if (operationId) observedPreparations.add(operationId);
+        if (["queued", "running"].includes(result?.operation?.status)) {
+          // The Engine can learn completion from resource evidence without another tool call.
+          // Resolve that same operation once, read-only, before choosing the patch workspace.
+          const sourceWorkspaceId = result.operation.workspaceId;
+          if (!/^wsp_[a-f0-9]{24}$/u.test(sourceWorkspaceId ?? "")) throw fail("SWE_ENVIRONMENT_RECEIPT_INVALID", "Preparation source is missing its actual scoped workspace receipt.");
+          result = await control("environment_read", { workspaceId: sourceWorkspaceId, operationId, waitMs: 0 });
+        }
+        const candidate = result?.operation?.status === "completed" ? result.operation.result?.workspace : undefined;
+        if (candidate && /^wsp_[a-f0-9]{24}$/u.test(candidate.id ?? "")) {
+          (item.environmentTransitions ??= []).push({ sourceWorkspaceId: item.workspaceId, candidateWorkspaceId: candidate.id, evidenceEventId: preparation.id });
+          item.workspaceId = candidate.id;
+        }
+      }
+      if ((await process(["rev-parse", "HEAD"])).stdout.trim() !== task.base_commit) throw fail("SWE_ENVIRONMENT_BASE_MISMATCH", "Prepared environment did not retain the exact Git baseline.");
       await process(["add", "-N", "--", ...sourcePaths]);
       await process(["diff", "--binary", "--no-ext-diff", "--no-textconv", `--output=${patchPath}`, task.base_commit, "--", ...sourcePaths]);
       const artifact = (await control("artifact_create", { path: patchPath, title: `SWE patch ${task.instance_id}`,
@@ -600,15 +631,16 @@ try {
       item.patch = { file: patchFile, sha256: sha(patch), bytes: artifactBytes.length, artifactId: artifact.id,
         artifactBlobHash: artifact.blobHash, baseRelative: true };
       item.status = patch.trim() ? "actual-patch-exported" : "actual-empty-patch-exported";
-      if (item.modelCalls > 0 && item.successfulModelResponses > 0) predictions.push({ instance_id: task.instance_id,
+      predictions.push({ instance_id: task.instance_id,
         model_name_or_path: `daoyin-cloud-${expected.slice(0, 12)}`, model_patch: patch });
-      else item.status = "no-successful-model-inference";
+      if (item.modelCalls === 0 || item.successfulModelResponses === 0) item.status = "no-successful-model-inference";
       if (["interrupted", "cancelled"].includes(run.status)) {
         throw Object.assign(new Error("The accepted run was interrupted or cancelled; retained its terminal evidence and patch and stopped remaining case admission."),
           { code: "SWE_RUNTIME_INTERRUPTED" });
       }
     } catch (error) {
       item.status = "blocked-or-incomplete";
+      if (!predictions.some(prediction => prediction.instance_id === task.instance_id)) predictions.push({ instance_id: task.instance_id, model_name_or_path: `daoyin-cloud-${expected.slice(0, 12)}`, model_patch: "" });
       if (item.workspaceCreateRecovery?.status === "read-only-pending") {
         item.workspaceCreateRecovery.status = "stopped-without-resubmission";
         item.workspaceCreateRecovery.failureCode = String(error.code ?? error.name);
@@ -657,10 +689,15 @@ try {
     ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}),
     ...(error.observationRecovery ? { observationRecovery: error.observationRecovery } : {}) };
 } finally {
+  for (const instanceId of selectedIds) if (!predictions.some(row => row.instance_id === instanceId)) {
+    predictions.push({ instance_id: instanceId, model_name_or_path: `daoyin-cloud-${expected.slice(0, 12)}`, model_patch: "" });
+  }
+  report.inferenceFailures = report.cases.filter(item => item.status === "blocked-or-incomplete" || item.status === "no-successful-model-inference").map(item => item.instance_id);
+  try { report.finalBudget = await budget.inspect(); } catch { report.finalBudgetUnavailable = true; }
   clearTimeout(timer); client.close(); report.finishedAt = new Date().toISOString();
   report.durationMs = Math.round(performance.now() - started); report.submittedIds = predictions.map(row => row.instance_id);
   report.missingIds = selectedIds.filter(id => !report.submittedIds.includes(id)); await save();
   process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop);
 }
 console.log(JSON.stringify({ status: report.status, output, submitted: predictions.length, modelCalls: report.modelCalls }));
-process.exitCode = predictions.length === selectedIds.length ? 0 : 1;
+process.exitCode = report.status === "cloud-inference-exported-awaiting-official-grading" && !report.lifecycleIncomplete ? 0 : 1;

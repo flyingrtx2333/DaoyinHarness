@@ -168,6 +168,7 @@ export class PostgresCloudRepository implements CloudRepository {
     }
     // Fail readiness before serving the new API against an unmigrated database.
     await this.pool.query("SELECT pinned_at,archived_at,deleted_at FROM cloud_sessions WHERE FALSE");
+    await this.pool.query("SELECT execution_budget,admission FROM cloud_runs WHERE FALSE");
     await this.pool.query("SELECT parent_run_id,parent_session_id,operation_id,tool_call_id,node_id,child_run_id,child_session_id,scope_key,created_at FROM cloud_child_runs WHERE FALSE");
     await this.pool.query("SELECT turn_id,scope_key,session_id,search_text,updated_at FROM session_search_documents WHERE FALSE");
     await this.pool.query("SELECT embedding,embedding_model,embedding_version,embedded_at FROM durable_memories WHERE FALSE");
