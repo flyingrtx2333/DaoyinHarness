@@ -188,13 +188,14 @@ try {
   });
   await scenario(async () => {
   const bounded = await fixture('额度保留续跑与取消', { 'ledger.txt': '', 'write_once.py': 'from pathlib import Path\np=Path("ledger.txt")\np.write_text(p.read_text()+"phase-a\\n")\nprint("phase-a-written")\n', 'cancel_job.py': 'import time\ntime.sleep(90)\nprint("unexpected-completion")\n' });
-  const limited = await run(bounded, `工作区 ${bounded.workspaceId} 中用 task_plan 保存两个步骤：先运行 write_once.py 写入 phase-a（只允许执行一次），再生成 result.txt 并实际核对。额度不足时保存进展，不能宣称验证完成。`, 4);
-  const continued = await run(bounded, '继续原任务。先核对已保存计划及 ledger.txt；已经有 phase-a 就不要再执行 write_once.py，再生成 result.txt 说明实际已完成的操作，并验证。', 8, { continueFromRunId: limited.runId });
+  const limited = await run(bounded, `工作区 ${bounded.workspaceId} 中用 task_plan 保存两个步骤：先运行 write_once.py 写入 phase-a（只允许执行一次），再生成 result.txt 并实际核对。额度不足时保存进展，不能宣称验证完成。`, 6);
+  bounded.beforeContinuation = await control(bounded, 'file_read', { path: 'ledger.txt' });
+  const continued = await run(bounded, '继续原任务。先核对已保存计划及 ledger.txt；已经有 phase-a 就不要再执行 write_once.py，再生成 result.txt 说明实际已完成的操作，并验证。', 6, { continueFromRunId: limited.runId });
   bounded.ledger = await control(bounded, 'file_read', { path: 'ledger.txt' });
   bounded.result = await control(bounded, 'file_read', { path: 'result.txt' });
   const cancelled = await run(bounded, `在工作区 ${bounded.workspaceId} 只运行 cancel_job.py，process_run 等待1000ms，进程总期限120000ms，然后观察真实结果。`, 4, { cancelWhen: event => event.type === 'tool.completed' && event.payload.toolName === 'process_run' && event.payload.evidence?.result?.state === 'running' });
   const cancelledProcess = cancelled.events.find(event => event.type === 'process.completed');
-  bounded.status = partial(limited) && continued.run.status === 'completed' &&
+  bounded.status = partial(limited) && (bounded.beforeContinuation.content ?? bounded.beforeContinuation.text) === 'phase-a\n' && continued.run.status === 'completed' &&
     continued.events.some(event => event.type === 'turn.completed' && event.payload.taskOutcome === 'completed') &&
     (bounded.result.content ?? bounded.result.text ?? '').trim().length > 0 &&
     (bounded.ledger.content ?? bounded.ledger.text) === 'phase-a\n' && cancelled.run.status === 'cancelled' && cancelledProcess?.payload.status === 'cancelled' ? 'passed' : 'failed';
