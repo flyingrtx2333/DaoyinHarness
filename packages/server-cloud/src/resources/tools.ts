@@ -376,6 +376,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
           const processObservation: ToolEvidence["processObservation"] = name.startsWith("process_") && workspaceId &&
             typeof processId === "string" && /^prc_[a-f0-9]{24}$/u.test(processId) && typeof (result.state ?? result.status) === "string"
             ? { resourceId: workspaceId, processId, state: String(result.state ?? result.status).slice(0, 40),
+              started: startsProcess,
               exitCode: typeof result.exitCode === "number" && Number.isSafeInteger(result.exitCode) ? result.exitCode : null,
               verification: startsProcess && typeof input.verification === "string" ? input.verification.trim() : null,
               ...(startsProcess && typeof input.verification === "string" ? { checkIdentity: processCheckIdentity(input) } : {}),

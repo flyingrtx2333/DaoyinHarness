@@ -27,3 +27,9 @@ Mac checks: protocol TypeScript build; agent-core and server-cloud TypeScript ty
 **Additional model calls: 0.** The existing 99-request/CNY 5 ledger was not changed. The earlier official result remains **2/3** and does not validate this revision. This iteration changes Harness source only; it does not modify the main platform, deploy or restart services. Unrelated IM and other local changes were preserved.
 
 Behavioral acceptance remains unperformed under the owner's code-only instruction. In particular, selecting a suitable environment and acting on the suggested budget still depend on the model's decisions; the stronger receipt identity protects evidence but cannot itself guarantee regression coverage or SWE 3/3.
+
+## Follow-up review
+
+The next code-only iteration fixes three remaining seams: an identified command rerun under a renamed scope updates the same check; a cached finished-process receipt cannot overwrite newer source observations, and terminal facts take precedence over cached reads; contradictory pins return `declaration_conflict`, while incomplete pin declarations cannot yield `pin_matches`. Observation budget estimates now count all pending operations. Source/event history stays append-only. Focused agent-core/server-cloud type checks, changed-file lint and diff checks passed again after these edits. Additional model calls remain 0; no deployment or new scoring was performed.
+
+An optional capability-owned `started` observation field distinguishes actual process launches from receipt reads. Reading a process absent from the current transcript no longer invents a launch or treats its old completion fingerprint as current. No tool input or main-platform schema was changed.

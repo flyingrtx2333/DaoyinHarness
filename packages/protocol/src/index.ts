@@ -163,6 +163,8 @@ export interface ToolEvidence {
   verificationHint?: { resourceId: string; paths?: string[] };
   /** Actual process observation; verification records selected intent, not coverage or correctness. */
   processObservation?: { resourceId: string; processId: string; state: string; exitCode: number | null; verification: string | null;
+    /** Trusted capability fact: a new process was launched, rather than an existing receipt read. */
+    started?: boolean;
     /** Capability-owned exact check identity, not a model-supplied scope name. */
     checkIdentity?: string;
     sourceVersionBefore?: WorkspaceVersion; sourceVersionAfter?: WorkspaceVersion };

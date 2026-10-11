@@ -6,7 +6,7 @@ export function toolBudgetGuidance(input: {
   unverifiedResources: number; pendingPlanSteps: number; pendingOperations: number;
 }): string {
   const checks = input.unresolvedChecks + input.unverifiedResources * 2;
-  const observe = input.pendingOperations > 0 ? 1 : 0;
+  const observe = input.pendingOperations;
   const closePlan = input.pendingPlanSteps > 0 ? 1 : 0;
   const needed = checks + observe + closePlan;
   if (!input.used.size && !needed) return "";

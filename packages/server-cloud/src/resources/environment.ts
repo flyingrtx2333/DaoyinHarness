@@ -56,7 +56,7 @@ interface RuntimeHint { family: "python" | "node"; source: string; kind: "pin" |
 export function environmentRuntimeAssessment(
   declarations: readonly { path: string; content?: string; truncated?: boolean }[],
   interpreters: readonly { executable: string; available?: boolean; output?: string; truncated?: boolean }[],
-): { hints: RuntimeHint[]; observations: Array<{ family: "python" | "node"; actualVersion: string | null; status: "pin_matches" | "pin_mismatch" | "unconfirmed" | "unknown" }>; incompleteSources: string[] } {
+): { hints: RuntimeHint[]; observations: Array<{ family: "python" | "node"; actualVersion: string | null; status: "pin_matches" | "pin_mismatch" | "declaration_conflict" | "unconfirmed" | "unknown" }>; incompleteSources: string[] } {
   const hints: RuntimeHint[] = [];
   const add = (family: RuntimeHint["family"], source: string, kind: RuntimeHint["kind"], value: string): void => {
     if (hints.length < 64 && value.length <= 160 && !hints.some(item => item.family === family && item.source === source && item.kind === kind && item.value === value)) hints.push({ family, source, kind, value });
@@ -72,6 +72,7 @@ export function environmentRuntimeAssessment(
     }
     if (item.path === ".tool-versions") {
       for (const match of body.matchAll(/^(python|nodejs)\s+(\d+(?:\.\d+){0,2})\s*$/gmu)) add(match[1] === "python" ? "python" : "node", item.path, "pin", match[2]!);
+      if (body.split(/\r?\n/u).some(line => /^(python|nodejs)\s/u.test(line) && !/^(python|nodejs)\s+\d+(?:\.\d+){0,2}\s*$/u.test(line))) incompleteSources.push(item.path);
     }
     if (item.path === "package.json") {
       try {
@@ -104,8 +105,13 @@ export function environmentRuntimeAssessment(
       .filter((value): value is string => value !== undefined);
     const actualVersion = versions.length && new Set(versions).size === 1 ? versions[0]! : null;
     const pins = hints.filter(item => item.family === family && item.kind === "pin");
-    const status: "pin_matches" | "pin_mismatch" | "unconfirmed" | "unknown" = actualVersion === null ? "unknown" : !pins.length ? "unconfirmed"
-      : pins.every(pin => actualVersion === pin.value || actualVersion.startsWith(pin.value + ".")) ? "pin_matches" : "pin_mismatch";
+    const extendsPin = (version: string, pin: string): boolean => version === pin || version.startsWith(pin + ".");
+    const conflicting = pins.some(pin => pins.some(other => !extendsPin(pin.value, other.value) && !extendsPin(other.value, pin.value)));
+    const incompletePins = incompleteSources.some(source => source === ".tool-versions" ||
+      (family === "python" ? source === ".python-version" : [".node-version", ".nvmrc"].includes(source)));
+    const status: "pin_matches" | "pin_mismatch" | "declaration_conflict" | "unconfirmed" | "unknown" = conflicting ? "declaration_conflict"
+      : actualVersion === null ? "unknown" : pins.some(pin => !extendsPin(actualVersion, pin.value)) ? "pin_mismatch"
+        : !pins.length || incompletePins ? "unconfirmed" : "pin_matches";
     return { family, actualVersion, status };
   });
   return { hints, observations, incompleteSources: [...new Set(incompleteSources)] };

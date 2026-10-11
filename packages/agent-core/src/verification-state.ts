@@ -16,6 +16,7 @@ export class VerificationState {
   readonly #intents = new Map<string, string | null>();
   readonly #processGenerations = new Map<string, number>();
   readonly #latestProcesses = new Map<string, string>();
+  readonly #finishedProcesses = new Set<string>();
   readonly #turnIds: Set<string>;
   readonly #changedResources = new Set<string>();
   readonly #terminal = new Map<string, { state: string; exitCode: number | null; eventId: string; before?: WorkspaceVersion; after?: WorkspaceVersion }>();
@@ -64,7 +65,10 @@ export class VerificationState {
       const observation = evidence.processObservation;
       if (!observation) return;
       const knownIntent = this.#intents.has(observation.processId);
-      if (!knownIntent) {
+      // Reading an externally started/older process is not a new mutation and
+      // cannot establish completion-time content as the current workspace.
+      const firstStart = !knownIntent && observation.started !== false;
+      if (firstStart) {
         this.#intents.set(observation.processId, observation.verification);
         // An arbitrary command may alter installed dependencies as well as source.
         // Conservatively expire earlier checks; declared checks remain independent.
@@ -73,11 +77,12 @@ export class VerificationState {
         this.#latestProcesses.set(observation.resourceId, observation.processId);
       }
       const completedVersion = observation.sourceVersionAfter ?? this.#terminal.get(observation.processId)?.after;
-      if (this.#currentProcess(observation.resourceId, observation.processId)) {
+      if ((!knownIntent || !this.#finishedProcesses.has(observation.processId)) && this.#currentProcess(observation.resourceId, observation.processId)) {
         if (completedVersion) this.#versions.set(observation.resourceId, completedVersion);
         else this.#versions.delete(observation.resourceId); // A running writer cannot attest current content.
       }
-      if (observation.verification && this.#turnIds.has(event.turnId) && !knownIntent) {
+      if (observation.exitCode !== null || ["failed", "cancelled", "timed_out", "interrupted", "exited", "dead"].includes(observation.state)) this.#finishedProcesses.add(observation.processId);
+      if (observation.verification && this.#turnIds.has(event.turnId) && firstStart) {
         const identity = /^sha256:[a-f0-9]{64}$/u.test(observation.checkIdentity ?? "") ? observation.checkIdentity : undefined;
         const key = this.#key(observation.resourceId, observation.verification, identity);
         this.#checks.delete(key);
@@ -90,18 +95,27 @@ export class VerificationState {
         const terminal = this.#terminal.get(check.processId);
         if (terminal) Object.assign(check, terminal);
         this.#checks.set(key, check);
-      } else this.#update(observation.processId, observation.state, observation.exitCode, event.id, observation.sourceVersionBefore, observation.sourceVersionAfter);
+      } else {
+        const terminal = this.#terminal.get(observation.processId);
+        // Persisted completion facts take precedence over a later cached read.
+        this.#update(observation.processId, terminal?.state ?? observation.state, terminal ? terminal.exitCode : observation.exitCode,
+          terminal?.eventId ?? event.id, terminal?.before ?? observation.sourceVersionBefore, terminal?.after ?? observation.sourceVersionAfter);
+      }
     } else if (event.type === "process.completed") {
       const terminal = { state: event.payload.status, exitCode: event.payload.exitCode, eventId: event.id,
         ...(event.payload.sourceVersionBefore ? { before: event.payload.sourceVersionBefore } : {}),
         ...(event.payload.sourceVersionAfter ? { after: event.payload.sourceVersionAfter } : {}) };
-      if (this.#turnIds.has(event.turnId)) this.#terminal.set(event.payload.processId, terminal);
-      if (event.payload.sourceVersionAfter && this.#currentProcess(event.payload.workspaceId, event.payload.processId)) this.#versions.set(event.payload.workspaceId, event.payload.sourceVersionAfter);
-      this.#update(event.payload.processId, terminal.state, terminal.exitCode, event.id, terminal.before, terminal.after);
+      if (this.#turnIds.has(event.turnId) && !this.#terminal.has(event.payload.processId)) this.#terminal.set(event.payload.processId, terminal);
+      const recorded = this.#terminal.get(event.payload.processId) ?? terminal;
+      if (!this.#finishedProcesses.has(event.payload.processId) && event.payload.sourceVersionAfter && this.#currentProcess(event.payload.workspaceId, event.payload.processId)) this.#versions.set(event.payload.workspaceId, event.payload.sourceVersionAfter);
+      this.#finishedProcesses.add(event.payload.processId);
+      this.#update(event.payload.processId, recorded.state, recorded.exitCode, recorded.eventId, recorded.before, recorded.after);
     }
   }
 
-  #key(resourceId: string, scope: string, identity?: string): string { return JSON.stringify([resourceId, scope, identity ?? "legacy"]); }
+  #key(resourceId: string, scope: string, identity?: string): string {
+    return JSON.stringify(identity ? [resourceId, "command", identity] : [resourceId, "legacy_scope", scope]);
+  }
   #currentProcess(resourceId: string, processId: string): boolean {
     return this.#latestProcesses.get(resourceId) === processId && this.#processGenerations.get(processId) === (this.#generations.get(resourceId) ?? 0);
   }
