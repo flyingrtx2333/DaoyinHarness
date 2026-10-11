@@ -1,4 +1,4 @@
-import type { JsonValue, ToolCapabilityCategory, ToolCapabilitySummary, ToolEvidence } from "@daoyin/harness-protocol";
+import type { JsonValue, ToolCapabilityCategory, ToolCapabilitySummary, ToolEvidence, ToolExecutionRole } from "@daoyin/harness-protocol";
 import { assertExecutionIdentity, ExecutionAccessError, type ExecutionIdentity } from "@daoyin/harness-contracts";
 
 export interface ToolDescriptor {
@@ -9,6 +9,8 @@ export interface ToolDescriptor {
   inputSchema: JsonValue;
   category: ToolCapabilityCategory;
   mutating: boolean;
+  /** Scheduling metadata from the capability owner; never grants access or reserves a second quota. */
+  executionRole?: ToolExecutionRole;
   /** Trusted registration only: allow intentional repeated writes within one turn. */
   repeatable?: boolean;
 }
@@ -87,6 +89,7 @@ function failure(code: string, message: string, retryable = false, details?: Jso
 function descriptor(tool: ToolDescriptor): ToolDescriptor {
   const { name, description, inputSchema, category, mutating } = tool;
   return { name, ...(tool.displayName === undefined ? {} : { displayName: tool.displayName }), description, inputSchema, category, mutating,
+    ...(tool.executionRole === undefined ? {} : { executionRole: tool.executionRole }),
     ...(tool.repeatable === undefined ? {} : { repeatable: tool.repeatable }) };
 }
 

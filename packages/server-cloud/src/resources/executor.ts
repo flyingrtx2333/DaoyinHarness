@@ -13,7 +13,7 @@ import { ensureWorkspaceEgress, isolateExistingContainer } from "./workspace-net
 import type { ExecutorProcessRequest, ResolvedSecret } from "./contracts.js";
 import { assertFileVersion, fileBaseline, fileChange, fileDigest, fileMutation } from "./file-mutation.js";
 import { applyTextPatch, parseTextPatch } from "./text-patch.js";
-import { PROJECT_DECLARATIONS, environmentVersionProbes, environmentCacheKey, isDependencyDeclaration } from "./environment.js";
+import { PROJECT_DECLARATIONS, environmentVersionProbes, environmentCacheKey, isDependencyDeclaration, environmentRuntimeAssessment } from "./environment.js";
 import { ProcessReceiptStore, receiptPage } from "./process-receipts.js";
 import { workspaceVersion } from "./workspace-version.js";
 
@@ -701,7 +701,8 @@ print(json.dumps(results))`] } : undefined;
   const interpreters = executables.map((executable, index) => ({ executable, available: observations[index]?.exitCode === 0, ...observations[index] }));
   const imageDigest = spec.image.kind === "builtin" ? spec.image.digest : spec.image.imageDigest!;
   const sourceMetadata = gitArgs.map((args, index) => ({ args, ...observations[executables.length + index] }));
-  return { runtime: spec, interpreters, declarations, sourceMetadata, cacheKey: environmentCacheKey(imageDigest, declarations, spec.environment),
+  return { runtime: spec, interpreters, declarations, sourceMetadata, runtimeAssessment: environmentRuntimeAssessment(declarations, interpreters),
+    cacheKey: environmentCacheKey(imageDigest, declarations, spec.environment),
     uncertainty: "Declarations are bounded untrusted data, not executed configuration or proof of compatibility. Git metadata may be absent or shallow; derived package versions must be checked, never invented. Verification commands and optional test dependencies remain model-selected from project declarations." };
 }
 

@@ -330,6 +330,7 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
   }
   if (request.action === "runtime_list") return { summary: "Trusted runtime catalog.", runtimes: trustedRuntimeCatalog(runtimeImages) };
   if (request.action === "environment_inspect") return { summary: "Actual environment and bounded declarations inspected.",
+    runtimes: trustedRuntimeCatalog(runtimeImages),
     ...await executor({ action: "environment", workspaceId: await workspaceAccess(auth, request), runId: request.sourceRun }, signal) };
   if (request.action === "environment_prepare") return prepareEnvironment(auth, request);
   if (request.action === "environment_read") return readEnvironment(auth, request);

@@ -3,6 +3,7 @@ import { taskTurnIds } from "./task-scope.js";
 
 interface Check {
   resourceId: string; processId: string; scope: string; generation: number;
+  checkIdentity?: string;
   state: string; exitCode: number | null; eventId: string;
   before?: WorkspaceVersion; after?: WorkspaceVersion;
 }
@@ -13,6 +14,8 @@ export class VerificationState {
   readonly #versions = new Map<string, WorkspaceVersion>();
   readonly #checks = new Map<string, Check>();
   readonly #intents = new Map<string, string | null>();
+  readonly #processGenerations = new Map<string, number>();
+  readonly #latestProcesses = new Map<string, string>();
   readonly #turnIds: Set<string>;
   readonly #changedResources = new Set<string>();
   readonly #terminal = new Map<string, { state: string; exitCode: number | null; eventId: string; before?: WorkspaceVersion; after?: WorkspaceVersion }>();
@@ -44,7 +47,9 @@ export class VerificationState {
         this.#generations.set(id, (this.#generations.get(id) ?? 0) + 1);
         if (this.#turnIds.has(event.turnId)) this.#changedResources.add(id);
       }
-      if (evidence.workspaceVersion) this.#versions.set(evidence.workspaceVersion.resourceId, evidence.workspaceVersion.version);
+      // A cached process receipt attests its completion-time content, not current
+      // workspace content. Apply process versions below, with ordering/generation.
+      if (evidence.workspaceVersion && !evidence.processObservation) this.#versions.set(evidence.workspaceVersion.resourceId, evidence.workspaceVersion.version);
       const transition = evidence.verificationWorkspace;
       if (transition && transition.sourceResourceId !== transition.targetResourceId && this.#turnIds.has(event.turnId)) {
         for (const [key, check] of [...this.#checks]) {
@@ -52,7 +57,7 @@ export class VerificationState {
           this.#checks.delete(key);
           check.resourceId = transition.targetResourceId;
           delete check.before; delete check.after;
-          this.#checks.set(JSON.stringify([check.resourceId, check.scope]), check);
+          this.#checks.set(this.#key(check.resourceId, check.scope, check.checkIdentity), check);
         }
         if (this.#changedResources.delete(transition.sourceResourceId)) this.#changedResources.add(transition.targetResourceId);
       }
@@ -64,15 +69,21 @@ export class VerificationState {
         // An arbitrary command may alter installed dependencies as well as source.
         // Conservatively expire earlier checks; declared checks remain independent.
         if (!observation.verification) this.#generations.set(observation.resourceId, (this.#generations.get(observation.resourceId) ?? 0) + 1);
+        this.#processGenerations.set(observation.processId, this.#generations.get(observation.resourceId) ?? 0);
+        this.#latestProcesses.set(observation.resourceId, observation.processId);
       }
       const completedVersion = observation.sourceVersionAfter ?? this.#terminal.get(observation.processId)?.after;
-      if (completedVersion) this.#versions.set(observation.resourceId, completedVersion);
-      else this.#versions.delete(observation.resourceId); // A running writer cannot attest current content.
-      if (observation.verification && this.#turnIds.has(event.turnId)) {
-        const key = JSON.stringify([observation.resourceId, observation.verification]);
+      if (this.#currentProcess(observation.resourceId, observation.processId)) {
+        if (completedVersion) this.#versions.set(observation.resourceId, completedVersion);
+        else this.#versions.delete(observation.resourceId); // A running writer cannot attest current content.
+      }
+      if (observation.verification && this.#turnIds.has(event.turnId) && !knownIntent) {
+        const identity = /^sha256:[a-f0-9]{64}$/u.test(observation.checkIdentity ?? "") ? observation.checkIdentity : undefined;
+        const key = this.#key(observation.resourceId, observation.verification, identity);
         this.#checks.delete(key);
         const check: Check = { resourceId: observation.resourceId, processId: observation.processId,
           scope: observation.verification, generation: this.#generations.get(observation.resourceId) ?? 0,
+          ...(identity ? { checkIdentity: identity } : {}),
           state: observation.state, exitCode: observation.exitCode, eventId: event.id,
           ...(observation.sourceVersionBefore ? { before: observation.sourceVersionBefore } : {}),
           ...(observation.sourceVersionAfter ? { after: observation.sourceVersionAfter } : {}) };
@@ -85,9 +96,14 @@ export class VerificationState {
         ...(event.payload.sourceVersionBefore ? { before: event.payload.sourceVersionBefore } : {}),
         ...(event.payload.sourceVersionAfter ? { after: event.payload.sourceVersionAfter } : {}) };
       if (this.#turnIds.has(event.turnId)) this.#terminal.set(event.payload.processId, terminal);
-      if (event.payload.sourceVersionAfter) this.#versions.set(event.payload.workspaceId, event.payload.sourceVersionAfter);
+      if (event.payload.sourceVersionAfter && this.#currentProcess(event.payload.workspaceId, event.payload.processId)) this.#versions.set(event.payload.workspaceId, event.payload.sourceVersionAfter);
       this.#update(event.payload.processId, terminal.state, terminal.exitCode, event.id, terminal.before, terminal.after);
     }
+  }
+
+  #key(resourceId: string, scope: string, identity?: string): string { return JSON.stringify([resourceId, scope, identity ?? "legacy"]); }
+  #currentProcess(resourceId: string, processId: string): boolean {
+    return this.#latestProcesses.get(resourceId) === processId && this.#processGenerations.get(processId) === (this.#generations.get(resourceId) ?? 0);
   }
 
   #update(processId: string, state: string, exitCode: number | null, eventId: string, before?: WorkspaceVersion, after?: WorkspaceVersion): void {
@@ -107,7 +123,11 @@ export class VerificationState {
     return "command_succeeded";
   }
 
-  get unresolved(): boolean { return [...this.#checks.values()].some(check => this.#status(check) !== "command_succeeded"); }
+  get unresolvedCount(): number { return [...this.#checks.values()].filter(check => this.#status(check) !== "command_succeeded").length; }
+  get unresolved(): boolean { return this.unresolvedCount > 0; }
+  get unverifiedResourceCount(): number {
+    return [...this.#changedResources].filter(id => ![...this.#checks.values()].some(check => check.resourceId === id && this.#status(check) === "command_succeeded")).length;
+  }
 
   context(): string {
     if (!this.#checks.size && !this.#changedResources.size) return "";
@@ -119,6 +139,7 @@ export class VerificationState {
         changedWithoutSelectedCheck: [...this.#changedResources].filter(id => !checks.some(check => check.resourceId === id)).slice(-12), checks: selected }) +
       "\ncommand_succeeded 只证明所选命令退出 0 且绑定的源码版本有效，不证明覆盖充分或目标正确。pending 读取同一进程；" +
       "unsuccessful 根据真实输出区分代码、环境或网络原因，修复责任层后重跑同一范围；outdated 重新检查最终修改；version_unknown 先消除并发写入或读取限制。" +
-      "未显示事项可通过 task_plan 的证据与原进程读取核对；不同范围的成功不清除其他失败。安装、读取和计划完成不能代替验证。遵从用户限制，如实报告未验证部分。";
+      "未显示事项可通过 task_plan 的证据与原进程读取核对；不同范围或不同命令的成功不清除其他失败。范围标签不能改变实际命令身份；安装、版本探测和准备步骤不应标记验收范围，也不能代替验证。" +
+      "对公共接口或数据格式的修改，同时检查问题复现及受影响的现有消费者；只验证新分支不能证明兼容。遵从用户限制，如实报告未验证部分。";
   }
 }

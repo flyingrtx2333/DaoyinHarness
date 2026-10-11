@@ -50,6 +50,66 @@ export function trustedRuntimeCatalog(catalog: Record<string, RuntimeCatalogEntr
       version: typeof entry.version === "string" ? entry.version.slice(0, 160) : null,
       capabilities: Array.isArray(entry.capabilities) ? entry.capabilities.filter((value): value is string => typeof value === "string").slice(0, 32) : [] }] : []);
 }
+
+interface RuntimeHint { family: "python" | "node"; source: string; kind: "pin" | "constraint" | "published_support"; value: string }
+/** Bounded declaration text is evidence, never executed configuration or an inferred upper bound. */
+export function environmentRuntimeAssessment(
+  declarations: readonly { path: string; content?: string; truncated?: boolean }[],
+  interpreters: readonly { executable: string; available?: boolean; output?: string; truncated?: boolean }[],
+): { hints: RuntimeHint[]; observations: Array<{ family: "python" | "node"; actualVersion: string | null; status: "pin_matches" | "pin_mismatch" | "unconfirmed" | "unknown" }>; incompleteSources: string[] } {
+  const hints: RuntimeHint[] = [];
+  const add = (family: RuntimeHint["family"], source: string, kind: RuntimeHint["kind"], value: string): void => {
+    if (hints.length < 64 && value.length <= 160 && !hints.some(item => item.family === family && item.source === source && item.kind === kind && item.value === value)) hints.push({ family, source, kind, value });
+  };
+  const incompleteSources: string[] = [];
+  for (const item of declarations) {
+    if (item.truncated || item.content === undefined || item.content.length > 32768) { incompleteSources.push(item.path); continue; }
+    const body = item.content;
+    if ([".python-version", ".node-version", ".nvmrc"].includes(item.path)) {
+      const value = body.trim().replace(/^v/u, "");
+      if (/^\d+(?:\.\d+){0,2}$/u.test(value)) add(item.path === ".python-version" ? "python" : "node", item.path, "pin", value);
+      else incompleteSources.push(item.path);
+    }
+    if (item.path === ".tool-versions") {
+      for (const match of body.matchAll(/^(python|nodejs)\s+(\d+(?:\.\d+){0,2})\s*$/gmu)) add(match[1] === "python" ? "python" : "node", item.path, "pin", match[2]!);
+    }
+    if (item.path === "package.json") {
+      try {
+        const parsed: unknown = JSON.parse(body);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const engines = (parsed as { engines?: unknown }).engines;
+          if (engines && typeof engines === "object" && !Array.isArray(engines)) {
+            const node = (engines as { node?: unknown }).node;
+            if (typeof node === "string") add("node", item.path, "constraint", node);
+          }
+        }
+      } catch { incompleteSources.push(item.path); }
+    }
+    if (["pyproject.toml", "setup.cfg", "setup.py"].includes(item.path)) {
+      // These are literal metadata hints, not a TOML/Python evaluator. Expressions
+      // and dynamic values remain unknown; no regex-derived constraint is executed.
+      for (const match of body.matchAll(/(?:requires-python|python_requires)\s*=\s*["']([^"'\r\n]{1,160})["']/gu)) add("python", item.path, "constraint", match[1]!);
+      if (item.path === "setup.cfg") {
+        for (const match of body.matchAll(/^\s*python_requires\s*=\s*([<>=!~\d][^#;\r\n]{0,159})$/gmu)) add("python", item.path, "constraint", match[1]!.trim());
+      }
+      for (const match of body.matchAll(/Programming Language :: Python :: (\d+\.\d+(?:\.\d+)?)/gu)) add("python", item.path, "published_support", match[1]!);
+    }
+  }
+  const families = new Set(hints.map(item => item.family));
+  if (interpreters.some(item => item.executable === "python" || item.executable === "python3")) families.add("python");
+  if (interpreters.some(item => item.executable === "node")) families.add("node");
+  const observations = [...families].map(family => {
+    const versions = interpreters.filter(item => (family === "python" ? ["python", "python3"].includes(item.executable) : item.executable === "node") && item.available && !item.truncated)
+      .map(item => (family === "python" ? /^Python\s+(\d+\.\d+\.\d+)/u : /^v(\d+\.\d+\.\d+)/u).exec(item.output?.trim() ?? "")?.[1])
+      .filter((value): value is string => value !== undefined);
+    const actualVersion = versions.length && new Set(versions).size === 1 ? versions[0]! : null;
+    const pins = hints.filter(item => item.family === family && item.kind === "pin");
+    const status: "pin_matches" | "pin_mismatch" | "unconfirmed" | "unknown" = actualVersion === null ? "unknown" : !pins.length ? "unconfirmed"
+      : pins.every(pin => actualVersion === pin.value || actualVersion.startsWith(pin.value + ".")) ? "pin_matches" : "pin_mismatch";
+    return { family, actualVersion, status };
+  });
+  return { hints, observations, incompleteSources: [...new Set(incompleteSources)] };
+}
 export function environmentCacheKey(imageDigest: string, declarations: Array<{ path: string; digest: string }>, environment: Readonly<Record<string, string>> = {}): string {
   const dependencies = declarations.filter(item => DEPENDENCY_DECLARATIONS.has(item.path)).map(({ path, digest }) => ({ path, digest }))
     .sort((a, b) => a.path.localeCompare(b.path));

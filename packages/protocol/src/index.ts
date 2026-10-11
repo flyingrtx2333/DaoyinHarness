@@ -151,6 +151,7 @@ export interface SessionCompaction {
 }
 
 export type WorkspaceVersion = { state: "known"; digest: string } | { state: "unknown"; reason: string };
+export type ToolExecutionRole = "observe" | "change" | "prepare" | "execute" | "coordinate";
 
 export interface ToolEvidence {
   schemaVersion: 1;
@@ -162,6 +163,8 @@ export interface ToolEvidence {
   verificationHint?: { resourceId: string; paths?: string[] };
   /** Actual process observation; verification records selected intent, not coverage or correctness. */
   processObservation?: { resourceId: string; processId: string; state: string; exitCode: number | null; verification: string | null;
+    /** Capability-owned exact check identity, not a model-supplied scope name. */
+    checkIdentity?: string;
     sourceVersionBefore?: WorkspaceVersion; sourceVersionAfter?: WorkspaceVersion };
   /** Successful snapshot-derived environment transition; not verification success. */
   verificationWorkspace?: { sourceResourceId: string; targetResourceId: string };

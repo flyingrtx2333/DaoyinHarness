@@ -70,7 +70,7 @@ export function createTaskPlanTool(options: TaskPlanToolOptions): ToolDefinition
   // A registry instance may serve several sessions; serialize read/version-check/append per scoped session.
   const writes = new Map<string, Promise<unknown>>();
   return {
-    name: "task_plan", displayName: "记录任务计划", category: "extension", mutating: true, repeatable: true,
+    name: "task_plan", displayName: "记录任务计划", category: "extension", mutating: true, repeatable: true, executionRole: "coordinate",
     description: "Read or update an optional versioned plan for a complex task. Read returns currentVersion (0 before creation). Updates require expectedVersion equal to currentVersion, goal and steps; blockers and evidence default to empty arrays. Status records intended progress, not verified correctness. Cite only actual accessible evidence; subagents maintain their own session plan.",
     inputSchema: { type: "object", additionalProperties: false, required: ["operation"], properties: {
       operation: { type: "string", enum: ["read", "update"] }, expectedVersion: { type: "integer", minimum: 0 }, goal: { type: "string", maxLength: 2000 },
