@@ -1,5 +1,6 @@
 // Four bounded actual account/model/tool/storage scenarios. No fabricated model or business responses.
 import { randomUUID, createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -10,10 +11,11 @@ const args = process.argv.slice(2);
 const value = flag => args[args.indexOf(flag) + 1];
 if (args.length !== 5 || !args.includes('--run') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') || !args.includes('--budget-dir')) throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY.');
 const revision = value('--expected-revision');
+const driverRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(import.meta.dirname, '..'), encoding: 'utf8' }).trim();
 const budget = validationBudget(value('--budget-dir'));
 const output = resolve('.cache/execution-architecture-live', new Date().toISOString().replaceAll(':', '-') + '_' + randomUUID().slice(0, 8));
 await mkdir(output, { recursive: true, mode: 0o700 });
-const report = { revision, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
+const report = { revision, driverRevision, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
   cases: [], startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: { maxScenarioRequests: 52, maxTotalSharedRequests: 160, maxCny: 10 } };
 const save = () => writeFile(join(output, 'report.json'), JSON.stringify(sanitizeEvidence(report), null, 2) + '\n', { mode: 0o600 });
 const client = createCloudAccountClient();
@@ -131,17 +133,26 @@ try {
   const first = await run(multi, `在工作区 ${multi.workspaceId} 完成两阶段任务。用 task_plan 保存目标、步骤和真实证据引用。第一阶段读取 orders.csv，生成 totals.csv（name,total），总和写入 summary.txt。第二阶段生成说明文件 README.md 并实际核对产物。本轮仅完成第一阶段，然后保存第二阶段为未完成并如实报告 partial，等待我下一轮继续。`, 4);
   const resumed = await run(multi, '继续保存的两阶段任务。先读取当前计划和实际产物，复用已完成写入，再完成剩余步骤与实际验证。', 8, { continueFromRunId: first.runId });
   multi.receipt = await control(multi, 'file_read', { path: 'summary.txt' });
+  multi.totals = await control(multi, 'file_read', { path: 'totals.csv' });
   multi.documentation = await control(multi, 'file_read', { path: 'README.md' });
-  multi.status = partial(first) && currentPlan(multi)?.steps.every(step => step.status === 'completed') && /10/.test(multi.receipt.content ?? multi.receipt.text ?? '') && resumed.events.some(event => event.type === 'tool.completed') ? 'passed' : 'failed';
+  const totals = (multi.totals.content ?? multi.totals.text ?? '').trim().split(/\r?\n/u).map(row => row.split(',').map(cell => cell.trim()));
+  const summaryNumbers = (multi.receipt.content ?? multi.receipt.text ?? '').match(/[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/gu) ?? [];
+  const actualTotals = totals.length === 3 && totals[0].join(',') === 'name,total' && totals.slice(1).every(row => row.length === 2) &&
+    totals.slice(1).filter(row => row[0] === 'alpha' && Number(row[1]) === 6).length === 1 &&
+    totals.slice(1).filter(row => row[0] === 'beta' && Number(row[1]) === 4).length === 1;
+  multi.status = partial(first) && currentPlan(multi)?.steps.every(step => step.status === 'completed') && actualTotals &&
+    summaryNumbers.length === 1 && Number(summaryNumbers[0]) === 10 && resumed.events.some(event => event.type === 'tool.completed') ? 'passed' : 'failed';
 
   });
   await scenario(async () => {
-  const environment = await fixture('声明运行时适配', { '.python-version': '3.11\n', 'pyproject.toml': '[project]\nname="price-export"\nversion="0.1.0"\nrequires-python=">=3.11,<3.12"\n', 'export.py': 'import sys\nif sys.version_info[:2] != (3, 11):\n    raise RuntimeError("project requires Python 3.11")\nprices = [3, 4]\nprint(sum(prices))\n' });
+  const originalExport = 'import sys\nif sys.version_info[:2] != (3, 11):\n    raise RuntimeError("project requires Python 3.11")\nprices = [3, 4]\nprint(sum(prices))\n';
+  const environment = await fixture('声明运行时适配', { '.python-version': '3.11\n', 'pyproject.toml': '[project]\nname="price-export"\nversion="0.1.0"\nrequires-python=">=3.11,<3.12"\n', 'export.py': originalExport });
   await run(environment, `在工作区 ${environment.workspaceId} 把 export.py 改为输出价格含 10% 服务费的总额，保留项目声明的解释器约束。先检查真实环境和项目声明，使用 runtime_list 与 environment_prepare 准备兼容环境，观察同一 operation，成功后在新工作区修改并实际运行验证，应输出 7.7。保存计划与证据。`, 12);
   environment.actual = await control(environment, 'environment_inspect');
   environment.verification = await control(environment, 'process_run', { executable: 'python', args: ['export.py'], cwd: '.', timeoutMs: 30000 });
   environment.original = await control(environment, 'file_read', { workspaceId: environment.originalWorkspaceId, path: 'export.py' });
-  environment.status = environment.workspaceId !== environment.originalWorkspaceId && environment.verification.exitCode === 0 && /^7\.7\s*$/u.test(environment.verification.stdout ?? '') ? 'passed' : 'failed';
+  environment.status = environment.workspaceId !== environment.originalWorkspaceId && environment.verification.exitCode === 0 && /^7\.7\s*$/u.test(environment.verification.stdout ?? '') &&
+    (environment.original.content ?? environment.original.text) === originalExport ? 'passed' : 'failed';
 
   });
   await scenario(async () => {
@@ -161,11 +172,15 @@ try {
   await scenario(async () => {
   const bounded = await fixture('额度保留续跑与取消', { 'ledger.txt': '', 'write_once.py': 'from pathlib import Path\np=Path("ledger.txt")\np.write_text(p.read_text()+"phase-a\\n")\nprint("phase-a-written")\n', 'cancel_job.py': 'import time\ntime.sleep(90)\nprint("unexpected-completion")\n' });
   const limited = await run(bounded, `工作区 ${bounded.workspaceId} 中用 task_plan 保存两个步骤：先运行 write_once.py 写入 phase-a（只允许执行一次），再生成 result.txt 并实际核对。额度不足时保存进展，不能宣称验证完成。`, 4);
-  await run(bounded, '继续原任务。先核对已保存计划及 ledger.txt；已经有 phase-a 就不要再执行 write_once.py，再生成 result.txt 说明实际已完成的操作，并验证。', 8, { continueFromRunId: limited.runId });
+  const continued = await run(bounded, '继续原任务。先核对已保存计划及 ledger.txt；已经有 phase-a 就不要再执行 write_once.py，再生成 result.txt 说明实际已完成的操作，并验证。', 8, { continueFromRunId: limited.runId });
   bounded.ledger = await control(bounded, 'file_read', { path: 'ledger.txt' });
+  bounded.result = await control(bounded, 'file_read', { path: 'result.txt' });
   const cancelled = await run(bounded, `在工作区 ${bounded.workspaceId} 只运行 cancel_job.py，process_run 等待1000ms，进程总期限120000ms，然后观察真实结果。`, 4, { cancelWhen: event => event.type === 'tool.completed' && event.payload.toolName === 'process_run' && event.payload.evidence?.result?.state === 'running' });
   const cancelledProcess = cancelled.events.find(event => event.type === 'process.completed');
-  bounded.status = partial(limited) && (bounded.ledger.content ?? bounded.ledger.text) === 'phase-a\n' && cancelled.run.status === 'cancelled' && cancelledProcess?.payload.status === 'cancelled' ? 'passed' : 'failed';
+  bounded.status = partial(limited) && continued.run.status === 'completed' &&
+    continued.events.some(event => event.type === 'turn.completed' && event.payload.taskOutcome === 'completed') &&
+    (bounded.result.content ?? bounded.result.text ?? '').trim().length > 0 &&
+    (bounded.ledger.content ?? bounded.ledger.text) === 'phase-a\n' && cancelled.run.status === 'cancelled' && cancelledProcess?.payload.status === 'cancelled' ? 'passed' : 'failed';
   });
   report.status = report.cases.length === 4 && report.cases.every(item => item.status === 'passed') ? 'passed-small-sample' : 'failed-small-sample';
 } catch (error) {
