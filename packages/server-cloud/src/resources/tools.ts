@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ExecutionIdentity } from "@daoyin/harness-contracts";
-import type { JsonValue, ToolEvidence, TaskEvidenceReference, AgentEventPayloads } from "@daoyin/harness-protocol";
+import type { JsonValue, ToolEvidence, TaskEvidenceReference, AgentEventPayloads, WorkspaceVersion } from "@daoyin/harness-protocol";
 import type { CloudRun } from "../repository.js";
 import type { CloudToolBinding } from "../app.js";
 import { CloudError } from "../repository.js";
@@ -44,7 +44,7 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   workspace_create: { description: "Create a task-neutral cloud workspace from an empty tree, credential-free HTTPS Git source at an explicit revision, upload artifact or snapshot. Select runtimeId from runtime_list; inspect project declarations before preparing a different environment.", mutating: true, inputSchema: object({ title: { type: "string", minLength: 1, maxLength: 120 }, source: workspaceSource, runtimeId: { type: "string", minLength: 1, maxLength: 80 } }, ["title", "source", "runtimeId"]) },
   runtime_list: { description: "List trusted runtime identifiers, image digests, configured versions and capabilities. A missing version is unknown; never invent catalog entries.", mutating: false, inputSchema: object({}) },
   environment_inspect: { description: "Read bounded project declarations as data and probe actual interpreter/package-manager versions in the selected isolated workspace. Does not execute configuration or assume compatibility.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
-  environment_prepare: { description: "Prepare a candidate workspace from an immutable snapshot without modifying the original. Select a trusted runtimeId, or a Dockerfile runtime whose FROM images are digest-pinned. Optionally install dependencies from detected project declarations. Returns one tracked operation ID; use environment_read to observe it, never relaunch an uncertain preparation. Success returns a new workspace ID.", mutating: true, inputSchema: object({ workspaceId, runtimeId: { type: "string", minLength: 1, maxLength: 80 }, runtime: object({ image: object({ kind: { const: "dockerfile", type: "string" }, path, context: cwd }, ["kind", "path", "context"]), environment: { type: "object", additionalProperties: { type: "string" } }, secretRefs: { type: "array", items: { type: "string" }, maxItems: 16 }, network: { type: "string", enum: ["public", "none"] }, limits: object({ cpu: { type: "number" }, memoryMiB: { type: "integer" }, pids: { type: "integer" }, diskMiB: { type: "integer" }, timeoutSeconds: { type: "integer" }, maxOutputBytes: { type: "integer" } }, ["cpu", "memoryMiB", "pids", "diskMiB", "timeoutSeconds", "maxOutputBytes"]) }, ["image", "environment", "secretRefs", "network", "limits"]), installDependencies: { type: "boolean" }, waitMs: { type: "integer", minimum: 0, maximum: 60000 } }, ["workspaceId"]) },
+  environment_prepare: { description: "Prepare a candidate workspace from an immutable snapshot without modifying the original. Select a trusted runtimeId, or a Dockerfile runtime whose FROM images are digest-pinned. Optionally install dependencies from detected project declarations. Returns one tracked operation ID; use environment_read to observe it, never relaunch an uncertain preparation. Success returns a new workspace ID.", mutating: true, inputSchema: object({ workspaceId, retryFromOperationId: { type: "string", pattern: "^op_[a-f0-9]{24}$", description: "Explicit retry of a previously observed failed or cancelled operation. Running or uncertain operations must be observed, not restarted." }, runtimeId: { type: "string", minLength: 1, maxLength: 80 }, runtime: object({ image: object({ kind: { const: "dockerfile", type: "string" }, path, context: cwd }, ["kind", "path", "context"]), environment: { type: "object", additionalProperties: { type: "string" } }, secretRefs: { type: "array", items: { type: "string" }, maxItems: 16 }, network: { type: "string", enum: ["public", "none"] }, limits: object({ cpu: { type: "number" }, memoryMiB: { type: "integer" }, pids: { type: "integer" }, diskMiB: { type: "integer" }, timeoutSeconds: { type: "integer" }, maxOutputBytes: { type: "integer" } }, ["cpu", "memoryMiB", "pids", "diskMiB", "timeoutSeconds", "maxOutputBytes"]) }, ["image", "environment", "secretRefs", "network", "limits"]), installDependencies: { type: "boolean" }, waitMs: { type: "integer", minimum: 0, maximum: 60000 } }, ["workspaceId"]) },
   environment_read: { description: "Observe the existing environment preparation operation with a bounded wait. Does not restart a build or dependency installation. Failed candidates preserve the original workspace.", mutating: false, inputSchema: object({ workspaceId, operationId: { type: "string", pattern: "^op_[a-f0-9]{24}$" }, waitMs: { type: "integer", minimum: 0, maximum: 60000 } }, ["workspaceId", "operationId"]) },
   workspace_inspect: { description: "Inspect one attached workspace, runtime, limits and snapshots.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   workspace_snapshot: { description: "Create an immutable content-addressed snapshot of the current workspace.", mutating: true, inputSchema: object({ workspaceId }, ["workspaceId"]) },
@@ -151,6 +151,10 @@ const RESOURCE_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   RESOURCE_NOT_ATTACHED: "目标资源未挂载到当前会话，未执行操作。请调用 resource_list 核对当前 attached 资源和真实 ID。",
   RESOURCE_NOT_FOUND: "当前账号无法使用该资源，未执行操作。请调用 resource_list 核对当前账号和会话可用的真实资源 ID。",
   PROCESS_TIMEOUT: "命令超过执行时限，本次未获得成功结果。安装或写入可能已留下部分状态；请先检查工作区和已有结果，确认原因或改变执行条件后再决定下一步，不要原样重复同一长时间命令。",
+  ENVIRONMENT_SOURCE_BUSY: "源工作区仍有运行中的进程，未捕获快照。先观察或停止原进程，再准备环境。",
+  ENVIRONMENT_RETRY_REQUIRED: "之前的环境准备已失败或取消。先读取原 operationId 的真实结果，再以 retryFromOperationId 明确发起新尝试。",
+  ENVIRONMENT_RETRY_DENIED: "原环境操作仍运行或结果不确定，不能重试；使用 environment_read 核对原操作。",
+  ENVIRONMENT_OUTCOME_UNCERTAIN: "环境操作结果尚不能安全确定，未重复启动。使用 environment_read 观察已有 operationId。",
   PROCESS_OBSERVATION_FAILED: "暂时无法确认原进程的输出或状态，未重新启动进程。保留 processId 和 cursor，通过只读观察核对原进程；不能把观察失败当作命令失败或重复安装。",
 };
 
@@ -164,10 +168,18 @@ function invalidWorkspacePath(name: ResourceToolName, input: Record<string, unkn
   });
 }
 
+function sourceVersion(value: unknown): WorkspaceVersion | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const version = value as Record<string, unknown>;
+  if (version.state === "known" && typeof version.digest === "string" && /^sha256:[a-f0-9]{64}$/u.test(version.digest)) return { state: "known", digest: version.digest };
+  if (version.state === "unknown" && typeof version.reason === "string") return { state: "unknown", reason: version.reason.slice(0, 160) };
+  return undefined;
+}
+
 function resourceVerificationHint(name: ResourceToolName, input: Record<string, unknown>, result: Record<string, unknown>): ToolEvidence["verificationHint"] {
   const resourceId = input.workspaceId;
   if (typeof resourceId !== "string" || !/^wsp_[a-f0-9]{24}$/u.test(resourceId)) return undefined;
-  if (name === "workspace_restore") return { resourceId };
+  if (name === "workspace_restore" || name === "git_checkout" || name === "git_branch") return { resourceId };
   if (!name.startsWith("file_") || !RESOURCE_DEFINITIONS[name].mutating) return undefined;
   const mutation = result.mutation as { changed?: boolean; changes?: Array<{ path?: unknown; changed?: boolean }> } | undefined;
   if (mutation?.changed === false) return undefined;
@@ -227,7 +239,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
         name, description: descriptor.description + (name === "resource_campfire_list" ? ` ${CAMPFIRE_INSTRUCTIONS}` : ""), category: "extension", mutating: descriptor.mutating,
         inputSchema: schema as JsonValue,
         ...(CAMPFIRE_DISPLAY_NAMES[name] ? { displayName: CAMPFIRE_DISPLAY_NAMES[name], auditInput: () => ({}) } : {}),
-        async execute(input, signal) {
+        async execute(input, signal, context) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");
           await ensureActive(identity, signal);
           if (invalidWorkspacePath(name, input)) return { ok: false, code: "WORKSPACE_PATH_INVALID", message: RESOURCE_FAILURE_MESSAGES.WORKSPACE_PATH_INVALID!, retryable: false };
@@ -270,7 +282,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             delete resourceInput.verification;
             result = await resourceCall<Record<string, unknown>>(identity, { ...resourceInput, ...versionGuard,
               ...(name === "process_run" ? { agentProcess: true } : {}),
-              action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}_${createHash("sha256").update(JSON.stringify(executionInput)).digest("hex").slice(0, 24)}` } as ResourceControlRequest, signal);
+              action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}_${createHash("sha256").update(name === "environment_prepare" ? context.toolCallId ?? context.sourceEventIds.at(-1) ?? JSON.stringify(executionInput) : JSON.stringify(executionInput)).digest("hex").slice(0, 24)}` } as ResourceControlRequest, signal);
           } catch (error) {
             // Preserve only independently specified infrastructure failures. The
             // registry still hides all other remote errors and arbitrary text.
@@ -343,10 +355,14 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
               ? { sourceResourceId: workspaceId, targetResourceId: targetId } : undefined;
           const processId = typeof result.processId === "string" ? result.processId : input.processId;
           const processObservation: ToolEvidence["processObservation"] = name.startsWith("process_") && workspaceId &&
-            typeof processId === "string" && /^prc_[a-f0-9]{24}$/u.test(processId) && typeof result.state === "string"
-            ? { resourceId: workspaceId, processId, state: result.state.slice(0, 40),
+            typeof processId === "string" && /^prc_[a-f0-9]{24}$/u.test(processId) && typeof (result.state ?? result.status) === "string"
+            ? { resourceId: workspaceId, processId, state: String(result.state ?? result.status).slice(0, 40),
               exitCode: typeof result.exitCode === "number" && Number.isSafeInteger(result.exitCode) ? result.exitCode : null,
-              verification: startsProcess && typeof input.verification === "string" ? input.verification.trim() : null } : undefined;
+              verification: startsProcess && typeof input.verification === "string" ? input.verification.trim() : null,
+              ...(sourceVersion(result.sourceVersionBefore) ? { sourceVersionBefore: sourceVersion(result.sourceVersionBefore)! } : {}),
+              ...(sourceVersion(result.sourceVersionAfter) ? { sourceVersionAfter: sourceVersion(result.sourceVersionAfter)! } : {}) } : undefined;
+          const version = sourceVersion(result.sourceVersionAfter);
+          const workspaceVersion: ToolEvidence["workspaceVersion"] = workspaceId && version ? { resourceId: workspaceId, version } : undefined;
           const reference = result.fullResultArtifact;
           const artifactId = reference && typeof reference === "object" && !Array.isArray(reference)
             ? (reference as Record<string, unknown>).artifactId : undefined;
@@ -354,6 +370,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
           return { ok: true, summary: typeof result.summary === "string" ? result.summary : `${name} completed.`, evidence: { schemaVersion: 1, toolName: name, result: result as JsonValue, artifacts, diagnostics: [],
             ...(verificationHint === undefined ? {} : { verificationHint }),
             ...(verificationWorkspace === undefined ? {} : { verificationWorkspace }),
+            ...(workspaceVersion === undefined ? {} : { workspaceVersion }),
             ...(processObservation === undefined ? {} : { processObservation }) } };
         },
       },
@@ -367,7 +384,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
 /** Read persisted facts only; notification delivery never launches a model request. */
 export async function resourceRunEvidence(identity: ExecutionIdentity, run: CloudRun): Promise<{ evidenceText: string; pendingOperationIds: string[]; completions: AgentEventPayloads["process.completed"][] }> {
   const result = await resourceCall<{ processes: Array<{ processId: string; workspaceId: string; status: string; exitCode: number | null; finishedAt: string | null;
-    receipt?: { digest?: string; cursor?: number; truncated?: boolean } }>; environments: Array<{ id: string; status: string }> }>(identity,
+    receipt?: { digest?: string; cursor?: number; truncated?: boolean; sourceVersionBefore?: WorkspaceVersion; sourceVersionAfter?: WorkspaceVersion } }>; environments: Array<{ id: string; status: string }> }>(identity,
     { action: "run_evidence", sessionId: run.sessionId, sourceRun: run.id });
   const pendingOperationIds = [...result.processes.filter(item => ["starting", "running"].includes(item.status)).map(item => item.processId),
     ...result.environments.filter(item => ["queued", "running"].includes(item.status)).map(item => item.id)].slice(0, 96);
@@ -378,7 +395,9 @@ export async function resourceRunEvidence(identity: ExecutionIdentity, run: Clou
     if (!Number.isFinite(finishedAt)) return [];
     return [{ processId: item.processId, workspaceId: item.workspaceId,
       status: status as AgentEventPayloads["process.completed"]["status"], exitCode: item.exitCode,
-      receiptDigest: item.receipt.digest, finishedAt, cursor: item.receipt.cursor ?? 0, truncated: item.receipt.truncated === true }];
+      receiptDigest: item.receipt.digest, finishedAt, cursor: item.receipt.cursor ?? 0, truncated: item.receipt.truncated === true,
+      ...(sourceVersion(item.receipt.sourceVersionBefore) ? { sourceVersionBefore: sourceVersion(item.receipt.sourceVersionBefore)! } : {}),
+      ...(sourceVersion(item.receipt.sourceVersionAfter) ? { sourceVersionAfter: sourceVersion(item.receipt.sourceVersionAfter)! } : {}) }];
   });
   return { evidenceText: JSON.stringify(result).slice(0, 12_000), pendingOperationIds, completions };
 }

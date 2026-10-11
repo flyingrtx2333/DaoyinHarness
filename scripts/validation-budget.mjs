@@ -34,9 +34,11 @@ export function validationBudget(directory) {
       ' prices=q.fetchall()',
       ` assert len(prices)==1 and prices[0]['is_enabled'] and prices[0]['currency']=='CNY', 'Actual pricing unavailable'`,
       ` pricing=prices[0]; pricing['pricing_json']=json.loads(pricing['pricing_json']) if isinstance(pricing['pricing_json'],str) else pricing['pricing_json']; date=pricing['effective_from']; pricing['effective_from']=date.isoformat() if hasattr(date,'isoformat') else str(date) if date is not None else None`,
+      ` q.execute("SELECT api_key,is_enabled FROM ai_provider_configs WHERE provider_key=%s",(primary['provider'],)); credentials=q.fetchall(); assert len(credentials)==1 and credentials[0]['is_enabled'], 'Existing credential unavailable'`,
+      ` credential=str(credentials[0]['api_key'] or '').strip(); assert credential, 'Existing credential unavailable'; credentialSha256=hashlib.sha256(credential.encode()).hexdigest(); credential=''`,
       ` canonical=lambda v:json.dumps(v,sort_keys=True,separators=(',',':')).encode()`,
       ` facts={'scenes':scenes,'maxOutputTokens':AGENT_MODEL_MAX_TOKENS}`,
-      ` print(json.dumps({'provider':primary['provider'],'model':primary['model'],**facts,'modelConfigurationSha256':hashlib.sha256(canonical(facts)).hexdigest(),'pricing':pricing,'pricingSha256':hashlib.sha256(canonical(pricing)).hexdigest()}))`,
+      ` print(json.dumps({'provider':primary['provider'],'model':primary['model'],**facts,'credentialSha256':credentialSha256,'modelConfigurationSha256':hashlib.sha256(canonical(facts)).hexdigest(),'pricing':pricing,'pricingSha256':hashlib.sha256(canonical(pricing)).hexdigest()}))`,
     ].join('\n');
     const usageProgram = operation === 'settle' ? [
       'import json',
@@ -51,6 +53,11 @@ export function validationBudget(directory) {
 p=json.loads(base64.b64decode('${parameters}'))
 root=pathlib.Path(p['directory']); policy_path=root/'policy.json'; ledger_path=root/'ledger.json'
 policy=json.loads(policy_path.read_text())
+runtime=subprocess.run(['systemctl','show','daoyin-harness-cloud.service','-p','MainPID','--value'],capture_output=True,text=True,timeout=5)
+pid=runtime.stdout.strip()
+if runtime.returncode or not pid.isdigit() or int(pid)<=0: raise RuntimeError('Active admission paths unavailable')
+active=dict(item.split('=',1) for item in pathlib.Path('/proc/'+pid+'/environ').read_bytes().decode().split('\x00') if '=' in item)
+if active.get('DAOYIN_CLOUD_MODEL_ADMISSION_POLICY')!=str(policy_path) or active.get('DAOYIN_CLOUD_MODEL_ADMISSION_LEDGER')!=str(ledger_path): raise RuntimeError('Active admission paths differ; no new request admitted')
 def sql(code):
  r=subprocess.run(['docker','exec','daoyintech-backend','python','-c',code],capture_output=True,text=True,timeout=20)
  if r.returncode: raise RuntimeError('Read-only platform audit failed')
@@ -58,6 +65,7 @@ def sql(code):
 configuration=sql(p['configurationProgram'])
 if any(configuration[k]!=policy[k] for k in ('provider','model','maxOutputTokens')): raise RuntimeError('Frozen model configuration changed; no new request admitted')
 if any(configuration[k]!=policy.get(k) for k in ('modelConfigurationSha256','pricingSha256')): raise RuntimeError('Frozen scene configuration or pricing changed; no new request admitted')
+if policy.get('credentialSha256') and configuration['credentialSha256']!=policy['credentialSha256']: raise RuntimeError('Frozen model configuration changed; no new request admitted')
 if policy['expiresAt']<=int(time.time()*1000): raise RuntimeError('Validation policy expired')
 rows=sql(p['usageProgram']) if p['operation']=='settle' else []
 lock=pathlib.Path(str(ledger_path)+'.lock'); until=time.monotonic()+5

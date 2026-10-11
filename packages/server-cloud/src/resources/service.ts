@@ -246,15 +246,23 @@ async function prepareEnvironment(auth: ExecutionIdentity, request: ResourceCont
       (Object.keys(originalRuntime.limits) as Array<keyof typeof originalRuntime.limits>).some(key => runtime.limits[key] > originalRuntime.limits[key]))
     throw new ResourceError("ENVIRONMENT_POLICY_INCREASE", "Preparation cannot increase the source workspace's network, secrets or resource limits.", 403);
   if (runtime.image.kind === "dockerfile" && runtime.image.imageDigest) throw new ResourceError("RUNTIME_IMAGE_BUILD_REQUIRED", "Dockerfile runtimes must be produced by the isolated builder.", 403);
-  const claimed = await repository.claimEnvironment(auth, workspaceId, required(request.requestId, "requestId"), request.sourceRun,
-    { runtime, installDependencies: request.installDependencies === true });
+  const claimed = await repository.serializeWorkspace(workspaceId, () => repository.claimEnvironment(auth, workspaceId,
+    required(request.requestId, "requestId"), request.sourceRun,
+    { runtime, installDependencies: request.installDependencies === true }, request.retryFromOperationId));
   if (claimed.claimed) {
     const operationId = claimed.operation.id; const controller = new AbortController();
     const work = (async (): Promise<void> => {
       let candidateId: string | undefined;
+      let sourceSnapshotId: string | undefined;
       try {
-        const exported = await executor({ action: "workspace_prepare", operation: "snapshot", workspaceId }, controller.signal);
-        const snapshot = await repository.recordSnapshot(auth, workspaceId, exported.entries as WorkspaceEntry[]);
+        const snapshot = await repository.serializeWorkspace(workspaceId, async () => {
+          if (await repository.hasRunningProcessesInWorkspace(auth, workspaceId)) throw new ResourceError("ENVIRONMENT_SOURCE_BUSY",
+            "Source workspace has a running process. Wait for or stop it before preparing a consistent snapshot.", 409);
+          const exported = await executor({ action: "workspace_prepare", operation: "snapshot", workspaceId }, controller.signal);
+          return repository.recordSnapshot(auth, workspaceId, exported.entries as WorkspaceEntry[]);
+        });
+        sourceSnapshotId = snapshot.id;
+        await repository.recordEnvironmentSnapshot(operationId, snapshot);
         const { workspaceId: _originalWorkspace, runtimeId: _selectedRuntime, ...creationRequest } = request;
         const result = await dispatchUnlocked({ ...creationRequest, action: "workspace_create",
           runtime, title: "Prepared environment", source: { kind: "snapshot", snapshotId: snapshot.id } }, controller.signal);
@@ -278,7 +286,7 @@ async function prepareEnvironment(auth: ExecutionIdentity, request: ResourceCont
           }
         }
         if (controller.signal.aborted) throw new ResourceError("ENVIRONMENT_CANCELLED", "Preparation was cancelled; the original workspace was preserved.");
-        await repository.completeEnvironment(operationId, "completed", { ...result, inspection, originalWorkspaceId: workspaceId });
+        await repository.completeEnvironment(operationId, "completed", { ...result, inspection, originalWorkspaceId: workspaceId, sourceSnapshotId });
       } catch (error) {
         const code = error instanceof ResourceError ? error.code : "ENVIRONMENT_PREPARATION_FAILED";
         if (controller.signal.aborted && candidateId && request.sourceRun) {
@@ -289,7 +297,7 @@ async function prepareEnvironment(auth: ExecutionIdentity, request: ResourceCont
         }
         if (candidateId) await repository.setWorkspaceState(auth, candidateId, "failed", code);
         await repository.completeEnvironment(operationId, controller.signal.aborted ? "cancelled" : "failed", { originalWorkspaceId: workspaceId,
-          ...(candidateId ? { candidateWorkspaceId: candidateId } : {}), code }, code);
+          ...(candidateId ? { candidateWorkspaceId: candidateId } : {}), ...(sourceSnapshotId ? { sourceSnapshotId } : {}), code }, code);
       }
     })().finally(() => { environmentJobs.delete(operationId); });
     environmentJobs.set(operationId, { owner: environmentOwner(auth), runId: request.sourceRun, controller, work });

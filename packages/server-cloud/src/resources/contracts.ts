@@ -35,6 +35,8 @@ export interface ResourceControlRequest {
   source?: WorkspaceSource;
   runtimeId?: string;
   operationId?: string;
+  /** Explicit new attempt after an owned preparation has a known failed/cancelled outcome. */
+  retryFromOperationId?: string;
   installDependencies?: boolean;
   runtime?: RuntimeSpec;
   entries?: WorkspaceEntry[];

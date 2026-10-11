@@ -1,6 +1,7 @@
 import type { SessionEventStore } from "@daoyin/harness-contracts";
 import type { AgentEvent, JsonValue, TaskEvidenceReference, TaskPlan, TaskPlanStep } from "@daoyin/harness-protocol";
 import type { ToolDefinition, ToolExecutionContext } from "@daoyin/harness-tools/registry";
+import { taskTurnIds } from "./task-scope.js";
 
 type PlanContext = Pick<ToolExecutionContext, "accountId" | "scopeId" | "sessionId" | "turnId">;
 
@@ -19,7 +20,9 @@ function scopedEvents(events: readonly AgentEvent[], context: PlanContext): read
 }
 
 export async function readCurrentTaskPlan(events: SessionEventStore, context: PlanContext): Promise<TaskPlan | undefined> {
-  const event = scopedEvents(await events.read(context.sessionId), context).findLast(event => event.type === "task_plan.updated");
+  const history = scopedEvents(await events.read(context.sessionId), context);
+  const turns = taskTurnIds(history, context.turnId);
+  const event = history.findLast(event => event.type === "task_plan.updated" && turns.has(event.turnId));
   return event?.type === "task_plan.updated" ? structuredClone(event.payload.plan) : undefined;
 }
 
@@ -83,7 +86,8 @@ export function createTaskPlanTool(options: TaskPlanToolOptions): ToolDefinition
       const operation = async () => {
         signal.throwIfAborted();
         const events = scopedEvents(await options.events.read(context.sessionId), context);
-        const latest = events.findLast(event => event.type === "task_plan.updated");
+        const turns = taskTurnIds(events, context.turnId);
+        const latest = events.findLast(event => event.type === "task_plan.updated" && turns.has(event.turnId));
         const current = latest?.type === "task_plan.updated" ? latest.payload.plan : undefined;
         const success = (result: JsonValue) => ({ ok: true as const, summary: input.operation === "read" ? "已读取当前任务计划。" : "已保存任务计划；计划状态不代表验收通过。",
           evidence: { schemaVersion: 1 as const, toolName: "task_plan", result, artifacts: [], diagnostics: [] } });

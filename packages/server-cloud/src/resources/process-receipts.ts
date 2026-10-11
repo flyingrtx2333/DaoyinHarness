@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertResourceId } from "@daoyin/harness-contracts";
+import type { WorkspaceVersion } from "@daoyin/harness-protocol";
 
 export interface ProcessReceipt {
   processId: string; workspaceId: string; state: string; exitCode: number | null;
   output: string; cursor: number; truncated: boolean; digest: string;
   startedAt: string; finishedAt: string | null; timeoutAt: string;
+  sourceVersionBefore?: WorkspaceVersion; sourceVersionAfter?: WorkspaceVersion;
 }
 export class ProcessReceiptStore {
   public constructor(private readonly root: string) {}

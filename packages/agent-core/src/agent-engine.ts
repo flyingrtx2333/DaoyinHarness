@@ -10,8 +10,9 @@ import { contextPreview, modelToolResult } from "./model-tool-result.js";
 import { memoryContextView, memoryOperation, type AgentMemoryProvider, type MemoryContextSnapshot } from "./memory-context.js";
 import type { ModelClient, ModelConversationItem, ModelReply } from "./model.js";
 import { createDefaultPromptRegistry, SystemPromptRegistry } from "./prompt-registry.js";
-import { readCurrentTaskPlan, taskPlanContext } from "./task-plan.js";
-import { VerificationState } from "./verification-state.js";
+import { taskPlanContext } from "./task-plan.js";
+import type { VerificationState } from "./verification-state.js";
+import { ExecutionProjection } from "./execution-projection.js";
 
 /**
  * Agent 回合输入参数接口
@@ -366,6 +367,7 @@ export class AgentEngine {
     }
     const current: ModelConversationItem[] = [{ role: "user", content: input.userMessage }];
     const toolReceipts: Array<{ toolCallId: string; name: string; ok: boolean; mutating: boolean }> = [];
+    let projection: ExecutionProjection | undefined;
     const verificationHints: Array<{ toolCallId: string; resourceId: string; paths?: string[] }> = [];
     let verificationRequested = false;
     let verificationNextStep = false;
@@ -426,13 +428,13 @@ export class AgentEngine {
           ...(contextInherited.length ? { inheritedEvents: contextInherited } : {}), ...(compaction === undefined ? {} : { compaction }) });
         // Derive the active plan from immutable events, outside lossy dialogue compaction.
         // Never inherit a parent's plan as the child's writable coordination state.
-        const plan = await readCurrentTaskPlan(this.#events, executionContext);
-        // Read canonical events rather than model summaries; also includes newly
-        // persisted asynchronous completion receipts and continuation history.
-        verification = new VerificationState(await this.#events.read(input.sessionId), input.turnId);
+        const executionState = await this.#executionState?.(input);
+        if (projection === undefined) projection = new ExecutionProjection(await this.#events.read(input.sessionId), input.turnId);
+        else await projection.refresh(this.#events, executionContext);
+        const plan = projection.plan;
+        verification = projection.verification;
         pendingPlanSteps = plan?.steps.filter(item => item.status !== "completed").length ?? 0;
         const planText = tools.some(tool => tool.name === "task_plan") || plan !== undefined ? taskPlanContext(plan) : "";
-        const executionState = await this.#executionState?.(input);
         if (executionState !== undefined && (executionState.evidenceText.length > 12_000 || executionState.pendingOperationIds.length > 96 ||
             executionState.pendingOperationIds.some(id => typeof id !== "string" || !id || id.length > 200))) {
           throw new AgentPolicyError("AGENT_EXECUTION_STATE_INVALID", "能力返回的运行证据超出可信上下文边界。");

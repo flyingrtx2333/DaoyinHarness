@@ -145,6 +145,8 @@ export interface SessionCompaction {
   createdAt: string;
 }
 
+export type WorkspaceVersion = { state: "known"; digest: string } | { state: "unknown"; reason: string };
+
 export interface ToolEvidence {
   schemaVersion: 1;
   toolName: string;
@@ -154,9 +156,11 @@ export interface ToolEvidence {
   /** Capability-owned changed resource to inspect; not a claim of task validation. */
   verificationHint?: { resourceId: string; paths?: string[] };
   /** Actual process observation; verification records selected intent, not coverage or correctness. */
-  processObservation?: { resourceId: string; processId: string; state: string; exitCode: number | null; verification: string | null };
+  processObservation?: { resourceId: string; processId: string; state: string; exitCode: number | null; verification: string | null;
+    sourceVersionBefore?: WorkspaceVersion; sourceVersionAfter?: WorkspaceVersion };
   /** Successful snapshot-derived environment transition; not verification success. */
   verificationWorkspace?: { sourceResourceId: string; targetResourceId: string };
+  workspaceVersion?: { resourceId: string; version: WorkspaceVersion };
 }
 
 export interface AgentEventPayloads {
@@ -169,6 +173,7 @@ export interface AgentEventPayloads {
     finishedAt: number;
     cursor: number;
     truncated: boolean;
+    sourceVersionBefore?: WorkspaceVersion; sourceVersionAfter?: WorkspaceVersion;
   };
   "task_plan.updated": {
     plan: TaskPlan;

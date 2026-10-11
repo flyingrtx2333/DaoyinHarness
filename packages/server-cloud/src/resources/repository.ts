@@ -643,6 +643,12 @@ export class ResourceRepository {
       WHERE owner_key=$1 AND run_id=$2 AND status IN ('starting','running') ORDER BY started_at,id`,
       [ownerKey(identity), runId])).rows;
   }
+  public async hasRunningProcessesInWorkspace(identity: ExecutionIdentity, workspaceId: string): Promise<boolean> {
+    await this.workspace(identity, workspaceId);
+    return (await this.pool.query<{ busy: boolean }>(`SELECT EXISTS (
+      SELECT 1 FROM harness_process_sessions WHERE workspace_id=$1 AND owner_key=$2
+      AND status IN ('starting','running')) AS busy`, [workspaceId, ownerKey(identity)])).rows[0]?.busy === true;
+  }
   public async pendingProcessReceipts(): Promise<Array<{ processId: string; workspaceId: string; status: string; timeoutAt: string | null }>> {
     return (await this.pool.query<{ processId: string; workspaceId: string; status: string; timeoutAt: string | null }>(`SELECT id AS "processId",workspace_id AS "workspaceId",status,timeout_at AS "timeoutAt"
       FROM harness_process_sessions WHERE status IN ('starting','running') ORDER BY started_at LIMIT 100`)).rows;
@@ -692,8 +698,34 @@ export class ResourceRepository {
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
 
-  public async claimEnvironment(identity: ExecutionIdentity, workspaceId: string, requestId: string, sourceRun: string | undefined, input: unknown): Promise<{ operation: EnvironmentOperation; claimed: boolean }> {
+  /** Caller serializes the workspace while claiming; input digest is not an operation identity. */
+  public async claimEnvironment(identity: ExecutionIdentity, workspaceId: string, requestId: string, sourceRun: string | undefined, input: unknown, retryFromOperationId?: string): Promise<{ operation: EnvironmentOperation; claimed: boolean }> {
     await this.workspace(identity,workspaceId); const operationId=id("op"); const hash=createHash("sha256").update(canonical(input)).digest("hex");
+    const columns = `id,workspace_id AS "workspaceId",source_run AS "sourceRun",status,result,error,input_hash`;
+    const previous = (await this.pool.query<EnvironmentOperation & { input_hash: string }>(`SELECT ${columns}
+      FROM harness_workspace_operations WHERE workspace_id=$1 AND request_id=$2 AND owner_key=$3 AND kind='environment_prepare'`,
+      [workspaceId,requestId,ownerKey(identity)])).rows[0];
+    if (previous) {
+      if (previous.input_hash !== hash) throw new ResourceError("ENVIRONMENT_OUTCOME_UNCERTAIN", "Preparation request already exists with different input; it was not repeated.", 409);
+      return { operation: previous, claimed: false };
+    }
+    if (retryFromOperationId) {
+      const prior = await this.environmentOperation(identity, workspaceId, retryFromOperationId);
+      if (prior.status !== "failed" && prior.status !== "cancelled") throw new ResourceError("ENVIRONMENT_RETRY_DENIED",
+        "Only a known failed or cancelled preparation can be retried. Observe running or uncertain operations instead.", 409);
+    }
+    const pending = (await this.pool.query<EnvironmentOperation & { input_hash: string }>(`SELECT ${columns}
+      FROM harness_workspace_operations WHERE workspace_id=$1 AND owner_key=$2 AND kind='environment_prepare'
+      AND status IN ('running','interrupted') ORDER BY created_at DESC LIMIT 1`, [workspaceId,ownerKey(identity)])).rows[0];
+    if (pending) {
+      if (pending.status === "running" && pending.input_hash === hash && !retryFromOperationId) return { operation: pending, claimed: false };
+      throw new ResourceError("ENVIRONMENT_OUTCOME_UNCERTAIN", "A source preparation is running or uncertain; inspect its outcome before creating another attempt.", 409);
+    }
+    const latest = (await this.pool.query<{ id: string; status: string }>(`SELECT id,status FROM harness_workspace_operations
+      WHERE workspace_id=$1 AND owner_key=$2 AND kind='environment_prepare' AND input_hash=$3
+      ORDER BY created_at DESC LIMIT 1`, [workspaceId,ownerKey(identity),hash])).rows[0];
+    if (latest && (latest.status === "failed" || latest.status === "cancelled") && !retryFromOperationId) throw new ResourceError("ENVIRONMENT_RETRY_REQUIRED",
+      `An earlier preparation failed or was cancelled. Inspect operation ${latest.id} and explicitly provide retryFromOperationId for a new attempt.`, 409);
     const inserted=await this.pool.query(`INSERT INTO harness_workspace_operations(id,owner_key,workspace_id,request_id,kind,input_hash,source_run,status)
       VALUES($1,$2,$3,$4,'environment_prepare',$5,$6,'running') ON CONFLICT(workspace_id,request_id) DO NOTHING`, [operationId,ownerKey(identity),workspaceId,requestId,hash,sourceRun??null]);
     const row=(await this.pool.query<EnvironmentOperation & { input_hash:string }>(`SELECT id,workspace_id AS "workspaceId",source_run AS "sourceRun",status,result,error,input_hash
@@ -706,6 +738,16 @@ export class ResourceRepository {
     const row=(await this.pool.query<EnvironmentOperation>(`SELECT id,workspace_id AS "workspaceId",source_run AS "sourceRun",status,result,error
       FROM harness_workspace_operations WHERE id=$1 AND workspace_id=$2 AND owner_key=$3 AND kind='environment_prepare'`,[operationId,workspaceId,ownerKey(identity)])).rows[0];
     if(!row) throw new ResourceError("ENVIRONMENT_NOT_FOUND","Environment operation is not available in this workspace.",404); return row;
+  }
+  public async recordEnvironmentSnapshot(operationId: string, snapshot: WorkspaceSnapshot): Promise<void> {
+    await this.pool.query(`WITH changed AS (UPDATE harness_workspace_operations
+      SET result=COALESCE(result,'{}'::jsonb) || $2::jsonb,updated_at=now()
+      WHERE id=$1 AND workspace_id=$3 AND kind='environment_prepare' AND status='running' RETURNING *)
+      INSERT INTO harness_resource_events(owner_key,run_id,resource_id,event_type,payload)
+      SELECT owner_key,source_run,workspace_id,'environment.snapshot',
+      jsonb_build_object('operationId',id,'sourceSnapshotId',$4::text,'sourceSnapshotDigest',$5::text) FROM changed`,
+      [operationId,JSON.stringify({ originalWorkspaceId: snapshot.workspaceId, sourceSnapshotId: snapshot.id, sourceSnapshotDigest: snapshot.digest }),
+        snapshot.workspaceId,snapshot.id,snapshot.digest]);
   }
   public async completeEnvironment(operationId: string, status: "completed" | "failed" | "cancelled", result: Record<string, unknown>, error?: string): Promise<void> {
     await this.pool.query(`WITH changed AS (UPDATE harness_workspace_operations SET status=$2,result=$3,error=$4,updated_at=now()

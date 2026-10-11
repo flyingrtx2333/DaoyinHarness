@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chmod, chown, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertResourceId, assertWorkspacePath, type RuntimeSpec, type WorkspaceEntry } from "@daoyin/harness-contracts";
+import type { WorkspaceVersion } from "@daoyin/harness-protocol";
 import { FileContentStore } from "./content-store.js";
 import { ResourceError } from "./repository.js";
 import { assertRuntimeSpec } from "./runtime-policy.js";
@@ -12,8 +13,9 @@ import { ensureWorkspaceEgress, isolateExistingContainer } from "./workspace-net
 import type { ExecutorProcessRequest, ResolvedSecret } from "./contracts.js";
 import { assertFileVersion, fileBaseline, fileChange, fileDigest, fileMutation } from "./file-mutation.js";
 import { applyTextPatch, parseTextPatch } from "./text-patch.js";
-import { PROJECT_DECLARATIONS, VERSION_PROBES, environmentCacheKey } from "./environment.js";
+import { PROJECT_DECLARATIONS, environmentVersionProbes, environmentCacheKey, isDependencyDeclaration } from "./environment.js";
 import { ProcessReceiptStore, receiptPage } from "./process-receipts.js";
+import { workspaceVersion } from "./workspace-version.js";
 
 const ROOT = process.env.HARNESS_WORKSPACE_ROOT ?? "/var/lib/daoyin-resources/workspaces";
 const CONTENT_ROOT = process.env.HARNESS_CONTENT_STORE_ROOT ?? "/var/lib/daoyin-resources/content";
@@ -25,7 +27,7 @@ const RUNTIME = process.env.HARNESS_GVISOR_RUNTIME ?? "runsc";
 const EGRESS_NETWORK = process.env.HARNESS_EGRESS_NETWORK ?? "harness-public-egress";
 const EGRESS_PROXY = process.env.HARNESS_EGRESS_PROXY ?? process.env.HARNESS_EGRESS_PROXY_URL ?? "";
 const EGRESS_SECRET = process.env.HARNESS_EGRESS_HMAC_SECRET ?? "";
-const IMAGE_CATALOG = JSON.parse(process.env.HARNESS_RUNTIME_IMAGES ?? "{}") as Record<string, { image: string; digest: string }>;
+const IMAGE_CATALOG = JSON.parse(process.env.HARNESS_RUNTIME_IMAGES ?? "{}") as Record<string, { image: string; digest: string; capabilities?: string[] }>;
 const SANDBOX_PROBE = JSON.parse(process.env.HARNESS_SANDBOX_PROBE ?? "null") as { imageId?: string; executable?: string; args?: string[] } | null;
 const content = await FileContentStore.open(CONTENT_ROOT);
 const receipts = new ProcessReceiptStore(path.join(CONTENT_ROOT, "process-receipts"));
@@ -174,6 +176,29 @@ async function loadRuntime(workspaceId: string): Promise<RuntimeSpec> {
   assertRuntimeSpec(value); image(value); return value;
 }
 
+async function sourceVersion(workspaceId: string, spec: RuntimeSpec, signal?: AbortSignal): Promise<WorkspaceVersion> {
+  signal?.throwIfAborted();
+  const running = await docker(["ps", "--filter", `label=daoyin.harness.workspace=${workspaceId}`, "--filter", "label=daoyin.harness.process", "--format", "{{.Names}}"], 10_000, undefined, 20_000, signal);
+  signal?.throwIfAborted();
+  if (running.exitCode !== 0 || running.timedOut) return { state: "unknown", reason: "SOURCE_WRITERS_UNOBSERVED" };
+  if (running.stdout.trim()) return { state: "unknown", reason: "SOURCE_WRITER_RUNNING" };
+  const declarations = await projectDeclarations(workspaceId, true);
+  const digest = spec.image.kind === "builtin" ? spec.image.digest : spec.image.imageDigest!;
+  return workspaceVersion(workspaceRoot(workspaceId), environmentCacheKey(digest, declarations, spec.environment), signal);
+}
+
+async function savedSourceVersion(workspaceId: string, processId: string): Promise<WorkspaceVersion> {
+  assertResourceId(processId, "prc");
+  try {
+    const directory = await runtimeDirectory(workspaceId, ["process-source"]);
+    const target = path.join(directory, `${processId}.json`); const info = await lstat(target);
+    if (!info.isFile() || info.isSymbolicLink()) return { state: "unknown", reason: "SOURCE_VERSION_METADATA_INVALID" };
+    const value = JSON.parse(await readFile(target, "utf8")) as WorkspaceVersion;
+    if (value.state === "known" && typeof value.digest === "string" && /^sha256:[a-f0-9]{64}$/u.test(value.digest) || value.state === "unknown" && typeof value.reason === "string") return value;
+  } catch { /* Historical and unacknowledged launches must remain unknown. */ }
+  return { state: "unknown", reason: "SOURCE_VERSION_BEFORE_UNAVAILABLE" };
+}
+
 async function run(executable: string, args: string[], timeoutMs: number, input?: string, maximumBytes = 1_000_000, signal?: AbortSignal): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
     signal?.throwIfAborted();
@@ -315,9 +340,9 @@ async function redactSecretOutput(name: string, value: string): Promise<string> 
 
 async function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, runId = "system"): Promise<string[]> {
   const root = workspaceRoot(workspaceId); const egress = spec.network === "public" ? await egressArguments(workspaceId, runId, spec.limits.timeoutSeconds) : null;
-  const declarations = await projectDeclarations(workspaceId);
+  const declarations = await projectDeclarations(workspaceId, true);
   const digest = spec.image.kind === "builtin" ? spec.image.digest : spec.image.imageDigest!;
-  const cacheKey = environmentCacheKey(digest, declarations);
+  const cacheKey = environmentCacheKey(digest, declarations, spec.environment);
   await ensureWorkspaceRuntimeDirectories(workspaceId, cacheKey);
   const environmentRoot = `/workspace/.harness/environments/${cacheKey}`;
   const environmentHostRoot = path.join(root, ".harness", "environments", cacheKey);
@@ -391,6 +416,7 @@ function runtimeFrom(request: ExecutorProcessRequest): RuntimeSpec {
 
 async function prepare(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const workspaceId = request.workspaceId!; assertResourceId(workspaceId, "wsp"); const root = workspaceRoot(workspaceId);
+  if (request.operation === "fingerprint") return { sourceVersion: await sourceVersion(workspaceId, await loadRuntime(workspaceId), signal) };
   if (request.operation === "snapshot") return { entries: await scan(workspaceId) };
   if (request.operation === "set_runtime") { await saveRuntime(workspaceId, runtimeFrom(request)); return { runtimeUpdated: true }; }
   if (request.operation === "restore") { const spec = await loadRuntime(workspaceId); await materialize(workspaceId, request.entries ?? []); await saveRuntime(workspaceId, spec); return { entries: await scan(workspaceId) }; }
@@ -580,19 +606,22 @@ async function gitOperation(request: ExecutorProcessRequest, signal?: AbortSigna
     export_patch: ["diff", "--binary", "HEAD"],
   };
   const args = commands[operation]; if (!args) throw new ResourceError("GIT_OPERATION_DENIED", "Git operation is not allowed.", 403);
+  const sourceVersionBefore = await sourceVersion(workspaceId, spec, signal);
   if (operation === "commit") {
     const staged = await foreground(workspaceId, spec, "git", ["add", "-A"], ".", undefined, 120_000, undefined, request.runId, undefined, signal);
     if (staged.exitCode !== 0) throw new ResourceError("GIT_OPERATION_FAILED", staged.stderr.slice(-2000) || "Git changes could not be staged.", 422);
   }
   const result = await foreground(workspaceId, spec, "git", args, ".", undefined, 120_000, undefined, request.runId, undefined, signal);
   if (result.exitCode !== 0) throw new ResourceError("GIT_OPERATION_FAILED", result.stderr.slice(-2000) || "Git operation failed.", 422);
-  return operation === "export_patch" ? { content: result.stdout } : result;
+  const sourceVersionAfter = await sourceVersion(workspaceId, spec, signal);
+  return { ...(operation === "export_patch" ? { content: result.stdout } : result), sourceVersionBefore, sourceVersionAfter };
 }
 
-async function projectDeclarations(workspaceId: string): Promise<Array<{ path: string; digest: string; size: number; content: string; truncated: boolean }>> {
+async function projectDeclarations(workspaceId: string, dependenciesOnly = false): Promise<Array<{ path: string; digest: string; size: number; content: string; truncated: boolean }>> {
   const result: Array<{ path: string; digest: string; size: number; content: string; truncated: boolean }> = [];
   let remaining = 64 * 1024;
   for (const name of PROJECT_DECLARATIONS) {
+    if (dependenciesOnly && !isDependencyDeclaration(name)) continue;
     let target: string;
     try { target = await safePath(workspaceId, name); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
@@ -608,35 +637,81 @@ async function projectDeclarations(workspaceId: string): Promise<Array<{ path: s
 async function environmentInspect(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const workspaceId = request.workspaceId!; const spec = await loadRuntime(workspaceId);
   const declarations = await projectDeclarations(workspaceId);
-  const interpreters: Array<Record<string, unknown>> = [];
-  for (const executable of VERSION_PROBES) {
-    signal?.throwIfAborted();
+  const catalogCapabilities = spec.image.kind === "builtin" ? IMAGE_CATALOG[spec.image.id]?.capabilities : undefined;
+  const capabilities = Array.isArray(catalogCapabilities) ? catalogCapabilities.filter(value => typeof value === "string") : [];
+  const executables = environmentVersionProbes(declarations, capabilities);
+  const gitArgs = [["rev-parse", "--is-shallow-repository"], ["describe", "--tags", "--always"], ["status", "--short"]];
+  const commands = [...executables.map(executable => ({ executable, args: [executable === "go" ? "version" : "--version"] })),
+    ...gitArgs.map(args => ({ executable: "git", args: ["--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args] }))];
+  const probeSpec = { ...spec, network: "none" as const, secretRefs: [] };
+  const probeEnvironment = { PATH: "/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", NODE_OPTIONS: "", PYTHONPATH: "", PYTHONSTARTUP: "", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_COUNT: "0" };
+  type ProbeResult = { exitCode?: number; output?: string; truncated?: boolean; code?: string };
+  let results: ProbeResult[] | undefined;
+  // The driver is independently authored, fixed runtime code. Only our fixed
+  // version and Git metadata argument arrays are passed as data; no project
+  // imports, shell, hooks, or configuration evaluation are involved.
+  const driver = executables.includes("node") ? { executable: "node", args: ["-e", `
+const {spawnSync}=require('node:child_process');
+const commands=JSON.parse(process.argv[1]);
+console.log(JSON.stringify(commands.map(({executable,args})=>{
+ const result=spawnSync(executable,args,{shell:false,timeout:3000,maxBuffer:4096,encoding:'utf8'});
+ const output=String(result.stdout||'')+String(result.stderr||'');
+ return {...(Number.isInteger(result.status)?{exitCode:result.status}:{}),output:output.slice(0,2048),truncated:output.length>2048,...(result.error?{code:result.error.code||'PROBE_FAILED'}:{})};
+})));`] }
+    : executables.includes("python3") ? { executable: "python3", args: ["-I", "-S", "-c", `
+import json, subprocess, sys, tempfile
+results=[]
+for command in json.loads(sys.argv[1]):
+    with tempfile.TemporaryFile() as output:
+        try:
+            result=subprocess.run([command['executable'],*command['args']],stdout=output,stderr=output,timeout=3,check=False)
+            item={'exitCode':result.returncode}
+        except subprocess.TimeoutExpired:
+            item={'code':'PROBE_TIMEOUT'}
+        except OSError as error:
+            item={'code':'PROBE_FAILED','errno':error.errno}
+        output.seek(0)
+        data=output.read(2049)
+        item.update(output=data[:2048].decode('utf-8',errors='replace'),truncated=len(data)>2048)
+        results.append(item)
+print(json.dumps(results))`] } : undefined;
+  if (driver) {
     try {
-      const probe = await foreground(workspaceId, { ...spec, network: "none", secretRefs: [] }, executable,
-        [executable === "go" ? "version" : "--version"], ".", undefined, 3000, undefined, request.runId, undefined, signal);
-      interpreters.push({ executable, available: probe.exitCode === 0, exitCode: probe.exitCode,
-        output: String(probe.stdout + probe.stderr).slice(0, 2048) });
-    } catch (error) { interpreters.push({ executable, available: false, code: error instanceof ResourceError ? error.code : "PROBE_FAILED" }); }
+      const probe = await foreground(workspaceId, probeSpec, driver.executable, [...driver.args, JSON.stringify(commands)],
+        ".", undefined, commands.length * 3000 + 3000, probeEnvironment, request.runId, undefined, signal);
+      if (probe.exitCode === 0) {
+        const value: unknown = JSON.parse(probe.stdout);
+        if (Array.isArray(value) && value.length === commands.length && value.every(item => item !== null && typeof item === "object")) results = value as ProbeResult[];
+      }
+    } catch (error) { signal?.throwIfAborted(); if (error instanceof ResourceError && ["PROCESS_CLEANUP_FAILED", "WORKSPACE_RUNTIME_PATH_INVALID"].includes(error.code)) throw error; }
   }
+  if (!results) {
+    results = [];
+    for (const command of commands) {
+      signal?.throwIfAborted();
+      try {
+        const probe = await foreground(workspaceId, probeSpec, command.executable, command.args,
+          ".", undefined, 3000, probeEnvironment, request.runId, undefined, signal);
+        const output = String(probe.stdout + probe.stderr);
+        results.push({ exitCode: probe.exitCode, output: output.slice(0, 2048), truncated: output.length > 2048 });
+      } catch (error) { signal?.throwIfAborted(); results.push({ code: error instanceof ResourceError ? error.code : "PROBE_FAILED" }); }
+    }
+  }
+  const observations = results;
+  const interpreters = executables.map((executable, index) => ({ executable, available: observations[index]?.exitCode === 0, ...observations[index] }));
   const imageDigest = spec.image.kind === "builtin" ? spec.image.digest : spec.image.imageDigest!;
-  const sourceMetadata: Array<Record<string, unknown>> = [];
-  for (const args of [["rev-parse", "--is-shallow-repository"], ["describe", "--tags", "--always"], ["status", "--short"]]) {
-    signal?.throwIfAborted();
-    try {
-      const probe = await foreground(workspaceId, { ...spec, network: "none", secretRefs: [] }, "git",
-        ["--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args],
-        ".", undefined, 3000, undefined, request.runId, undefined, signal);
-      const output = String(probe.stdout + probe.stderr);
-      sourceMetadata.push({ args, exitCode: probe.exitCode, output: output.slice(0, 2048), truncated: output.length > 2048 });
-    } catch (error) { signal?.throwIfAborted(); sourceMetadata.push({ args, code: error instanceof ResourceError ? error.code : "PROBE_FAILED" }); }
-  }
-  return { runtime: spec, interpreters, declarations, sourceMetadata, cacheKey: environmentCacheKey(imageDigest, declarations),
+  const sourceMetadata = gitArgs.map((args, index) => ({ args, ...observations[executables.length + index] }));
+  return { runtime: spec, interpreters, declarations, sourceMetadata, cacheKey: environmentCacheKey(imageDigest, declarations, spec.environment),
     uncertainty: "Declarations are bounded untrusted data, not executed configuration or proof of compatibility. Git metadata may be absent or shallow; derived package versions must be checked, never invented. Verification commands and optional test dependencies remain model-selected from project declarations." };
 }
 
 async function processOperation(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const workspaceId = request.workspaceId!; const operation = request.operation ?? ""; const spec = await loadRuntime(workspaceId);
-  if (operation === "run") return foreground(workspaceId, spec, request.executable ?? "", request.args ?? [], request.cwd, request.stdin, request.timeoutMs, request.environment, request.runId, request.secretValues, signal);
+  if (operation === "run") {
+    const sourceVersionBefore = await sourceVersion(workspaceId, spec, signal);
+    const result = await foreground(workspaceId, spec, request.executable ?? "", request.args ?? [], request.cwd, request.stdin, request.timeoutMs, request.environment, request.runId, request.secretValues, signal);
+    return { ...result, sourceVersionBefore, sourceVersionAfter: await sourceVersion(workspaceId, spec, signal) };
+  }
   if (operation === "start") {
     if (request.mode !== "background" && request.mode !== "pty") throw new ResourceError("PROCESS_MODE_INVALID", "Background or PTY mode is required.");
     assertProcessInput(request.executable ?? "", request.args ?? []);
@@ -648,6 +723,10 @@ async function processOperation(request: ExecutorProcessRequest, signal?: AbortS
     if (await receipts.read(workspaceId, processId)) throw new ResourceError("PROCESS_ALREADY_STARTED", "This process already has a durable receipt; startup was not replayed.", 409);
     const existing = await docker(["inspect", "--format", "{{.Id}}", name], 10_000, undefined, 2000);
     if (existing.exitCode === 0) throw new ResourceError("PROCESS_ALREADY_STARTED", "This process identity already exists; startup was not replayed.", 409);
+    const sourceVersionBefore = await sourceVersion(workspaceId, spec, signal);
+    const sourceDirectory = await runtimeDirectory(workspaceId, ["process-source"]);
+    try { await writeFile(path.join(sourceDirectory, `${processId}.json`), JSON.stringify(sourceVersionBefore), { mode: 0o600, flag: "wx" }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new ResourceError("PROCESS_ALREADY_STARTED", "A launch record already exists; uncertain startup was not replayed.", 409); throw error; }
     const startedAt = new Date().toISOString();
     const timeoutAt = Date.now() + Math.min(request.timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000);
     const secrets = await secretArguments(name, spec.secretRefs, request.secretValues);
@@ -683,7 +762,7 @@ async function processOperation(request: ExecutorProcessRequest, signal?: AbortS
       } while (Date.now() < launchDeadline);
     }
     if (signal?.aborted) return processOperation({ ...request, operation: "stop", processId }, undefined);
-    return { processId, status: "running", mode: request.mode, timeoutAt: new Date(timeoutAt).toISOString() };
+    return { processId, status: "running", mode: request.mode, timeoutAt: new Date(timeoutAt).toISOString(), sourceVersionBefore };
   }
   if (operation === "read" || operation === "stop") {
     if (request.cursor !== undefined && (!Number.isSafeInteger(request.cursor) || request.cursor < 0))
@@ -718,11 +797,13 @@ async function processOperation(request: ExecutorProcessRequest, signal?: AbortS
     const limited = redacted.subarray(0, spec.limits.maxOutputBytes);
     const terminal = ["exited", "dead"].includes(state.Status);
     if (terminal) {
+      const sourceVersionBefore = await savedSourceVersion(workspaceId, processId);
+      const sourceVersionAfter = await sourceVersion(workspaceId, spec, signal);
       const receipt = await receipts.save({ processId, workspaceId,
         state: timedOut ? "timed_out" : cancelled ? "cancelled" : state.Status,
         exitCode: typeof state.ExitCode === "number" ? state.ExitCode : null,
         output: limited.toString("utf8"), cursor: limited.byteLength, truncated: limited.byteLength < redacted.byteLength,
-        startedAt: session.startedAt, finishedAt: state.FinishedAt ?? null, timeoutAt: new Date(session.timeoutAt).toISOString() });
+        startedAt: session.startedAt, finishedAt: state.FinishedAt ?? null, timeoutAt: new Date(session.timeoutAt).toISOString(), sourceVersionBefore, sourceVersionAfter });
       // Canonical receipt exists before either the Docker logs or mounted secret
       // values disappear. A lost control response is observed, never replayed.
       const cleaned = await removeSandboxContainer(session.name);
