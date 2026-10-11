@@ -11,9 +11,11 @@ const args = process.argv.slice(2);
 const value = flag => args[args.indexOf(flag) + 1];
 const reusePrepared = args.includes('--resume-prepared-report');
 const resuming = args.includes('--resume-report') || reusePrepared;
-if (args.length !== (resuming ? 7 : 5) || !args.includes('--run') || !args.includes('--budget-dir') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') ||
+const repairOnly = args.includes('--repair-only');
+if (args.length !== (resuming ? 7 : 5) + (repairOnly ? 1 : 0) || !args.includes('--run') || !args.includes('--budget-dir') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') ||
+    repairOnly && !reusePrepared ||
     args.includes('--resume-report') && reusePrepared || resuming && typeof value(reusePrepared ? '--resume-prepared-report' : '--resume-report') !== 'string')
-  throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY [--resume-report PATH | --resume-prepared-report PATH].');
+  throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY [--resume-report PATH | --resume-prepared-report PATH [--repair-only]].');
 let sourceReport;
 let sourceCase;
 let sourceRun;
@@ -56,9 +58,10 @@ const output = resolve('.cache/execution-architecture-live', new Date().toISOStr
 await mkdir(output, { recursive: true, mode: 0o700 });
 const report = { revision, driverRevision, driverSha256, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
   cases: [], runs: [], ...(sourceReceipt ? { resume: sourceReceipt } : {}), budgetDirectory: budget.directory,
+  ...(repairOnly ? { independentTaskValidation: 'not_run_budget_reserved' } : {}),
   startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: {
-    maxScenarioRequests: reusePrepared ? 10 : resuming ? 15 : 20, reservedSweRequests: 72, requiredRemainingRequests: reusePrepared ? 82 : resuming ? 87 : 92,
-    runCalls: reusePrepared ? [0, 6, 4] : resuming ? [5, 6, 4] : [8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
+    maxScenarioRequests: repairOnly ? 4 : reusePrepared ? 10 : resuming ? 15 : 20, reservedSweRequests: 72, requiredRemainingRequests: repairOnly ? 76 : reusePrepared ? 82 : resuming ? 87 : 92,
+    runCalls: repairOnly ? [0, 4, 0] : reusePrepared ? [0, 6, 4] : resuming ? [5, 6, 4] : [8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
 const save = () => writeFile(join(output, 'report.json'), JSON.stringify(sanitizeEvidence(report), null, 2) + '\n', { mode: 0o600 });
 const client = createCloudAccountClient();
 const call = async (path, body, options = {}) => (body === undefined ? await requestCloudObservation(client, path, options) : await client.request(path, body, options)).result;
@@ -260,6 +263,11 @@ try {
   invariant(outcome(resumed) === 'completed' && plan(resumed)?.steps.length > 0 && plan(resumed).steps.every(step => step.status === 'completed'), 'Successful repair did not clear the task-scoped unfinished work.');
   secondCase.status = 'passed'; await save();
 
+  if (repairOnly) {
+    report.cases.push({ name: '同会话独立任务的计划和验证隔离', sessionId: item.sessionId, workspaceId: item.workspaceId,
+      status: 'not_run_budget_reserved', reason: 'Remaining 72 shared requests reserved for the fixed SWE sample.' });
+    item.status = 'passed-repair-only'; report.status = 'passed-repair-only';
+  } else {
   const independent = await run(item, `这是同会话中的独立新任务，不是上一任务续跑。第一步用 task_plan read 读取本任务状态，确认初始版本为 0；随后在工作区 ${item.workspaceId} 读取 .python-version，生成 runtime-audit.txt，内容只包含当前声明的版本和工作区编号，不修改现有源代码。创建并完成本任务自己的计划，引用真实文件证据。`, 4);
   const thirdCase = { name: '同会话独立任务的计划和验证隔离', sessionId: item.sessionId, workspaceId: item.workspaceId, runId: independent.runId, status: 'failed' };
   report.cases.push(thirdCase);
@@ -269,6 +277,7 @@ try {
   invariant(thirdCase.initialPlanRead && plan(independent)?.version >= 1, 'An independent run inherited the preceding task plan.');
   invariant(/3\.11/.test(audit) && audit.includes(item.workspaceId) && outcome(independent) === 'completed', 'Independent task artifact or truthful completion was not observed.');
   thirdCase.status = 'passed'; item.status = 'passed'; report.status = 'passed-small-sample';
+  }
 } catch (error) {
   report.status = 'incomplete'; report.failure = { code: error.code ?? error.name, message: String(error.message).slice(0, 600), ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}) };
   if (active) { try { await call(`/runs/${active}/cancel`, {}); report.cancelRequested = active; } catch { report.cancelUnconfirmed = active; } }
@@ -277,4 +286,4 @@ try {
   client.close(); report.finishedAt = new Date().toISOString(); await save();
 }
 console.log(JSON.stringify({ output, status: report.status, modelCalls: report.modelCalls, cases: report.cases.map(item => ({ name: item.name, status: item.status })), cost: report.cost }));
-process.exitCode = report.status === 'passed-small-sample' ? 0 : 1;
+process.exitCode = ['passed-small-sample', 'passed-repair-only'].includes(report.status) ? 0 : 1;
