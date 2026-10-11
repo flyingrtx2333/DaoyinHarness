@@ -9,14 +9,17 @@ import { validationBudget } from './validation-budget.mjs';
 
 const args = process.argv.slice(2);
 const value = flag => args[args.indexOf(flag) + 1];
-if (args.length !== 5 || !args.includes('--run') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') || !args.includes('--budget-dir')) throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY.');
+if (![5, 7].includes(args.length) || !args.includes('--run') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') || !args.includes('--budget-dir') ||
+    args.length === 7 && !args.includes('--scenarios')) throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY [--scenarios 1,2,3,4].');
+const selectedScenarios = args.includes('--scenarios') ? value('--scenarios').split(',').map(Number) : [1, 2, 3, 4];
+if (!selectedScenarios.length || new Set(selectedScenarios).size !== selectedScenarios.length || selectedScenarios.some(index => ![1, 2, 3, 4].includes(index))) throw new Error('Select unique scenario numbers 1 through 4.');
 const revision = value('--expected-revision');
 const driverRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(import.meta.dirname, '..'), encoding: 'utf8' }).trim();
 const budget = validationBudget(value('--budget-dir'));
 const output = resolve('.cache/execution-architecture-live', new Date().toISOString().replaceAll(':', '-') + '_' + randomUUID().slice(0, 8));
 await mkdir(output, { recursive: true, mode: 0o700 });
 const report = { revision, driverRevision, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
-  cases: [], startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: { maxScenarioRequests: 52, maxTotalSharedRequests: 160, maxCny: 10 } };
+  cases: [], selectedScenarios, startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: { maxScenarioRequests: 52, maxTotalSharedRequests: 160, maxCny: 10 } };
 const save = () => writeFile(join(output, 'report.json'), JSON.stringify(sanitizeEvidence(report), null, 2) + '\n', { mode: 0o600 });
 const client = createCloudAccountClient();
 const call = async (path, body, options = {}) => (body === undefined ? await requestCloudObservation(client, path, options) : await client.request(path, body, options)).result;
@@ -98,7 +101,9 @@ async function run(item, message, maxModelCalls, { continueFromRunId, cancelWhen
   }
   await save(); return evidence;
 }
+let scenarioIndex = 0;
 async function scenario(body) {
+  if (!selectedScenarios.includes(++scenarioIndex)) return;
   try { await body(); }
   catch (error) {
     const item = report.cases.at(-1);
@@ -151,7 +156,9 @@ try {
   environment.actual = await control(environment, 'environment_inspect');
   environment.verification = await control(environment, 'process_run', { executable: 'python', args: ['export.py'], cwd: '.', timeoutMs: 30000 });
   environment.original = await control(environment, 'file_read', { workspaceId: environment.originalWorkspaceId, path: 'export.py' });
-  environment.status = environment.workspaceId !== environment.originalWorkspaceId && environment.verification.exitCode === 0 && /^7\.7\s*$/u.test(environment.verification.stdout ?? '') &&
+  const actualTotal = (environment.verification.stdout ?? '').trim();
+  environment.status = environment.workspaceId !== environment.originalWorkspaceId && environment.verification.exitCode === 0 &&
+    /^\d+(?:\.\d+)?$/u.test(actualTotal) && Math.abs(Number(actualTotal) - 7.7) <= 1e-10 &&
     (environment.original.content ?? environment.original.text) === originalExport ? 'passed' : 'failed';
 
   });
@@ -182,7 +189,7 @@ try {
     (bounded.result.content ?? bounded.result.text ?? '').trim().length > 0 &&
     (bounded.ledger.content ?? bounded.ledger.text) === 'phase-a\n' && cancelled.run.status === 'cancelled' && cancelledProcess?.payload.status === 'cancelled' ? 'passed' : 'failed';
   });
-  report.status = report.cases.length === 4 && report.cases.every(item => item.status === 'passed') ? 'passed-small-sample' : 'failed-small-sample';
+  report.status = report.cases.length === selectedScenarios.length && report.cases.every(item => item.status === 'passed') ? 'passed-small-sample' : 'failed-small-sample';
 } catch (error) {
   report.status = 'incomplete'; report.failure = { code: error.code ?? error.name, message: String(error.message).slice(0, 600), ...(error.publicFailure ? { publicFailure: error.publicFailure } : {}) };
   if (active) { try { await call(`/runs/${active}/cancel`, {}); report.cancelRequested = active; } catch { report.cancelUnconfirmed = active; } }
