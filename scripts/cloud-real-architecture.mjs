@@ -9,18 +9,21 @@ import { validationBudget } from './validation-budget.mjs';
 
 const args = process.argv.slice(2);
 const value = flag => args[args.indexOf(flag) + 1];
-const resuming = args.includes('--resume-report');
+const reusePrepared = args.includes('--resume-prepared-report');
+const resuming = args.includes('--resume-report') || reusePrepared;
 if (args.length !== (resuming ? 7 : 5) || !args.includes('--run') || !args.includes('--budget-dir') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') ||
-    resuming && typeof value('--resume-report') !== 'string') throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY [--resume-report PATH].');
+    args.includes('--resume-report') && reusePrepared || resuming && typeof value(reusePrepared ? '--resume-prepared-report' : '--resume-report') !== 'string')
+  throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY [--resume-report PATH | --resume-prepared-report PATH].');
 let sourceReport;
 let sourceCase;
 let sourceRun;
 let sourceReceipt;
 if (resuming) {
-  const path = resolve(value('--resume-report'));
+  const path = resolve(value(reusePrepared ? '--resume-prepared-report' : '--resume-report'));
   const raw = await readFile(path);
   sourceReport = JSON.parse(raw);
-  sourceCase = sourceReport.cases?.find(item => item.failedOperation?.status === 'failed' && !item.completedOperation);
+  sourceCase = sourceReport.cases?.find(item => item.failedOperation?.status === 'failed' &&
+    (reusePrepared ? item.completedOperation?.status === 'completed' : !item.completedOperation));
   sourceRun = sourceReport.runs?.find(run => run.runId === sourceCase?.runId);
   const requirement = sourceCase?.cacheBefore?.declarations?.find(item => item.path === 'requirements.txt');
   if (sourceReport.status !== 'incomplete' || !Number.isSafeInteger(sourceReport.modelCalls) || sourceReport.modelCalls < 1 || sourceReport.modelCalls > 8 || sourceReport.runs?.length !== 1 ||
@@ -30,13 +33,18 @@ if (resuming) {
       !/^op_[a-f0-9]{24}$/u.test(sourceCase?.failedOperation?.id ?? '') ||
       sourceCase.sessionId !== sourceReport.fixture.sessionId || sourceCase.failedOperation.workspaceId !== sourceReport.fixture.originalWorkspaceId ||
       sourceCase.failedOperation.error !== 'ENVIRONMENT_DECLARATION_MISSING' || !['completed', 'failed'].includes(sourceRun.status) ||
-      !/^sha256:[a-f0-9]{64}$/u.test(requirement?.digest ?? '') || typeof requirement.content !== 'string' || requirement.truncated) {
+      !/^sha256:[a-f0-9]{64}$/u.test(requirement?.digest ?? '') || typeof requirement.content !== 'string' || requirement.truncated ||
+      sourceReport.budgetDirectory && sourceReport.budgetDirectory !== value('--budget-dir') ||
+      reusePrepared && (!/^op_[a-f0-9]{24}$/u.test(sourceCase.completedOperation.id) ||
+        !/^wsp_[a-f0-9]{24}$/u.test(sourceCase.completedOperation.result?.workspace?.id ?? '') ||
+        sourceCase.completedOperation.sourceRun !== sourceRun.runId || sourceCase.completedOperation.workspaceId !== sourceReport.fixture.originalWorkspaceId || sourceRun.status !== 'completed')) {
     throw new Error('Resume requires a bounded, terminal previous run and known declaration failure; no fixture or operation will be replayed.');
   }
   sourceReceipt = { path, sha256: createHash('sha256').update(raw).digest('hex'), revision: sourceReport.revision,
     modelCalls: sourceReport.modelCalls, status: sourceReport.status, priorRunId: sourceRun.runId,
     priorSessionId: sourceReport.fixture.sessionId, priorWorkspaceId: sourceReport.fixture.originalWorkspaceId,
     failedOperationId: sourceCase.failedOperation.id, requirementsDigest: requirement.digest,
+    ...(reusePrepared ? { preparedOperationId: sourceCase.completedOperation.id, preparedWorkspaceId: sourceCase.completedOperation.result.workspace.id } : {}),
     cumulativePreviousModelCalls: sourceReport.modelCalls + (sourceReport.resume?.cumulativePreviousModelCalls ?? sourceReport.resume?.modelCalls ?? 0),
     ...(sourceReport.resume ? { previousSource: { path: sourceReport.resume.path, sha256: sourceReport.resume.sha256, priorRunId: sourceReport.resume.priorRunId } } : {}) };
 }
@@ -49,8 +57,8 @@ await mkdir(output, { recursive: true, mode: 0o700 });
 const report = { revision, driverRevision, driverSha256, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
   cases: [], runs: [], ...(sourceReceipt ? { resume: sourceReceipt } : {}), budgetDirectory: budget.directory,
   startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: {
-    maxScenarioRequests: resuming ? 15 : 20, reservedSweRequests: 72, requiredRemainingRequests: resuming ? 87 : 92,
-    runCalls: resuming ? [5, 6, 4] : [8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
+    maxScenarioRequests: reusePrepared ? 10 : resuming ? 15 : 20, reservedSweRequests: 72, requiredRemainingRequests: reusePrepared ? 82 : resuming ? 87 : 92,
+    runCalls: reusePrepared ? [0, 6, 4] : resuming ? [5, 6, 4] : [8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
 const save = () => writeFile(join(output, 'report.json'), JSON.stringify(sanitizeEvidence(report), null, 2) + '\n', { mode: 0o600 });
 const client = createCloudAccountClient();
 const call = async (path, body, options = {}) => (body === undefined ? await requestCloudObservation(client, path, options) : await client.request(path, body, options)).result;
@@ -140,7 +148,11 @@ async function run(item, message, maxModelCalls, { continueFromRunId, cancelWhen
 }
 const results = (run, name) => run.events.filter(event => event.type === 'tool.completed' && event.payload.toolName === name).map(event => event.payload.evidence?.result);
 const outcome = run => run.events.findLast(event => event.type === 'turn.completed')?.payload.taskOutcome;
-const plan = run => run.events.findLast(event => event.type === 'task_plan.updated')?.payload.plan;
+const plan = run => {
+  const observed = run.events.findLast(event => event.type === 'task_plan.updated' || event.type === 'tool.completed' &&
+    event.payload.toolName === 'task_plan' && event.payload.evidence?.result?.plan);
+  return observed?.type === 'task_plan.updated' ? observed.payload.plan : observed?.payload.evidence?.result?.plan;
+};
 const invariant = (condition, message) => { if (!condition) throw new Error(message); };
 // An independently authored, genuine installable package fixture. No network or fabricated tool response.
 const wheel = () => execFileSync('python3', ['-c', String.raw`import io,zipfile,base64,csv,hashlib
@@ -170,7 +182,25 @@ try {
   const check = 'from decimal import Decimal\nfrom export import total\nassert total() == Decimal("7.7"), ("service-fee total", total())\nprint("focused-check-passed")\n';
   let observedOriginalFailure;
   let first;
-  if (resuming) {
+  let observedPreparedOperation;
+  if (reusePrepared) {
+    item = { name: '复用已成功环境并继续验证', sessionId: sourceReceipt.priorSessionId,
+      workspaceId: sourceReceipt.preparedWorkspaceId, originalWorkspaceId: sourceReceipt.priorWorkspaceId,
+      operations: [], runs: [], status: 'resuming-prepared' };
+    report.fixture = { name: item.name, sessionId: item.sessionId, originalWorkspaceId: item.originalWorkspaceId,
+      preparedWorkspaceId: item.workspaceId, operations: item.operations };
+    const prior = (await call(`/runs/${sourceReceipt.priorRunId}`)).run;
+    invariant(prior.id === sourceReceipt.priorRunId && prior.sessionId === item.sessionId && prior.status === 'completed', 'Prepared run is not actually completed.');
+    observedOriginalFailure = (await control(item, 'environment_read', { workspaceId: item.originalWorkspaceId, operationId: sourceReceipt.failedOperationId, waitMs: 0 })).operation;
+    observedPreparedOperation = (await control(item, 'environment_read', { workspaceId: item.originalWorkspaceId, operationId: sourceReceipt.preparedOperationId, waitMs: 0 })).operation;
+    invariant(observedOriginalFailure?.status === 'failed' && observedOriginalFailure.id === sourceReceipt.failedOperationId &&
+      observedPreparedOperation?.status === 'completed' && observedPreparedOperation.id === sourceReceipt.preparedOperationId &&
+      observedPreparedOperation.result?.workspace?.id === item.workspaceId && observedPreparedOperation.sourceRun === prior.id,
+      'Previously prepared candidate no longer matches the real operation receipt.');
+    // Retained actual evidence has an explicit source report; it is never submitted to the Agent as a replay.
+    first = sourceRun;
+    report.referencedRuns = [{ sourceReportSha256: sourceReceipt.sha256, revision: sourceReport.revision, ...sourceRun }];
+  } else if (resuming) {
     item = { name: '原会话环境准备修复与继续验证', sessionId: sourceReceipt.priorSessionId,
       workspaceId: sourceReceipt.priorWorkspaceId, originalWorkspaceId: sourceReceipt.priorWorkspaceId,
       operations: [], runs: [], status: 'resuming' };
@@ -191,11 +221,12 @@ try {
     'vendor/architecture_dependency-0.1.0-py3-none-any.whl': { contentBase64: wheel() } });
     first = await run(item, `工作区 ${item.workspaceId} 的长期目标是让 export.py 输出含 10% 服务费的总额并实际验证。本轮只做环境准备，保留代码修改与 focused check 为未完成步骤并报告 partial。先用 task_plan 保存长期目标和两个阶段，检查真实运行时和项目声明，用 runtime_list 选择 Python 3.11。先请求一次 installDependencies=true 的 environment_prepare，验证缺少依赖声明时会得到真实失败回执；观察同一 operation，不重放请求。随后从现有 vendor 文件确定本项目唯一依赖，在原工作区创建 requirements.txt 指向实际 wheel。用真实失败 operationId 作为 retryFromOperationId 明确重试，等待新候选成功，实际确认 Python 3.11 和 architecture_dependency 导入成功，记录 environment_inspect 的 cacheKey 与真实证据。不要修改 export.py 或 check_export.py；代码修复与验证在下一轮继续。`, 8);
   }
-  const firstCase = { name: '环境声明失败后显式修复重试', sessionId: item.sessionId, workspaceId: item.workspaceId, runId: first.runId, status: 'failed' };
+  const firstCase = { name: '环境声明失败后显式修复重试', sessionId: item.sessionId, workspaceId: item.workspaceId, runId: first.runId,
+    ...(reusePrepared ? { reusedExistingRun: true, sourceReportSha256: sourceReceipt.sha256, newModelCalls: 0 } : {}), status: 'failed' };
   report.cases.push(firstCase);
   const operations = [...results(first, 'environment_prepare'), ...results(first, 'environment_read')].map(result => result?.operation).filter(Boolean);
   const failed = observedOriginalFailure ?? operations.find(operation => operation.status === 'failed');
-  const completed = operations.find(operation => operation.status === 'completed');
+  const completed = observedPreparedOperation ?? operations.find(operation => operation.status === 'completed');
   const started = first.events.filter(event => event.type === 'tool.started' && event.payload.toolName === 'environment_prepare');
   firstCase.failedOperation = failed; firstCase.completedOperation = completed;
   firstCase.explicitRetry = started.some(event => event.payload.input?.retryFromOperationId === failed?.id);
@@ -210,7 +241,7 @@ try {
     firstCase.savedPlan.steps.every(step => ['pending', 'in_progress', 'completed', 'blocked'].includes(step.status)), 'Preparation did not retain a valid partial plan for the actual unfinished code task.');
   firstCase.status = 'passed'; await save();
 
-  const resumed = await run(item, '继续原任务。先读保存的计划与产物，复用已准备环境。按 CONTRIBUTING.md 先实际运行 focused check，用稳定 verification 名称 price-export；根据真实失败输出修复 export.py，使总额含 10% 服务费，保留解释器约束和测试断言。更新 CONTRIBUTING.md 说明已验证的用法，并创建 pytest.ini 仅保存测试选择声明。环境依赖与版本声明不改变，不重复安装。修改后用相同 verification 名称重跑同一 focused check，实际检查导入的依赖位置和 environment_inspect cacheKey，再完成计划。如实区分最初失败、修复和最终验证。', report.limits.runCalls[1], { continueFromRunId: first.runId });
+  const resumed = await run(item, `继续原任务，使用已成功准备的工作区 ${item.workspaceId}，复用实际环境，不重新准备候选或安装依赖。先读保存的计划与产物。按 CONTRIBUTING.md 先实际运行 focused check，用稳定 verification 名称 price-export；根据真实失败输出修复 export.py，使总额含 10% 服务费，保留解释器约束和测试断言。更新 CONTRIBUTING.md 说明已验证的用法，并创建 pytest.ini 仅保存测试选择声明。环境依赖与版本声明不改变。修改后用相同 verification 名称重跑同一 focused check，实际检查导入的依赖位置和 environment_inspect cacheKey，再完成计划。如实区分最初失败、修复和最终验证。`, report.limits.runCalls[1], { continueFromRunId: first.runId });
   const secondCase = { name: '继续任务、失败验证修复与诊断编辑保留缓存', sessionId: item.sessionId, workspaceId: item.workspaceId, runId: resumed.runId, status: 'failed' };
   report.cases.push(secondCase);
   secondCase.cacheAfter = await control(item, 'environment_inspect');
