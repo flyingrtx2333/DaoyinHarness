@@ -153,8 +153,11 @@ try {
     totals.slice(1).filter(row => row[0] === 'beta' && Number(row[1]) === 4).length === 1;
   const savedPlan = first.events.filter(event => event.type === 'task_plan.updated').at(-1)?.payload.plan;
   const resumedPlan = currentPlan(multi);
+  const restoredPlan = savedPlan !== undefined && resumed.events.some(event => event.type === 'model.requested' &&
+    event.payload.systemPrompt?.dynamicText.includes(JSON.stringify(savedPlan)));
   multi.status = partial(first) && savedPlan?.steps.some(step => step.status !== 'completed') &&
-    resumedPlan?.version > savedPlan.version && resumedPlan.goal === savedPlan.goal &&
+    restoredPlan && resumedPlan?.version > savedPlan.version &&
+    savedPlan.steps.every(step => resumedPlan.steps.some(current => current.id === step.id && current.status === 'completed')) &&
     resumedPlan.steps.length > 0 && resumedPlan.steps.every(step => step.status === 'completed') && actualTotals &&
     summaryNumbers.length === 1 && Number(summaryNumbers[0]) === 10 && resumed.events.some(event => event.type === 'tool.completed') ? 'passed' : 'failed';
 
