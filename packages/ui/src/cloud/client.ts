@@ -38,11 +38,31 @@ function errorMessage(value: unknown): string | undefined {
   });
   return normalized && normalized.length <= 500 && !hasControl ? normalized : undefined;
 }
-export interface PendingRequest { sessionId: string; requestId: string; message: string }
+export interface RunSubmissionOptions {
+  limits?: { maxModelCalls?: number; maxToolCalls?: number; maxActiveMs?: number };
+  continueFromRunId?: string;
+}
+export interface PendingRequest extends RunSubmissionOptions { sessionId: string; requestId: string; message: string }
 interface StoragePort { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
 const RECEIPTS = "daoyin-harness-cloud-receipts-v1";
 const BASE = "/api/company-assistant/agent";
 const identifier = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{1,160}$/u.test(value);
+function submissionOptions(value: unknown): RunSubmissionOptions | undefined {
+  if (!record(value)) return undefined;
+  if (value.continueFromRunId !== undefined && !identifier(value.continueFromRunId)) return undefined;
+  let limits: RunSubmissionOptions["limits"];
+  if (value.limits !== undefined) {
+    if (!record(value.limits) || Object.keys(value.limits).some(key => !["maxModelCalls", "maxToolCalls", "maxActiveMs"].includes(key))) return undefined;
+    limits = {};
+    for (const [key, maximum] of [["maxModelCalls", 24], ["maxToolCalls", 96], ["maxActiveMs", 600000]] as const) {
+      const limit = value.limits[key];
+      if (limit === undefined) continue;
+      if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1 || limit > maximum) return undefined;
+      limits[key] = limit;
+    }
+  }
+  return { ...(limits === undefined ? {} : { limits }), ...(value.continueFromRunId === undefined ? {} : { continueFromRunId: value.continueFromRunId }) };
+}
 
 export class WorkbenchError extends Error {
   public constructor(message: string, public readonly status = 0, public readonly loginUrl?: string) { super(message); }
@@ -77,7 +97,8 @@ export class WorkbenchClient {
       if (Array.isArray(data)) for (const item of data) {
         if (typeof item === "object" && item !== null && identifier(item.sessionId) && identifier(item.requestId) &&
             typeof item.message === "string" && item.message.length > 0 && item.message.length <= 10000) {
-          this.#receipts.set(item.sessionId, { sessionId: item.sessionId, requestId: item.requestId, message: item.message });
+          const options = submissionOptions(item);
+          if (options !== undefined) this.#receipts.set(item.sessionId, { sessionId: item.sessionId, requestId: item.requestId, message: item.message, ...options });
         }
       }
     } catch { /* Invalid/unavailable storage is checked again before every billable submission. */ }
@@ -275,16 +296,20 @@ export class WorkbenchClient {
     this.#receipts.delete(sessionId);
     try { this.#persist(); } catch { /* A stale durable receipt still reuses the same accepted request. */ }
   }
-  public async submit(sessionId: string, message: string): Promise<CloudRun> {
+  public async submit(sessionId: string, message: string, options: RunSubmissionOptions = {}): Promise<CloudRun> {
     if (this.application !== "company" && !this.#accountScope) throw new WorkbenchError("请先连接当前道引账号。", 401);
     if (/saishi_agent_[A-Za-z0-9_-]{64}/u.test(message)) throw new WorkbenchError("检测到访问凭证，请勿发送到聊天。业务数据使用当前登录账号访问。");
     const existing = this.pending(sessionId);
-    if (existing && existing.message !== message) throw new WorkbenchError("上次提交结果尚未确认，请先恢复原提交。");
-    const receipt = existing ?? { sessionId, requestId: crypto.randomUUID(), message };
+    const checked = submissionOptions(options);
+    if (checked === undefined) throw new WorkbenchError("任务额度或继续任务标识无效。");
+    if (existing && (existing.message !== message || JSON.stringify(submissionOptions(existing)) !== JSON.stringify(checked))) throw new WorkbenchError("上次提交结果尚未确认，请先恢复原提交。");
+    const receipt = existing ?? { sessionId, requestId: crypto.randomUUID(), message, ...checked };
     this.#receipts.set(sessionId, receipt);
     this.#persist(); // Must succeed before a model run can be admitted.
     const result = await this.#request<{ run: CloudRun }>(`/sessions/${encodeURIComponent(sessionId)}/runs`,
-      { requestId: receipt.requestId, message: receipt.message });
+      { requestId: receipt.requestId, message: receipt.message,
+        ...(receipt.limits === undefined ? {} : { limits: receipt.limits }),
+        ...(receipt.continueFromRunId === undefined ? {} : { continueFromRunId: receipt.continueFromRunId }) });
     this.#forget(sessionId);
     return result.run;
   }

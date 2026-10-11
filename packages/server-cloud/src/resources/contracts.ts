@@ -5,6 +5,7 @@ import type { CampfireArtText, CampfireAudio, CampfireSegment } from "./campfire
 export const RESOURCE_TOOL_NAMES = [
   "resource_list", "resource_attach", "resource_detach",
   "workspace_create", "workspace_inspect", "workspace_snapshot", "workspace_restore",
+  "runtime_list", "environment_inspect", "environment_prepare", "environment_read",
   "file_list", "file_stat", "file_read", "file_search", "file_write", "file_patch", "file_mkdir", "file_move", "file_remove",
   "git_status", "git_diff", "git_log", "git_branch", "git_checkout", "git_commit", "git_export_patch",
   "process_run", "process_start", "process_read", "process_write", "process_stop", "process_list",
@@ -14,7 +15,7 @@ export const RESOURCE_TOOL_NAMES = [
 ] as const;
 
 export type ResourceToolName = typeof RESOURCE_TOOL_NAMES[number];
-export type ResourceAction = ResourceToolName | "readiness" | "cancel_run";
+export type ResourceAction = ResourceToolName | "readiness" | "cancel_run" | "run_evidence" | "evidence_validate";
 
 export interface ResourceControlRequest {
   action: ResourceAction;
@@ -32,7 +33,9 @@ export interface ResourceControlRequest {
   processId?: string;
   title?: string;
   source?: WorkspaceSource;
-  runtimeId?: "node22" | "python313" | "go125" | "rust190";
+  runtimeId?: string;
+  operationId?: string;
+  installDependencies?: boolean;
   runtime?: RuntimeSpec;
   entries?: WorkspaceEntry[];
   path?: string;
@@ -56,6 +59,8 @@ export interface ResourceControlRequest {
   cwd?: string;
   stdin?: string;
   processMode?: "foreground" | "background" | "pty";
+  /** Trusted tool adapter only; excluded from public tool input schemas. */
+  agentProcess?: boolean;
   timeoutMs?: number;
   cursor?: number;
   waitMs?: number;
@@ -97,7 +102,7 @@ export interface ResolvedSecret { ref: string; value: string }
 export interface ResolvedResourceBinding { resourceId: string; hostPath: string; targetPath: string; readOnly: boolean }
 
 export interface ExecutorProcessRequest {
-  action: "readiness" | "workspace_prepare" | "workspace_remove" | "image_import" | "file" | "git" | "process" | "reconcile";
+  action: "readiness" | "environment" | "workspace_prepare" | "workspace_remove" | "image_import" | "file" | "git" | "process" | "reconcile";
   workspaceId?: string | undefined;
   snapshotId?: string | undefined;
   runtime?: RuntimeSpec | undefined;

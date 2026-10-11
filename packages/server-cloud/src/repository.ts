@@ -1,6 +1,7 @@
 import type { AgentEvent, TurnStatus } from "@daoyin/harness-protocol";
 import type { CloudMemoryRepository } from "./memory-repository.js";
 import type { EpisodicMemoryRepository } from "./episodic-memory.js";
+import type { ExecutionBudget, RunAdmission } from "./execution-budget.js";
 import type { ExecutionIdentity, ExecutionScope, SessionCompactionStore, SessionEventStore } from "@daoyin/harness-contracts";
 
 export class CloudError extends Error {
@@ -35,6 +36,8 @@ export interface CloudRun {
   authorizationId: string;
   billingAccountId: string;
   createdAt: string;
+  executionBudget?: ExecutionBudget;
+  admission?: RunAdmission;
 }
 
 export interface CloudChildInput {
@@ -81,7 +84,8 @@ export interface CloudRepository {
   getSession(scope: ExecutionScope, sessionId: string): Promise<CloudSession>;
   /** Desired-state actions are idempotent. null means soft-deleted; events remain immutable. */
   manageSession?(scope: ExecutionScope, sessionId: string, action: SessionAction): Promise<CloudSession | null>;
-  acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string): Promise<{ run: CloudRun; created: boolean }>;
+  acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string, admission?: RunAdmission): Promise<{ run: CloudRun; created: boolean }>;
+  bindExecutionBudget?(identity: ExecutionIdentity, runId: string, budget: ExecutionBudget): Promise<CloudRun>;
   getRun(scope: ExecutionScope, runId: string): Promise<CloudRun>;
   findRequest(scope: ExecutionScope, sessionId: string, requestId: string): Promise<CloudRun | undefined>;
   listRuns(scope: ExecutionScope, sessionId: string): Promise<CloudRun[]>;

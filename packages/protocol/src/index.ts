@@ -5,6 +5,27 @@ export type Readiness = "ready" | "planned" | "unavailable";
 /** Model-reported task outcome, not independent verification of task success. */
 export type AgentTaskOutcome = "completed" | "partial" | "blocked" | "unknown";
 
+/** A model-maintained plan is coordination state, never acceptance evidence. */
+export interface TaskEvidenceReference {
+  type: "event" | "process" | "artifact";
+  id: string;
+}
+
+export interface TaskPlanStep {
+  id: string;
+  description: string;
+  status: "pending" | "in_progress" | "completed" | "blocked";
+  evidence: TaskEvidenceReference[];
+}
+
+export interface TaskPlan {
+  version: number;
+  goal: string;
+  steps: TaskPlanStep[];
+  blockers: string[];
+  evidence: TaskEvidenceReference[];
+}
+
 export interface RuntimeHealth {
   status: "ready";
   apiVersion: typeof API_VERSION;
@@ -135,6 +156,21 @@ export interface ToolEvidence {
 }
 
 export interface AgentEventPayloads {
+  "process.completed": {
+    processId: string;
+    workspaceId: string;
+    status: "exited" | "failed" | "cancelled" | "timed_out" | "interrupted";
+    exitCode: number | null;
+    receiptDigest: string;
+    finishedAt: number;
+    cursor: number;
+    truncated: boolean;
+  };
+  "task_plan.updated": {
+    plan: TaskPlan;
+    previousVersion: number;
+    toolCallId: string;
+  };
   "turn.started": {
     status: "running";
     userMessageId: string;

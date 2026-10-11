@@ -6,6 +6,7 @@ import { AuditDashboard } from "./AuditDashboard.js";
 
 const statusLabel: Record<AuditRunSummary["status"], string> = { running: "执行中", completed: "完成", failed: "失败", cancelled: "已取消", interrupted: "已中断" };
 const eventLabel: Partial<Record<AgentEvent["type"], string>> = {
+  "task_plan.updated": "任务计划", "process.completed": "进程结果",
   "turn.started": "用户提问", "capability.routed": "能力路由", "model.requested": "模型请求", "model.responded": "模型响应",
   "capability.model.requested": "能力路由请求", "capability.model.responded": "能力路由响应",
   "assistant.delta": "AI 正文", "assistant.commentary": "AI 中途说明", "phase.updated": "执行阶段", "tool.started": "工具开始执行",
@@ -82,6 +83,8 @@ function eventTitle(event: AgentEvent): string {
 function rowSummary(row: AuditRow, timings: ReadonlyMap<string, ToolTiming>): string {
   const event = row.event;
   switch (event.type) {
+    case "task_plan.updated": return `任务计划版本 ${event.payload.plan.version} · 未完成 ${event.payload.plan.steps.filter(step => step.status !== "completed").length} 项`;
+    case "process.completed": return `进程 ${event.payload.status} · 退出码 ${event.payload.exitCode ?? "未知"}`;
     case "turn.started": return `用户提交的问题（${event.payload.userMessage.length} 字）`;
     case "capability.model.requested": return `能力${event.payload.operation === "retrieve" ? "检索" : "分析"} · 共享请求 #${event.payload.callIndex} · 候选 ${event.payload.candidatePackIds.length} 个`;
     case "capability.model.responded": return `能力${event.payload.operation === "retrieve" ? "检索" : "分析"} · ${event.payload.status === "completed" ? "完成" : event.payload.failureCode ?? event.payload.status} · ${duration(event.payload.latencyMs)}`;
@@ -150,6 +153,8 @@ function messageText(value: unknown): string {
 function readableEvent(row: AuditRow, timings: ReadonlyMap<string, ToolTiming>): React.JSX.Element {
   const event = row.event;
   switch (event.type) {
+    case "task_plan.updated": return <div className="audit-readable-stack"><p>{event.payload.plan.goal}</p><p className="audit-plan-note">计划用于记录进展，完成状态不代表验收通过。</p><ol className="audit-plan-list">{event.payload.plan.steps.map(step => <li key={step.id}><strong>{step.description}</strong><span>{({ pending: "待完成", in_progress: "进行中", completed: "已记录完成", blocked: "受阻" })[step.status]}</span></li>)}</ol>{event.payload.plan.blockers.map((blocker, index) => <p key={index}>{blocker}</p>)}</div>;
+    case "process.completed": return <p className="audit-readable-text">进程已保存结果：{event.payload.status}，退出码 {event.payload.exitCode ?? "未知"}{event.payload.truncated ? "，输出已截断" : ""}。</p>;
     case "turn.started": return <p className="audit-readable-text">{event.payload.userMessage}</p>;
     case "capability.model.requested":
     case "capability.model.responded": return <p className="audit-readable-text">{rowSummary(row, timings)}</p>;

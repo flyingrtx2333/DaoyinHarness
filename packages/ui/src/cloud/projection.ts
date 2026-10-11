@@ -187,6 +187,14 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
     seen.add(event.eventSeq);
     const turn = byId.get(event.turnId);
     if (!turn) continue;
+    if (event.type === "process.completed") {
+      const id = `process:${event.payload.processId}`;
+      let activity = turn.activities.find(item => item.id === id);
+      if (!activity) { activity = { id, kind: "phase", status: "running", text: "进程运行中…", startedAt: event.occurredAt }; turn.activities.push(activity); }
+      activity.status = event.payload.status === "exited" && event.payload.exitCode === 0 ? "completed" : "failed";
+      activity.text = event.payload.status === "cancelled" ? "进程已停止，结果已保存" : event.payload.status === "timed_out" ? "进程已超时，结果已保存" : `进程已结束，退出码 ${event.payload.exitCode ?? "未知"}`;
+      activity.finishedAt = event.occurredAt;
+    }
     if (event.type.startsWith("assistant.") || (event.type.startsWith("turn.") && event.type !== "turn.started")) turn.assistantOccurredAt = event.occurredAt;
     if (event.type === "assistant.delta") {
       finishNonToolActivity(turn, event.occurredAt);
@@ -271,6 +279,10 @@ export function projectTurns(runs: CloudRun[], events: AgentEvent[]): TurnView[]
       if (event.type === "tool.completed" || event.type === "tool.failed") tool.finishedAt = event.occurredAt;
       if (event.type === "tool.completed") {
         const result: unknown = event.payload.evidence.result;
+        if (typeof name === "string" && name.startsWith("process_") && record(result) && typeof result.processId === "string" && result.state === "running") {
+          const id = `process:${result.processId}`;
+          if (!turn.activities.some(item => item.id === id)) turn.activities.push({ id, kind: "phase", status: "running", text: "进程运行中，等待实际结果…", startedAt: event.occurredAt });
+        }
         tool.status = "completed"; tool.text = `${label}完成`;
         const outcomeSummary = resultCount(result) || event.payload.summary;
         tool.detailSummary = tool.detailSummary?.startsWith("命令：") && outcomeSummary

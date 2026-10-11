@@ -1,5 +1,6 @@
 import http from "node:http";
-import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+import { createHash, randomBytes } from "node:crypto";
 import { chmod, chown, mkdir, unlink } from "node:fs/promises";
 import { Pool, type PoolConfig } from "pg";
 import { assertExecutionIdentity, defaultRuntimeSpec, type DeploymentSpec, type ExecutionIdentity, type WorkspaceEntry } from "@daoyin/harness-contracts";
@@ -13,6 +14,8 @@ import { PlatformMaterialGateway } from "./material-gateway.js";
 import { PlatformCampfireGateway } from "./campfire-gateway.js";
 import { CampfireService } from "./campfire.js";
 import { CAMPFIRE_DEFINITIONS } from "./campfire-contract.js";
+import { trustedRuntimeCatalog, declaredDependencyCommand, environmentFailure } from "./environment.js";
+import type { ProcessReceipt } from "./process-receipts.js";
 
 const SOCKET = "/run/daoyin-resources/control.sock";
 const EXECUTOR = "/run/daoyin-resource-executor/control.sock";
@@ -22,7 +25,7 @@ const database = process.env.HARNESS_RESOURCES_DATABASE_URL ?? "";
 const contentRoot = process.env.HARNESS_CONTENT_STORE_ROOT ?? "";
 const allowed = new Set((process.env.HARNESS_RESOURCES_ALLOWED_USERS ?? "").split(",").filter(Boolean));
 const allEnabled = process.env.HARNESS_RESOURCES_ENABLED === "1";
-const runtimeImages = JSON.parse(process.env.HARNESS_RUNTIME_IMAGES ?? "{}") as Record<string, { digest?: unknown }>;
+const runtimeImages = JSON.parse(process.env.HARNESS_RUNTIME_IMAGES ?? "{}") as Record<string, { digest?: unknown; image?: unknown; version?: unknown; capabilities?: unknown }>;
 const defaultRuntime = process.env.HARNESS_DEFAULT_RUNTIME ? JSON.parse(process.env.HARNESS_DEFAULT_RUNTIME) as import("@daoyin/harness-contracts").RuntimeSpec : undefined;
 const bootstrapRuntime = process.env.HARNESS_BUILDER_BOOTSTRAP_RUNTIME ? JSON.parse(process.env.HARNESS_BUILDER_BOOTSTRAP_RUNTIME) as import("@daoyin/harness-contracts").RuntimeSpec : undefined;
 if (!database || !contentRoot) throw new Error("Resource database and content store configuration are required.");
@@ -219,6 +222,81 @@ async function workspaceAccess(auth: ExecutionIdentity, request: ResourceControl
   return workspaceId;
 }
 
+const environmentOwner = (auth: ExecutionIdentity): string => JSON.stringify([auth.actorUserId, auth.space]);
+const environmentJobs = new Map<string, { owner: string; runId: string | undefined; controller: AbortController; work: Promise<void> }>();
+async function readEnvironment(auth: ExecutionIdentity, request: ResourceControlRequest): Promise<Record<string, unknown>> {
+  const workspaceId = await workspaceAccess(auth, request); const operationId = required(request.operationId, "operationId");
+  await repository.environmentOperation(auth, workspaceId, operationId);
+  const waitMs = Math.min(request.waitMs ?? 0, 60_000);
+  if (!Number.isSafeInteger(waitMs) || waitMs < 0) throw new ResourceError("ENVIRONMENT_WAIT_INVALID", "Preparation wait is invalid.");
+  const job = environmentJobs.get(operationId);
+  if (job && waitMs > 0) await Promise.race([job.work, delay(waitMs)]);
+  return { summary: "Environment operation observed.", operation: await repository.environmentOperation(auth, workspaceId, operationId) };
+}
+async function prepareEnvironment(auth: ExecutionIdentity, request: ResourceControlRequest): Promise<Record<string, unknown>> {
+  const workspaceId = await workspaceAccess(auth, request);
+  const originalRuntime = (await repository.workspace(auth, workspaceId)).runtime;
+  if ((request.runtime === undefined) === (request.runtimeId === undefined)) throw new ResourceError("ENVIRONMENT_INPUT_INVALID", "Choose one catalog runtimeId or Dockerfile runtime.");
+  const selection = request.runtimeId ? runtimeImages[request.runtimeId] : undefined;
+  if (request.runtimeId && typeof selection?.digest !== "string") throw new ResourceError("RUNTIME_IMAGE_DENIED", "Runtime is not in the trusted catalog.", 403);
+  const runtime = request.runtime ?? { ...originalRuntime, image: { kind: "builtin" as const, id: request.runtimeId!, digest: selection!.digest as string } };
+  assertRuntimeSpec(runtime);
+  if (originalRuntime.network === "none" && runtime.network !== "none" ||
+      runtime.secretRefs.some(ref => !originalRuntime.secretRefs.includes(ref)) ||
+      (Object.keys(originalRuntime.limits) as Array<keyof typeof originalRuntime.limits>).some(key => runtime.limits[key] > originalRuntime.limits[key]))
+    throw new ResourceError("ENVIRONMENT_POLICY_INCREASE", "Preparation cannot increase the source workspace's network, secrets or resource limits.", 403);
+  if (runtime.image.kind === "dockerfile" && runtime.image.imageDigest) throw new ResourceError("RUNTIME_IMAGE_BUILD_REQUIRED", "Dockerfile runtimes must be produced by the isolated builder.", 403);
+  const claimed = await repository.claimEnvironment(auth, workspaceId, required(request.requestId, "requestId"), request.sourceRun,
+    { runtime, installDependencies: request.installDependencies === true });
+  if (claimed.claimed) {
+    const operationId = claimed.operation.id; const controller = new AbortController();
+    const work = (async (): Promise<void> => {
+      let candidateId: string | undefined;
+      try {
+        const exported = await executor({ action: "workspace_prepare", operation: "snapshot", workspaceId }, controller.signal);
+        const snapshot = await repository.recordSnapshot(auth, workspaceId, exported.entries as WorkspaceEntry[]);
+        const { workspaceId: _originalWorkspace, runtimeId: _selectedRuntime, ...creationRequest } = request;
+        const result = await dispatchUnlocked({ ...creationRequest, action: "workspace_create",
+          runtime, title: "Prepared environment", source: { kind: "snapshot", snapshotId: snapshot.id } }, controller.signal);
+        const candidate = result.workspace as { id: string }; candidateId = candidate.id;
+        const inspection = await executor({ action: "environment", workspaceId: candidateId, runId: request.sourceRun }, controller.signal);
+        if (request.installDependencies) {
+          const command = declaredDependencyCommand(inspection.declarations as Array<{ path: string; content: string; truncated: boolean }>);
+          if (!command) throw new ResourceError("ENVIRONMENT_DECLARATION_MISSING", "No supported dependency declaration is available; preparation did not guess packages.", 422);
+          const started = await dispatchUnlocked({ action: "process_start", workspaceId: candidateId,
+            sessionId: request.sessionId!, sourceRun: required(request.sourceRun, "sourceRun"), authorization: auth,
+            executable: command.executable, args: command.args, processMode: "background", timeoutMs: runtime.limits.timeoutSeconds * 1000 }, controller.signal);
+          let installed: Record<string, unknown>;
+          do {
+            installed = await dispatchUnlocked({ action: "process_read", workspaceId: candidateId, sessionId: request.sessionId!,
+              sourceRun: required(request.sourceRun, "sourceRun"), authorization: auth, processId: started.processId as string, cursor: 0, waitMs: 10_000 }, controller.signal);
+          } while (!installed.terminalReceipt);
+          if (installed.exitCode !== 0) {
+            const output = String(installed.output ?? "");
+            await repository.createArtifact(auth, { workspaceId: candidateId, title: "Dependency preparation output", mediaType: "text/plain", content: Buffer.from(output) });
+            throw new ResourceError(`ENVIRONMENT_${environmentFailure(output).toUpperCase()}`, "Declared dependency installation failed; the original workspace and modifications were preserved.", 422);
+          }
+        }
+        if (controller.signal.aborted) throw new ResourceError("ENVIRONMENT_CANCELLED", "Preparation was cancelled; the original workspace was preserved.");
+        await repository.completeEnvironment(operationId, "completed", { ...result, inspection, originalWorkspaceId: workspaceId });
+      } catch (error) {
+        const code = error instanceof ResourceError ? error.code : "ENVIRONMENT_PREPARATION_FAILED";
+        if (controller.signal.aborted && candidateId && request.sourceRun) {
+          for (const process of await repository.runningProcessesForRun(auth, request.sourceRun)) if (process.workspaceId === candidateId) {
+            const receipt = await executor({ action: "process", operation: "stop", workspaceId: candidateId, processId: process.id }).catch(() => null);
+            if (receipt?.terminalReceipt) await repository.persistTerminalReceipt(receipt as unknown as ProcessReceipt);
+          }
+        }
+        if (candidateId) await repository.setWorkspaceState(auth, candidateId, "failed", code);
+        await repository.completeEnvironment(operationId, controller.signal.aborted ? "cancelled" : "failed", { originalWorkspaceId: workspaceId,
+          ...(candidateId ? { candidateWorkspaceId: candidateId } : {}), code }, code);
+      }
+    })().finally(() => { environmentJobs.delete(operationId); });
+    environmentJobs.set(operationId, { owner: environmentOwner(auth), runId: request.sourceRun, controller, work });
+  }
+  return readEnvironment(auth, { ...request, operationId: claimed.operation.id });
+}
+
 async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSignal): Promise<Record<string, unknown>> {
   if (!request || typeof request !== "object" || typeof request.action !== "string") throw new ResourceError("RESOURCE_INPUT_INVALID", "Resource action is required.");
   if (request.action === "readiness") return { ready: true, executor: await executor({ action: "readiness" }, signal),
@@ -229,14 +307,36 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
     if (!auth.permissions.includes("agent.use") || !auth.allowedTools.includes(request.action)) throw new ResourceError("CAMPFIRE_ACCESS_DENIED", "当前账号无法使用此营火操作。", 403);
     return campfire.call(auth, request, signal);
   }
+  if (request.action === "run_evidence") {
+    const processes = await repository.runProcessEvidence(auth, required(request.sourceRun, "sourceRun"));
+    const environments = await repository.runEnvironmentEvidence(auth, required(request.sourceRun, "sourceRun"));
+    return { summary: "Persisted run operation evidence.", processes, environments };
+  }
+  if (request.action === "evidence_validate") {
+    const type = request.metadata && typeof request.metadata === "object" && !Array.isArray(request.metadata)
+      ? (request.metadata as Record<string, unknown>).type : undefined;
+    if (type !== "process" && type !== "artifact") throw new ResourceError("EVIDENCE_TYPE_INVALID", "Resource evidence type is invalid.");
+    const workspaceId = await repository.evidenceWorkspace(auth, type, required(request.referenceId, "referenceId"));
+    await repository.authorizeAttached(auth, required(request.sessionId, "sessionId"), workspaceId);
+    return { valid: true, workspaceId };
+  }
+  if (request.action === "runtime_list") return { summary: "Trusted runtime catalog.", runtimes: trustedRuntimeCatalog(runtimeImages) };
+  if (request.action === "environment_inspect") return { summary: "Actual environment and bounded declarations inspected.",
+    ...await executor({ action: "environment", workspaceId: await workspaceAccess(auth, request), runId: request.sourceRun }, signal) };
+  if (request.action === "environment_prepare") return prepareEnvironment(auth, request);
+  if (request.action === "environment_read") return readEnvironment(auth, request);
   if (request.action === "cancel_run") {
     const runId = required(request.sourceRun, "sourceRun"); const stopped: string[] = []; const failed: string[] = [];
+    const ownedJobs = [...environmentJobs.values()].filter(job => job.runId === runId && job.owner === environmentOwner(auth));
+    for (const job of ownedJobs) job.controller.abort();
     for (const process of await repository.runningProcessesForRun(auth, runId)) {
       try {
-        await executor({ action: "process", operation: "stop", workspaceId: process.workspaceId, processId: process.id });
-        await repository.updateProcess(auth, process.workspaceId, process.id, { status: "cancelled" }); stopped.push(process.id);
+        const receipt = await executor({ action: "process", operation: "stop", workspaceId: process.workspaceId, processId: process.id });
+        if (receipt.terminalReceipt) await repository.persistTerminalReceipt(receipt as unknown as ProcessReceipt);
+        stopped.push(process.id);
       } catch { failed.push(process.id); }
     }
+    await Promise.allSettled(ownedJobs.map(job => job.work));
     if (failed.length) throw new ResourceError("PROCESS_CANCEL_FAILED", `${failed.length} process container(s) could not be terminated.`, 503);
     return { summary: "Run processes cancelled.", stopped };
   }
@@ -343,29 +443,57 @@ async function dispatchUnlocked(request: ResourceControlRequest, signal: AbortSi
     }
     const secretValues = request.action === "process_start" || request.action === "process_run"
       ? await resolveSecrets(auth, (await repository.workspace(auth, workspaceId)).runtime.secretRefs, signal) : [];
-    const result = await executor({ action: "process", operation: request.action.slice(8), workspaceId, processId: request.processId,
+    const trackedRun = request.action === "process_run" && request.agentProcess === true;
+    if (trackedRun && request.waitMs !== undefined && (!Number.isSafeInteger(request.waitMs) || request.waitMs < 0 || request.waitMs > 60_000))
+      throw new ResourceError("PROCESS_WAIT_INVALID", "Foreground observation wait must be between 0 and 60000 milliseconds.");
+    const trackedStart = trackedRun || request.action === "process_start";
+    const reservedProcessId = trackedStart ? `prc_${randomBytes(12).toString("hex")}` : undefined;
+    if (reservedProcessId) {
+      const runtime = (await repository.workspace(auth, workspaceId)).runtime;
+      await repository.recordProcess(auth, { id: reservedProcessId, workspaceId, status: "starting",
+        runId: required(request.sourceRun, "sourceRun"), executable: required(request.executable, "executable"), args: request.args ?? [],
+        cwd: request.cwd ?? ".", mode: request.processMode === "pty" ? "pty" : "background",
+        timeoutAt: new Date(Date.now() + Math.min(request.timeoutMs ?? runtime.limits.timeoutSeconds * 1000, runtime.limits.timeoutSeconds * 1000)).toISOString() });
+    }
+    let result = await executor({ action: "process", operation: trackedRun ? "start" : request.action.slice(8), workspaceId, processId: reservedProcessId ?? request.processId,
       runId: request.sourceRun, executable: request.executable, args: request.args, cwd: request.cwd, stdin: request.stdin,
-      mode: request.processMode, timeoutMs: request.timeoutMs, cursor: request.cursor, waitMs: request.waitMs, environment: request.environment, secretValues }, signal);
-    if (request.action === "process_start" && typeof result.processId === "string") {
-      await repository.recordProcess(auth, { id: result.processId, workspaceId,
-        runId: required(request.sourceRun, "sourceRun"), executable: required(request.executable, "executable"),
-        args: request.args ?? [], cwd: request.cwd ?? ".", mode: request.processMode === "pty" ? "pty" : "background",
-        ...(typeof result.timeoutAt === "string" ? { timeoutAt: result.timeoutAt } : {}) });
+      mode: trackedRun ? "background" : request.processMode, timeoutMs: request.timeoutMs, cursor: request.cursor, waitMs: request.waitMs, environment: request.environment, secretValues }, signal);
+    if ((request.action === "process_start" || trackedRun) && typeof result.processId === "string") {
+      if (result.terminalReceipt) await repository.persistTerminalReceipt(result as unknown as ProcessReceipt);
+      else await repository.updateProcess(auth, workspaceId, result.processId, { status: "running" });
+      if (trackedRun) {
+        const processId = result.processId as string; const waitMs = Math.min(request.waitMs ?? 60_000, 60_000);
+        const deadline = performance.now() + waitMs;
+        do {
+          result = await executor({ action: "process", operation: "read", workspaceId, processId, cursor: 0 }, signal);
+          if (result.terminalReceipt) { await repository.persistTerminalReceipt(result as unknown as ProcessReceipt); break; }
+          const remaining = deadline - performance.now(); if (remaining <= 0) break;
+          await delay(Math.min(500, remaining), undefined, { signal });
+        } while (true);
+        result = { ...result, processId, tracked: true, foregroundWaitMs: waitMs };
+      }
     } else if (request.action === "process_read" && typeof request.processId === "string") {
       const state = result.state === "exited" ? (result.exitCode === 0 ? "exited" : "failed")
         : result.state === "timed_out" ? "timed_out" : undefined;
+      if (result.terminalReceipt) await repository.persistTerminalReceipt(result as unknown as ProcessReceipt);
       await repository.updateProcess(auth, workspaceId, request.processId, {
         ...(state ? { status: state } : {}),
         ...(typeof result.exitCode === "number" ? { exitCode: result.exitCode } : {}),
         ...(typeof result.cursor === "number" ? { outputCursor: result.cursor } : {}),
       });
     } else if (request.action === "process_stop" && typeof request.processId === "string") {
-      await repository.updateProcess(auth, workspaceId, request.processId, { status: "cancelled" });
+      if (result.terminalReceipt) await repository.persistTerminalReceipt(result as unknown as ProcessReceipt);
     } else if (request.action === "process_list") {
       const live = new Set(Array.isArray(result.processes) ? (result.processes as Array<{ processId?: unknown }>).map((item) => item.processId).filter((id): id is string => typeof id === "string") : []);
       const recorded = await repository.processes(auth, workspaceId);
       for (const process of recorded) if (["starting", "running"].includes(process.status) && !live.has(process.id)) {
-        await repository.updateProcess(auth, workspaceId, process.id, { status: process.timeoutAt && Date.parse(process.timeoutAt) <= Date.now() ? "timed_out" : "interrupted" });
+        try {
+          const receipt = await executor({ action: "process", operation: "read", workspaceId, processId: process.id }, signal);
+          if (receipt.terminalReceipt) await repository.persistTerminalReceipt(receipt as unknown as ProcessReceipt);
+        } catch (error) {
+          if (error instanceof ResourceError && error.code === "PROCESS_NOT_FOUND") await repository.reconcileMissingProcesses([process.id]);
+          else throw error;
+        }
       }
       return { summary: "process_list completed.", processes: await repository.processes(auth, workspaceId) };
     }
@@ -490,9 +618,28 @@ const reconcilePersistedProcesses = async (): Promise<void> => {
   try {
     const result = await executor({ action: "reconcile" });
     const live = Array.isArray(result.processes) ? result.processes.filter((item): item is string => typeof item === "string") : [];
-    await repository.reconcileStoppedProcesses(live);
+    const protectedIds = new Set(live); const missingIds: string[] = [];
+    for (const process of await repository.pendingProcessReceipts()) {
+      if (protectedIds.has(process.processId)) continue;
+      try {
+        const receipt = await executor({ action: "process", operation: "read", workspaceId: process.workspaceId, processId: process.processId });
+        if (receipt.terminalReceipt) await repository.persistTerminalReceipt(receipt as unknown as ProcessReceipt);
+        else protectedIds.add(process.processId);
+      } catch (error) {
+        // Observation or persistence uncertainty is not a missing process.
+        // Keep its index pending for later observation rather than fabricate an
+        // interrupted outcome and lose a saved terminal receipt.
+        if (error instanceof ResourceError && error.code === "PROCESS_NOT_FOUND" &&
+            (process.status !== "starting" || process.timeoutAt !== null && Date.parse(process.timeoutAt) <= Date.now())) missingIds.push(process.processId);
+        else protectedIds.add(process.processId);
+      }
+    }
+    // Reconcile only proven missing records in this bounded batch. Other live
+    // or unobserved records must not be relabelled by absence from a page.
+    await repository.reconcileMissingProcesses(missingIds);
   } finally { processReconcileRunning = false; }
 };
+await repository.interruptEnvironmentOperations();
 await reconcilePersistedProcesses();
 const processReconcileTimer = setInterval(() => { void reconcilePersistedProcesses().catch((error: unknown) => {
   console.error("Resource process reconciliation failed:", error instanceof Error ? error.message : "unknown error");
@@ -549,5 +696,5 @@ server.listen(SOCKET, () => {
   if (Number.isSafeInteger(gid) && gid > 0) void chown(SOCKET, -1, gid).then(() => chmod(SOCKET, 0o660));
 });
 
-async function close(): Promise<void> { clearInterval(analysisTimer); analysisAbort.abort(); await analysisWork; clearInterval(processReconcileTimer); await new Promise<void>(resolve => server.close(() => resolve())); await pool.end(); }
+async function close(): Promise<void> { for (const job of environmentJobs.values()) job.controller.abort(); await Promise.allSettled([...environmentJobs.values()].map(job => job.work)); clearInterval(analysisTimer); analysisAbort.abort(); await analysisWork; clearInterval(processReconcileTimer); await new Promise<void>(resolve => server.close(() => resolve())); await pool.end(); }
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close(); });

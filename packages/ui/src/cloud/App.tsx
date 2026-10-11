@@ -138,6 +138,11 @@ export function App(): React.JSX.Element {
   const feed = useRef<{ key: string; events: AgentEvent[] }>({ key: "", events: [] });
   const active = runs.find((run) => run.status === "running" || run.status === "queued");
   const pending = selected ? client.pending(selected) : undefined;
+  const latestRun = runs[0];
+  const latestOutcome = latestRun ? [...events].reverse().find(event => event.turnId === latestRun.id && event.type === "turn.completed") : undefined;
+  const resumableRun = latestRun && latestOutcome?.type === "turn.completed" && latestOutcome.payload.taskOutcome === "partial" ? latestRun : undefined;
+  const planEvent = [...events].reverse().find(event => event.type === "task_plan.updated");
+  const pendingPlanSteps = planEvent?.type === "task_plan.updated" ? planEvent.payload.plan.steps.filter(step => step.status !== "completed").length : 0;
   const turns = projectTurns(runs, events);
   const videoInteraction = selected ? pendingVideoInteraction(events, selected) : undefined;
   const session = sessions.find((item) => item.id === selected);
@@ -321,9 +326,9 @@ export function App(): React.JSX.Element {
     setView("chat"); setSidebar(false); setError("");
     if (focusComposer) window.requestAnimationFrame(() => document.getElementById("message")?.focus());
   }
-  async function send(message?: string, sessionTitle?: string): Promise<void> {
+  async function send(message?: string, sessionTitle?: string, continueFromRunId?: string): Promise<void> {
     const visibleMessage = message === undefined ? draft.trim() : visibleUserMessage(message);
-    const attachedMessage = references.length
+    const attachedMessage = references.length && continueFromRunId === undefined
       ? `${message ?? visibleMessage}\n\n${references.map(referenceLine).join("\n")}` : message ?? visibleMessage;
     const submittedMessage = message === undefined && campfire ? `[营火内置剪辑；店铺资料 ID：${campfire.shopId}${campfire.referenceId ? `；参考视频 ID：${campfire.referenceId}` : ""}]\n${attachedMessage}` : attachedMessage;
     if (submittedMessage.length > 10000) { setError("问题和素材说明过长，请缩短后再发送。"); return; }
@@ -332,7 +337,7 @@ export function App(): React.JSX.Element {
     if (!plugin?.profileId) { setError("当前会话的插件尚未支持，请新建会话并选择可用插件。"); return; }
     const submittedDraft = draft;
     const submittedReferences = references;
-    setDraft(""); setReferences([]);
+    if (continueFromRunId === undefined) { setDraft(""); setReferences([]); }
     setSubmitting(true); setSendingMessage(visibleMessage); setError(""); nearBottom.current = true;
     const epoch = accountEpoch.current;
     const operation = (async (): Promise<CloudRun> => {
@@ -342,7 +347,10 @@ export function App(): React.JSX.Element {
         if (epoch !== accountEpoch.current) throw new WorkbenchError("账号连接已变化，原问题未继续提交。");
         id = created.id; setSessions((list) => [created, ...list]); setSelected(id);
       }
-      return client.submit(id, submittedMessage);
+      const receipt = client.pending(id);
+      return client.submit(id, submittedMessage, receipt
+        ? { ...(receipt.limits === undefined ? {} : { limits: receipt.limits }), ...(receipt.continueFromRunId === undefined ? {} : { continueFromRunId: receipt.continueFromRunId }) }
+        : continueFromRunId === undefined ? {} : { continueFromRunId });
     })();
     submission.current = operation;
     try {
@@ -430,6 +438,7 @@ export function App(): React.JSX.Element {
         {loginUrl && phase !== "ready" && phase !== "connecting" && <button type="button" className="primary reconnect" onClick={() => window.location.assign(loginUrl)}>登录道引账号</button>}
         {!loginUrl && phase !== "connecting" && phase !== "ready" && <button className="primary reconnect" onClick={() => { void connect(); }}>重新连接工作台</button>}
         {pending && phase === "ready" && !submitting && <div className="recovery"><span>上次提交结果尚未确认。</span><button disabled={loading || !!active} onClick={() => { void send(pending.message); }}>恢复原提交</button></div>}
+        {resumableRun && !pending && !active && phase === "ready" && <div className="recovery" role="status"><span>本轮已结束，进展已保留{pendingPlanSteps ? `，计划仍有 ${pendingPlanSteps} 项未完成` : ""}。</span><button type="button" disabled={loading || submitting || uploading || !!managing || !!session?.archivedAt} onClick={() => { void send("继续未完成的任务，先核对已保存的计划与实际结果。", undefined, resumableRun.id); }}>继续任务</button></div>}
         {session?.archivedAt && <div className="archived-notice" role="status"><span>会话已归档，恢复后可继续发送。</span><button type="button" disabled={!!managing || phase !== "ready"} onClick={() => { void manageSession(session.id, "restore").catch(() => undefined); }}>恢复会话</button></div>}
         <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
           <label htmlFor="message" className="sr-only">发送给 Harness 的问题</label>

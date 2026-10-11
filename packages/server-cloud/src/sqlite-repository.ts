@@ -1,3 +1,4 @@
+import { admissionHashInput, executionBudget, type ExecutionBudget, type RunAdmission } from "./execution-budget.js";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { assertHistoryAdmission, readCompleteHistory } from "./history-policy.js";
@@ -27,6 +28,8 @@ function run(row: Row): CloudRun {
     finalText: String(row.final_text), lastEventSeq: Number(row.last_event_seq),
     cancelRequested: row.cancel_requested === 1, authorizationId: String(row.authorization_id),
     billingAccountId: String(row.billing_account_id), createdAt: String(row.created_at),
+    ...(typeof row.execution_budget === "string" ? { executionBudget: executionBudget(JSON.parse(row.execution_budget) as unknown) } : {}),
+    ...(typeof row.admission === "string" ? { admission: JSON.parse(row.admission) as RunAdmission } : {}),
   };
 }
 
@@ -94,6 +97,10 @@ export class SqliteCloudRepository implements CloudRepository {
     const columns = new Set(this.#db.prepare("PRAGMA table_info(cloud_sessions)").all().map((row) => String(row.name)));
     for (const column of ["pinned_at", "archived_at", "deleted_at"]) {
       if (!columns.has(column)) this.#db.exec(`ALTER TABLE cloud_sessions ADD COLUMN ${column} TEXT`);
+    }
+    const runColumns = new Set(this.#db.prepare("PRAGMA table_info(cloud_runs)").all().map(row => String(row.name)));
+    for (const column of ["execution_budget", "admission"]) {
+      if (!runColumns.has(column)) this.#db.exec(`ALTER TABLE cloud_runs ADD COLUMN ${column} TEXT`);
     }
     this.memory = new SqliteMemoryRepository(this.#db, (operation) => this.#transaction(operation));
   }
@@ -208,7 +215,7 @@ export class SqliteCloudRepository implements CloudRepository {
     });
   }
 
-  public async acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string): Promise<{ run: CloudRun; created: boolean }> {
+  public async acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string, admission: RunAdmission = {}): Promise<{ run: CloudRun; created: boolean }> {
     assertExecutionIdentity(identity);
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(requestId) || !userMessage.trim() || userMessage.length > 10_000) {
       throw new CloudError(400, "RUN_INPUT_INVALID", "请求标识或消息无效。");
@@ -216,12 +223,16 @@ export class SqliteCloudRepository implements CloudRepository {
     const key = executionScopeKey(identity);
     return this.#transaction(() => {
       const selectedSession = this.#session(key, sessionId);
-      const hash = digest(userMessage);
+      const hash = digest(admissionHashInput(userMessage, admission));
       const existing = this.#db.prepare("SELECT * FROM cloud_runs WHERE session_id=? AND request_id=? AND scope_key=?")
         .get(sessionId, requestId, key);
       if (existing !== undefined) {
         if (existing.input_hash !== hash) throw new CloudError(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同消息。");
         return { run: run(existing), created: false };
+      }
+      if (admission.continueFromRunId !== undefined) {
+        const source = this.#db.prepare("SELECT * FROM cloud_runs WHERE scope_key=? AND session_id=? ORDER BY created_at DESC,id DESC LIMIT 1").get(key, sessionId);
+        if (source?.id !== admission.continueFromRunId || source.status === "running") throw new CloudError(409, "CONTINUATION_STALE", "只能继续当前会话最新的已结束任务。");
       }
       if (selectedSession.archived_at) throw new CloudError(409, "SESSION_ARCHIVED", "请先恢复已归档的会话。");
       const active = this.#db.prepare("SELECT id FROM cloud_runs WHERE session_id=? AND status='running'").get(sessionId);
@@ -235,8 +246,22 @@ export class SqliteCloudRepository implements CloudRepository {
         VALUES (?,?,?,?,?,?,'running',?,?,?)`).run(
         runId, key, sessionId, requestId, hash, userMessage, identity.authorizationId, identity.billingAccountId, now(),
       );
+      this.#db.prepare("UPDATE cloud_runs SET admission=? WHERE id=?").run(JSON.stringify(admission), runId);
       this.#changedSessions.add(sessionId);
       return { run: run(this.#run(key, runId)), created: true };
+    });
+  }
+
+  public async bindExecutionBudget(identity: ExecutionIdentity, runId: string, budget: ExecutionBudget): Promise<CloudRun> {
+    const value = executionBudget(budget);
+    const key = executionScopeKey(identity);
+    return this.#transaction(() => {
+      const current = this.#run(key, runId);
+      if (current.authorization_id !== identity.authorizationId || current.billing_account_id !== identity.billingAccountId) throw notFound();
+      if (current.status !== "running" && current.execution_budget == null) throw new CloudError(409, "BUDGET_ALREADY_STARTED", "历史任务不能改写额度。");
+      if (current.execution_budget != null && current.execution_budget !== JSON.stringify(value)) throw new CloudError(409, "BUDGET_CONFLICT", "本轮额度已经绑定。");
+      this.#db.prepare("UPDATE cloud_runs SET execution_budget=COALESCE(execution_budget,?) WHERE id=? AND scope_key=?").run(JSON.stringify(value), runId, key);
+      return run(this.#run(key, runId));
     });
   }
 

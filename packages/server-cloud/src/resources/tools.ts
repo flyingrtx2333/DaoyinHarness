@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import type { ExecutionIdentity } from "@daoyin/harness-contracts";
-import type { JsonValue, ToolEvidence } from "@daoyin/harness-protocol";
+import type { JsonValue, ToolEvidence, TaskEvidenceReference, AgentEventPayloads } from "@daoyin/harness-protocol";
 import type { CloudRun } from "../repository.js";
 import type { CloudToolBinding } from "../app.js";
 import { CloudError } from "../repository.js";
@@ -39,7 +40,11 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   resource_list: { description: "Discover real resource IDs available to the account and attached to this session. Use the attached workspace IDs for file, Git and process calls; never guess them.", mutating: false, inputSchema: object({ sessionId: { type: "string", maxLength: 160 } }) },
   resource_attach: { description: "Attach an owned resource to the current session.", mutating: true, inputSchema: object({ resourceId: id }, ["resourceId"]) },
   resource_detach: { description: "Detach a resource from the current session without deleting it.", mutating: true, inputSchema: object({ resourceId: id }, ["resourceId"]) },
-  workspace_create: { description: "Create a language- and task-neutral cloud workspace from an empty tree, credential-free HTTPS Git source at an explicit revision, upload artifact or existing snapshot. runtimeId is required: choose node22, python313, go125 or rust190; use node22 only when no language was requested.", mutating: true, inputSchema: object({ title: { type: "string", minLength: 1, maxLength: 120 }, source: workspaceSource, runtimeId: { type: "string", enum: ["node22", "python313", "go125", "rust190"] } }, ["title", "source", "runtimeId"]) },
+  workspace_create: { description: "Create a task-neutral cloud workspace from an empty tree, credential-free HTTPS Git source at an explicit revision, upload artifact or snapshot. Select runtimeId from runtime_list; inspect project declarations before preparing a different environment.", mutating: true, inputSchema: object({ title: { type: "string", minLength: 1, maxLength: 120 }, source: workspaceSource, runtimeId: { type: "string", minLength: 1, maxLength: 80 } }, ["title", "source", "runtimeId"]) },
+  runtime_list: { description: "List trusted runtime identifiers, image digests, configured versions and capabilities. A missing version is unknown; never invent catalog entries.", mutating: false, inputSchema: object({}) },
+  environment_inspect: { description: "Read bounded project declarations as data and probe actual interpreter/package-manager versions in the selected isolated workspace. Does not execute configuration or assume compatibility.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
+  environment_prepare: { description: "Prepare a candidate workspace from an immutable snapshot without modifying the original. Select a trusted runtimeId, or a Dockerfile runtime whose FROM images are digest-pinned. Optionally install dependencies from detected project declarations. Returns one tracked operation ID; use environment_read to observe it, never relaunch an uncertain preparation. Success returns a new workspace ID.", mutating: true, inputSchema: object({ workspaceId, runtimeId: { type: "string", minLength: 1, maxLength: 80 }, runtime: object({ image: object({ kind: { const: "dockerfile", type: "string" }, path, context: cwd }, ["kind", "path", "context"]), environment: { type: "object", additionalProperties: { type: "string" } }, secretRefs: { type: "array", items: { type: "string" }, maxItems: 16 }, network: { type: "string", enum: ["public", "none"] }, limits: object({ cpu: { type: "number" }, memoryMiB: { type: "integer" }, pids: { type: "integer" }, diskMiB: { type: "integer" }, timeoutSeconds: { type: "integer" }, maxOutputBytes: { type: "integer" } }, ["cpu", "memoryMiB", "pids", "diskMiB", "timeoutSeconds", "maxOutputBytes"]) }, ["image", "environment", "secretRefs", "network", "limits"]), installDependencies: { type: "boolean" }, waitMs: { type: "integer", minimum: 0, maximum: 60000 } }, ["workspaceId"]) },
+  environment_read: { description: "Observe the existing environment preparation operation with a bounded wait. Does not restart a build or dependency installation. Failed candidates preserve the original workspace.", mutating: false, inputSchema: object({ workspaceId, operationId: { type: "string", pattern: "^op_[a-f0-9]{24}$" }, waitMs: { type: "integer", minimum: 0, maximum: 60000 } }, ["workspaceId", "operationId"]) },
   workspace_inspect: { description: "Inspect one attached workspace, runtime, limits and snapshots.", mutating: false, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   workspace_snapshot: { description: "Create an immutable content-addressed snapshot of the current workspace.", mutating: true, inputSchema: object({ workspaceId }, ["workspaceId"]) },
   workspace_restore: { description: "Restore an attached workspace to one of its immutable snapshots.", mutating: true, inputSchema: object({ workspaceId, snapshotId: { type: "string", pattern: "^snp_[a-f0-9]{24}$" } }, ["workspaceId", "snapshotId"]) },
@@ -59,7 +64,7 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   git_checkout: { description: "Checkout an existing revision in an attached workspace without accessing the host repository.", mutating: true, inputSchema: object({ workspaceId, revision: { type: "string", minLength: 1, maxLength: 200 } }, ["workspaceId", "revision"]) },
   git_commit: { description: "Create a local workspace commit. It does not push to a remote.", mutating: true, inputSchema: object({ workspaceId, message: { type: "string", minLength: 1, maxLength: 500 } }, ["workspaceId", "message"]) },
   git_export_patch: { description: "Export the current Git changes as an immutable patch artifact.", mutating: true, inputSchema: object({ workspaceId }, ["workspaceId"]) },
-  process_run: { description: "Run a bounded foreground executable with an argument array inside the workspace gVisor sandbox. Use process_start and bounded process_read waiting for lengthy installs or checks, so one foreground command does not consume the entire turn. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, stdin: { type: "string", maxLength: 1000000 }, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args"]) },
+  process_run: { description: "Start one tracked executable inside the gVisor sandbox and wait at most 60 seconds. timeoutMs bounds total process lifetime, waitMs bounds foreground observation. A running receipt returns the original processId; use process_read, never start the same command again. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, stdin: { type: "string", maxLength: 1000000 }, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, waitMs: { type: "integer", minimum: 0, maximum: 60000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args"]) },
   process_start: { description: "Start a background or PTY process inside the workspace gVisor sandbox. Use process_read with returned processId, cursor and bounded waitMs to observe new output and eventual exit; starting a process does not prove completion. Omit cwd or use . for the workspace root; any other cwd must be workspace-relative.", mutating: true, inputSchema: object({ workspaceId, executable: { type: "string", minLength: 1, maxLength: 256 }, args: { type: "array", maxItems: 128, items: { type: "string", maxLength: 16000 } }, cwd, processMode, timeoutMs: { type: "integer", minimum: 100, maximum: 3600000 }, environment: { type: "object" } }, ["workspaceId", "executable", "args", "processMode"]) },
   process_read: { description: "Read incremental output from a workspace process using its returned cursor to avoid repeated logs. Agent reads wait up to 10000ms for new output or process exit when waitMs is omitted; set waitMs=0 for an immediate read, or at most 30000ms for a longer bounded wait. A running state is not evidence that the command completed.", mutating: false, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, cursor: { type: "integer", minimum: 0 }, waitMs: { type: "integer", minimum: 0, maximum: 30000 } }, ["workspaceId", "processId"]) },
   process_write: { description: "Write bounded stdin to a running PTY process.", mutating: true, inputSchema: object({ workspaceId, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" }, stdin: { type: "string", maxLength: 1000000 } }, ["workspaceId", "processId", "stdin"]) },
@@ -73,7 +78,7 @@ export const RESOURCE_DEFINITIONS: Readonly<Record<ResourceToolName, { descripti
   deployment_rollback: { description: "Roll back to a previous immutable deployment after an explicit current-turn request.", mutating: true, inputSchema: object({ deploymentId: { type: "string", pattern: "^dep_[a-f0-9]{24}$" } }, ["deploymentId"]) },
 };
 
-export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all cloud development and artifact tasks. A session may attach multiple resources; every file, Git and process call must name the intended workspaceId. Use IDs from the current attached-resource context or workspace_create; if unknown, first call resource_list and inspect attached, never invent an ID. File paths are workspace-relative, for example input.csv or src/app.py; omit path when listing or searching the workspace root, never use / or . as a file path. process cwd may be omitted or . for the workspace root. workspace_create always requires runtimeId: Node.js uses node22, Python uses python313, Go uses go125 and Rust uses rust190; choose node22 only when the user did not specify a language. Read before editing and use snapshots for durable checkpoints. Commands run only in the workspace gVisor sandbox and accept executable plus argument arrays, never host shell text. Each process_run or process_start creates a new container: the base image is read-only, /tmp is temporary, and /workspace including runtime-managed user dependencies and caches persists across commands. Public network access is available through the audited egress boundary; private, loopback, metadata and platform addresses remain forbidden. Never put credentials in files, arguments or messages. Git push, deployment, payment, external writes and destructive external actions require an explicit current-turn request. A command exit code, artifact digest, deployment health event or official evaluator is the evidence of completion; do not infer success from intent.
+export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all cloud development and artifact tasks. A session may attach multiple resources; every file, Git and process call must name the intended workspaceId. Use IDs from the current attached-resource context or workspace_create; if unknown, first call resource_list and inspect attached, never invent an ID. File paths are workspace-relative, for example input.csv or src/app.py; omit path when listing or searching the workspace root, never use / or . as a file path. process cwd may be omitted or . for the workspace root. Use runtime_list to discover trusted runtimes. Inspect actual environment and project declarations with environment_inspect; select environment_prepare only when declarations or actual failures justify it, then observe the same operation with environment_read. Preparation returns a new workspace ID and preserves the source workspace. Unknown declarations or versions remain uncertain. Read before editing and use snapshots for durable checkpoints. Commands run only in the workspace gVisor sandbox and accept executable plus argument arrays, never host shell text. Each process_run or process_start creates a new container: the base image is read-only, /tmp is temporary, and /workspace including runtime-managed user dependencies and caches persists across commands. Public network access is available through the audited egress boundary; private, loopback, metadata and platform addresses remain forbidden. Never put credentials in files, arguments or messages. Git push, deployment, payment, external writes and destructive external actions require an explicit current-turn request. A command exit code, artifact digest, deployment health event or official evaluator is the evidence of completion; do not infer success from intent.
 
 Work toward the requested outcome within the shared call and time budgets. Search named symbols or error text in relevant paths, then read bounded implementation, caller and verification ranges. Batch independent read-only observations whose inputs are already known. Reuse available same-digest observations rather than walking overlapping ranges one call at a time; omitted or truncated context is not available evidence, so retrieve only what is missing. Once evidence supports a concrete diagnosis, choose the smallest authorized change or check instead of continuing general exploration. Read-only tasks do not require a mutation. For related edits already understood, prefer one coherent unified patch over a separate model round for each hunk, and reserve capacity to inspect the diff and validate the result.
 
@@ -110,6 +115,8 @@ function basicInput(name: ResourceToolName, input: Record<string, unknown>): boo
   if (name.startsWith("file_") || name.startsWith("git_") || name.startsWith("process_") || name.startsWith("workspace_")) {
     if (name !== "workspace_create" && typeof input.workspaceId !== "string") return false;
   }
+  if (name.startsWith("environment_") && typeof input.workspaceId !== "string") return false;
+  if (name === "environment_prepare" && (typeof input.runtimeId === "string") === (typeof input.runtime === "object" && input.runtime !== null)) return false;
   if (name === "file_write" && (typeof input.content === "string") === (typeof input.contentBase64 === "string")) return false;
   if (name === "file_patch" && typeof input.patch !== "string" && !(typeof input.path === "string" && typeof input.expected === "string" && typeof input.replacement === "string")) return false;
   return Object.keys(input).every(key => !["owner", "authorization", "accountId", "actorUserId", "billingAccountId"].includes(key));
@@ -236,12 +243,9 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             const availableMs = Math.floor(remainingMs - reserveMs);
             if (startsProcess && availableMs < 100) return { ok: false, code: "PROCESS_BUDGET_INSUFFICIENT", retryable: false,
               message: "剩余运行时间需要保留给结果核对和收尾，未启动新进程。复用已有结果，明确尚未验证部分。" };
-            if (name === "process_run" && typeof input.timeoutMs === "number" && input.timeoutMs > availableMs) {
-              return { ok: false, code: "PROCESS_BUDGET_INSUFFICIENT", retryable: false,
-                message: `前台命令要求的等待时间超过当前可用 ${availableMs} 毫秒，未启动。选择更短的必要检查，或用 process_start 启动一次长操作，再用 process_read 的 waitMs 有界等待原进程；不要重复安装。` };
-            }
             if (startsProcess) boundedProcessInput = { ...input,
-              timeoutMs: Math.min(typeof input.timeoutMs === "number" ? input.timeoutMs : name === "process_run" ? 60_000 : availableMs, availableMs) };
+              timeoutMs: Math.min(typeof input.timeoutMs === "number" ? input.timeoutMs : availableMs, availableMs),
+              ...(name === "process_run" ? { waitMs: Math.min(typeof input.waitMs === "number" ? input.waitMs : 60_000, 60_000, availableMs) } : {}) };
             else if (typeof boundedProcessInput.waitMs === "number") boundedProcessInput = { ...boundedProcessInput,
               waitMs: Math.min(boundedProcessInput.waitMs, Math.max(0, availableMs)) };
           }
@@ -258,7 +262,8 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
               ? { expectedDigest: typeof input.path === "string" ? observed?.get(input.path) ?? null : null }
               : name === "file_patch" ? { expectedDigests: Object.fromEntries(observed ?? []) } : {};
             result = await resourceCall<Record<string, unknown>>(identity, { ...executionInput, ...versionGuard,
-              action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}` } as ResourceControlRequest, signal);
+              ...(name === "process_run" ? { agentProcess: true } : {}),
+              action: name, sessionId: run.sessionId, sourceRun: run.id, requestId: `${run.requestId}_${name}_${createHash("sha256").update(JSON.stringify(executionInput)).digest("hex").slice(0, 24)}` } as ResourceControlRequest, signal);
           } catch (error) {
             // Preserve only independently specified infrastructure failures. The
             // registry still hides all other remote errors and arbitrary text.
@@ -336,4 +341,35 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
       authorizeResource: async request => basicInput(name, request.input),
     } satisfies CloudToolBinding;
   });
+}
+
+/** Read persisted facts only; notification delivery never launches a model request. */
+export async function resourceRunEvidence(identity: ExecutionIdentity, run: CloudRun): Promise<{ evidenceText: string; pendingOperationIds: string[]; completions: AgentEventPayloads["process.completed"][] }> {
+  const result = await resourceCall<{ processes: Array<{ processId: string; workspaceId: string; status: string; exitCode: number | null; finishedAt: string | null;
+    receipt?: { digest?: string; cursor?: number; truncated?: boolean } }>; environments: Array<{ id: string; status: string }> }>(identity,
+    { action: "run_evidence", sessionId: run.sessionId, sourceRun: run.id });
+  const pendingOperationIds = [...result.processes.filter(item => ["starting", "running"].includes(item.status)).map(item => item.processId),
+    ...result.environments.filter(item => ["queued", "running"].includes(item.status)).map(item => item.id)].slice(0, 96);
+  const completions = result.processes.flatMap(item => {
+    const status = item.status;
+    if (!item.receipt?.digest || !["exited", "failed", "cancelled", "timed_out", "interrupted"].includes(status) || !item.finishedAt) return [];
+    const finishedAt = Date.parse(item.finishedAt);
+    if (!Number.isFinite(finishedAt)) return [];
+    return [{ processId: item.processId, workspaceId: item.workspaceId,
+      status: status as AgentEventPayloads["process.completed"]["status"], exitCode: item.exitCode,
+      receiptDigest: item.receipt.digest, finishedAt, cursor: item.receipt.cursor ?? 0, truncated: item.receipt.truncated === true }];
+  });
+  return { evidenceText: JSON.stringify(result).slice(0, 12_000), pendingOperationIds, completions };
+}
+
+export async function validateResourceEvidence(identity: ExecutionIdentity, run: CloudRun, reference: TaskEvidenceReference, signal?: AbortSignal): Promise<boolean> {
+  if (reference.type !== "process" && reference.type !== "artifact") return false;
+  try {
+    const result = await resourceCall<{ valid: boolean }>(identity, { action: "evidence_validate", sessionId: run.sessionId,
+      sourceRun: run.id, referenceId: reference.id, metadata: { type: reference.type } }, signal);
+    return result.valid === true;
+  } catch (error) {
+    if (error instanceof CloudError && ["RESOURCE_NOT_ATTACHED", "ARTIFACT_NOT_FOUND", "PROCESS_NOT_FOUND", "RESOURCE_ID_INVALID", "RESOURCE_NOT_FOUND"].includes(error.code)) return false;
+    throw error;
+  }
 }

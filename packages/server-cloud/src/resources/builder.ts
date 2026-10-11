@@ -36,8 +36,9 @@ function validateDockerfile(value: string): void {
     throw new ResourceError("DOCKERFILE_DIRECT_SECRET_DENIED", "Remote ADD, SSH mounts and inline secret mounts are not allowed.", 403);
   }
 }
-async function execute(executable: string, args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
+async function execute(executable: string, args: string[], timeoutMs: number, signal: AbortSignal): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
     const child = spawn(executable, args, { shell: false, stdio: ["ignore", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", HOME: "/nonexistent", LANG: "C.UTF-8" } });
     let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0), stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0), exceeded = false;
     const append = (current: Buffer<ArrayBufferLike>, chunk: Buffer<ArrayBufferLike>): Buffer<ArrayBufferLike> => {
@@ -45,8 +46,12 @@ async function execute(executable: string, args: string[], timeoutMs: number): P
       return Buffer.concat([current, chunk]);
     };
     child.stdout.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk); }); child.stderr.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk); });
+    const abort = (): void => { child.kill("SIGTERM"); };
+    signal.addEventListener("abort", abort, { once: true });
     child.once("error", reject); const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-    child.once("close", (code) => { clearTimeout(timer); if (exceeded) reject(new ResourceError("BUILD_OUTPUT_LIMIT", "Build logs exceeded the limit.", 413));
+    child.once("close", (code) => { clearTimeout(timer); signal.removeEventListener("abort", abort);
+      if (signal.aborted) reject(new ResourceError("OCI_BUILD_CANCELLED", "Build was cancelled; the candidate image was not activated.", 409));
+      else if (exceeded) reject(new ResourceError("BUILD_OUTPUT_LIMIT", "Build logs exceeded the limit.", 413));
       else if (code !== 0) reject(new ResourceError("OCI_BUILD_FAILED", stderr.toString().slice(-4000) || "OCI build failed.", 422));
       else resolve({ stdout: stdout.toString(), stderr: stderr.toString() }); });
   });
@@ -54,7 +59,7 @@ async function execute(executable: string, args: string[], timeoutMs: number): P
 async function digest(file: string): Promise<string> {
   return new Promise((resolve, reject) => { const hash = createHash("sha256"); const stream = createReadStream(file); stream.on("data", (chunk) => hash.update(chunk)); stream.once("error", reject); stream.once("end", () => resolve(`sha256:${hash.digest("hex")}`)); });
 }
-async function build(request: BuildRequest): Promise<Record<string, unknown>> {
+async function build(request: BuildRequest, signal: AbortSignal): Promise<Record<string, unknown>> {
   const context = await safeDirectory(request.workspaceId, request.context); const dockerfile = await safeDockerfile(context, request.dockerfile);
   validateDockerfile(await readFile(dockerfile, "utf8")); await mkdir(OUTPUTS, { recursive: true, mode: 0o700 });
   const output = path.join(OUTPUTS, `${request.workspaceId}-${randomBytes(8).toString("hex")}.tar`);
@@ -63,7 +68,7 @@ async function build(request: BuildRequest): Promise<Record<string, unknown>> {
       "--local", `context=${context}`, "--local", `dockerfile=${path.dirname(dockerfile)}`, "--opt", `filename=${path.basename(dockerfile)}`,
       // The executor imports with docker load, whose classic image store expects
       // a Docker-layout archive rather than an OCI-layout archive.
-      "--output", `type=docker,dest=${output}`, "--progress", "plain"], Math.min(request.timeoutMs ?? 600_000, 600_000));
+      "--output", `type=docker,dest=${output}`, "--progress", "plain"], Math.min(request.timeoutMs ?? 600_000, 600_000), signal);
     const info = await stat(output); if (!info.isFile() || info.size > 2 * 1024 * 1024 * 1024) throw new ResourceError("OCI_IMAGE_LIMIT", "Built OCI image exceeds the limit.", 413);
     return { archive: output, archiveDigest: await digest(output), size: info.size, log: `${result.stdout}${result.stderr}`.slice(-200_000) };
   } catch (error) { await rm(output, { force: true }); throw error; }
@@ -72,10 +77,12 @@ async function build(request: BuildRequest): Promise<Record<string, unknown>> {
 await mkdir(path.dirname(SOCKET), { recursive: true, mode: 0o750 }); await unlink(SOCKET).catch(() => undefined);
 const server = http.createServer((request, response) => {
   if (request.method !== "POST" || request.url !== "/build") { response.writeHead(404).end(); return; }
+  const controller = new AbortController(); request.once("aborted", () => controller.abort());
+  response.once("close", () => { if (!response.writableEnded) controller.abort(); });
   let body = ""; request.on("data", (chunk) => { body += chunk.toString(); if (Buffer.byteLength(body) > 64_000) request.destroy(); });
   request.on("end", () => { void (async () => {
     try {
-      const value = await build(JSON.parse(body) as BuildRequest);
+      const value = await build(JSON.parse(body) as BuildRequest, controller.signal);
       response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value));
     } catch (error) {
       const failure = error instanceof ResourceError ? error : new ResourceError("OCI_BUILDER_FAILED", "OCI builder failed.", 503);

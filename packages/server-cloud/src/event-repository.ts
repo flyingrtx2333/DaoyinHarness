@@ -49,8 +49,9 @@ export function withCommittedSessionEvents(base: CloudRepository, onCommitted?: 
     findRequest: (scope, sessionId, requestId) => base.findRequest(scope, sessionId, requestId),
     listRuns: (scope, sessionId) => base.listRuns(scope, sessionId),
     readEvents: (scope, sessionId, after, limit) => base.readEvents(scope, sessionId, after, limit),
-    async acceptRun(identity, sessionId, requestId, message) {
-      const result = await base.acceptRun(identity, sessionId, requestId, message);
+    ...(base.bindExecutionBudget === undefined ? {} : { bindExecutionBudget: (identity: import("@daoyin/harness-contracts").ExecutionIdentity, runId: string, budget: import("./execution-budget.js").ExecutionBudget) => base.bindExecutionBudget!(identity, runId, budget) }),
+    async acceptRun(identity, sessionId, requestId, message, admission) {
+      const result = await base.acceptRun(identity, sessionId, requestId, message, admission);
       if (result.created) notify(identity, sessionId);
       return result;
     },

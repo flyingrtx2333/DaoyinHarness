@@ -1,3 +1,4 @@
+import { admissionHashInput, executionBudget, type ExecutionBudget, type RunAdmission } from "./execution-budget.js";
 import { createHash, randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import { assertHistoryAdmission, readCompleteHistory } from "./history-policy.js";
@@ -31,7 +32,9 @@ function run(row: Row): CloudRun {
   return { id: String(row.id), sessionId: String(row.session_id), requestId: String(row.request_id),
     userMessage: String(row.user_message), status: row.status as CloudRun["status"], finalText: String(row.final_text),
     lastEventSeq: asNumber(row.last_event_seq), cancelRequested: asBoolean(row.cancel_requested),
-    authorizationId: String(row.authorization_id), billingAccountId: String(row.billing_account_id), createdAt: String(row.created_at) };
+    authorizationId: String(row.authorization_id), billingAccountId: String(row.billing_account_id), createdAt: String(row.created_at),
+    ...(typeof row.execution_budget === "string" ? { executionBudget: executionBudget(JSON.parse(row.execution_budget) as unknown) } : {}),
+    ...(typeof row.admission === "string" ? { admission: JSON.parse(row.admission) as RunAdmission } : {}) };
 }
 
 const cloudSchema = [
@@ -55,6 +58,8 @@ const cloudSchema = [
     cancel_requested BOOLEAN NOT NULL DEFAULT FALSE, authorization_id TEXT NOT NULL,
     billing_account_id TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(session_id, request_id)
   )`,
+  "ALTER TABLE cloud_runs ADD COLUMN IF NOT EXISTS execution_budget TEXT",
+  "ALTER TABLE cloud_runs ADD COLUMN IF NOT EXISTS admission TEXT",
   "CREATE UNIQUE INDEX IF NOT EXISTS cloud_one_active_run ON cloud_runs(session_id) WHERE status='running'",
   "CREATE INDEX IF NOT EXISTS cloud_runs_scope ON cloud_runs(scope_key, session_id)",
   `CREATE TABLE IF NOT EXISTS session_search_documents (
@@ -269,7 +274,7 @@ export class PostgresCloudRepository implements CloudRepository {
     });
   }
 
-  public async acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string): Promise<{ run: CloudRun; created: boolean }> {
+  public async acceptRun(identity: ExecutionIdentity, sessionId: string, requestId: string, userMessage: string, admission: RunAdmission = {}): Promise<{ run: CloudRun; created: boolean }> {
     assertExecutionIdentity(identity);
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(requestId) || !userMessage.trim() || userMessage.length > 10_000) {
       throw new CloudError(400, "RUN_INPUT_INVALID", "请求标识或消息无效。");
@@ -279,11 +284,15 @@ export class PostgresCloudRepository implements CloudRepository {
       const selectedSession = await this.#session(client, key, sessionId, true);
       const childSession = await client.query("SELECT 1 FROM cloud_child_runs WHERE child_session_id=$1", [sessionId]);
       if (childSession.rows.length) throw new CloudError(409, "CHILD_SESSION_READ_ONLY", "子会话仅用于委派审计，请在父会话继续任务。");
-      const inputHash = digest(userMessage);
+      const inputHash = digest(admissionHashInput(userMessage, admission));
       const previous = await client.query<Row>("SELECT * FROM cloud_runs WHERE session_id=$1 AND request_id=$2 AND scope_key=$3 FOR UPDATE", [sessionId, requestId, key]);
       if (previous.rows[0] !== undefined) {
         if (String(previous.rows[0].input_hash) !== inputHash) throw new CloudError(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同消息。");
         return { run: run(previous.rows[0]), created: false };
+      }
+      if (admission.continueFromRunId !== undefined) {
+        const source = await client.query<Row>("SELECT * FROM cloud_runs WHERE scope_key=$1 AND session_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1", [key, sessionId]);
+        if (source.rows[0]?.id !== admission.continueFromRunId || source.rows[0]?.status === "running") throw new CloudError(409, "CONTINUATION_STALE", "只能继续当前会话最新的已结束任务。");
       }
       if (selectedSession.archived_at) throw new CloudError(409, "SESSION_ARCHIVED", "请先恢复已归档的会话。");
       const active = await client.query("SELECT id FROM cloud_runs WHERE session_id=$1 AND status='running' FOR UPDATE", [sessionId]);
@@ -297,10 +306,24 @@ export class PostgresCloudRepository implements CloudRepository {
       await client.query(`INSERT INTO cloud_runs(id,scope_key,session_id,request_id,input_hash,user_message,status,authorization_id,billing_account_id,created_at)
         VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$9)`, [runId, key, sessionId, requestId, inputHash, userMessage,
         identity.authorizationId, identity.billingAccountId, createdAt]);
+      await client.query("UPDATE cloud_runs SET admission=$1 WHERE id=$2", [JSON.stringify(admission), runId]);
       await client.query(`INSERT INTO session_search_documents(turn_id,scope_key,session_id,search_text,updated_at)
         VALUES ($1,$2,$3,LEFT(CONCAT_WS(' ',$4::text,$5::text),20000),$6)`,
         [runId, key, sessionId, String(selectedSession.title), userMessage, Date.now()]);
       return { run: run(await this.#run(client, key, runId)), created: true };
+    });
+  }
+
+  public async bindExecutionBudget(identity: ExecutionIdentity, runId: string, budget: ExecutionBudget): Promise<CloudRun> {
+    const value = executionBudget(budget);
+    const key = executionScopeKey(identity);
+    return this.#transaction(async client => {
+      const current = await this.#run(client, key, runId, true);
+      if (current.authorization_id !== identity.authorizationId || current.billing_account_id !== identity.billingAccountId) throw notFound();
+      if (current.status !== "running" && current.execution_budget == null) throw new CloudError(409, "BUDGET_ALREADY_STARTED", "历史任务不能改写额度。");
+      if (current.execution_budget != null && current.execution_budget !== JSON.stringify(value)) throw new CloudError(409, "BUDGET_CONFLICT", "本轮额度已经绑定。");
+      const result = await client.query<Row>("UPDATE cloud_runs SET execution_budget=COALESCE(execution_budget,$1) WHERE id=$2 AND scope_key=$3 RETURNING *", [JSON.stringify(value), runId, key]);
+      return run(result.rows[0]!);
     });
   }
 

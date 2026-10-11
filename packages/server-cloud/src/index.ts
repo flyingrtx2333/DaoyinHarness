@@ -12,3 +12,4 @@ export { cancelResourceRun, createResourceTools, resourceCall, RESOURCE_INSTRUCT
 export { ResourceRepository, ResourceError } from "./resources/repository.js";
 export { FileContentStore, type ContentStore } from "./resources/content-store.js";
 export { RESOURCE_TOOL_NAMES, type ResourceControlRequest, type ResourceToolName } from "./resources/contracts.js";
+export { DEFAULT_EXECUTION_BUDGET, type ExecutionBudget, type RunAdmission } from "./execution-budget.js";

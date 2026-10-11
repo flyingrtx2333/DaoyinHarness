@@ -9,6 +9,7 @@ import {
 import type { JsonValue } from "@daoyin/harness-protocol";
 import type { ContentStore } from "./content-store.js";
 import type { ResolvedResourceBinding } from "./contracts.js";
+import type { ProcessReceipt } from "./process-receipts.js";
 
 export class ResourceError extends Error {
   public constructor(public readonly code: string, message: string, public readonly status = 400) { super(message); }
@@ -19,6 +20,10 @@ export interface SnapshotInputEntry {
   mode?: number;
   content?: Uint8Array;
   symlinkTarget?: string;
+}
+export interface EnvironmentOperation {
+  id: string; workspaceId: string; sourceRun: string | null; status: string;
+  result: Record<string, unknown> | null; error: string | null;
 }
 
 const resourceColumns = `id,kind,title,version,capabilities,created_at AS "createdAt",updated_at AS "updatedAt"`;
@@ -582,15 +587,15 @@ export class ResourceRepository {
 
   public async recordProcess(identity: ExecutionIdentity, input: {
     id: string; workspaceId: string; runId: string; executable: string; args: readonly string[];
-    cwd: string; mode: "foreground" | "background" | "pty"; timeoutAt?: string;
+    cwd: string; mode: "foreground" | "background" | "pty"; timeoutAt?: string; status?: "starting" | "running";
   }): Promise<ProcessSession> {
     assertResourceId(input.id, "prc");
     await this.workspace(identity, input.workspaceId);
     await this.pool.query(`INSERT INTO harness_process_sessions
       (id,owner_key,workspace_id,run_id,executable,args,cwd,mode,status,timeout_at)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'running',$9) ON CONFLICT(id) DO NOTHING`,
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$10,$9) ON CONFLICT(id) DO NOTHING`,
       [input.id, ownerKey(identity), input.workspaceId, input.runId, input.executable,
-        JSON.stringify(input.args), input.cwd, input.mode, input.timeoutAt ?? null]);
+        JSON.stringify(input.args), input.cwd, input.mode, input.timeoutAt ?? null, input.status ?? "running"]);
     return this.process(identity, input.workspaceId, input.id);
   }
 
@@ -611,7 +616,8 @@ export class ResourceRepository {
   }): Promise<ProcessSession> {
     await this.process(identity, workspaceId, processId);
     await this.pool.query(`UPDATE harness_process_sessions SET
-      status=COALESCE($1,status),exit_code=CASE WHEN $2::boolean THEN $3 ELSE exit_code END,
+      status=CASE WHEN status IN ('exited','failed','cancelled','timed_out','interrupted') AND $1 IN ('starting','running')
+        THEN status ELSE COALESCE($1,status) END,exit_code=CASE WHEN $2::boolean THEN $3 ELSE exit_code END,
       output_cursor=GREATEST(output_cursor,COALESCE($4,output_cursor)),
       finished_at=CASE WHEN $1 IN ('exited','failed','cancelled','timed_out','interrupted')
         THEN COALESCE(finished_at,now()) ELSE finished_at END
@@ -637,17 +643,92 @@ export class ResourceRepository {
       WHERE owner_key=$1 AND run_id=$2 AND status IN ('starting','running') ORDER BY started_at,id`,
       [ownerKey(identity), runId])).rows;
   }
+  public async pendingProcessReceipts(): Promise<Array<{ processId: string; workspaceId: string; status: string; timeoutAt: string | null }>> {
+    return (await this.pool.query<{ processId: string; workspaceId: string; status: string; timeoutAt: string | null }>(`SELECT id AS "processId",workspace_id AS "workspaceId",status,timeout_at AS "timeoutAt"
+      FROM harness_process_sessions WHERE status IN ('starting','running') ORDER BY started_at LIMIT 100`)).rows;
+  }
 
-  public async reconcileStoppedProcesses(liveProcessIds: readonly string[]): Promise<number> {
-    for (const processId of liveProcessIds) assertResourceId(processId, "prc");
+  public async runProcessEvidence(identity: ExecutionIdentity, runId: string): Promise<Record<string, unknown>[]> {
+    return (await this.pool.query<Record<string, unknown>>(`SELECT p.id AS "processId",p.workspace_id AS "workspaceId",p.status,p.exit_code AS "exitCode",
+      p.started_at AS "startedAt",p.finished_at AS "finishedAt",e.payload AS receipt
+      FROM harness_process_sessions p LEFT JOIN LATERAL (
+        SELECT payload FROM harness_resource_events WHERE owner_key=p.owner_key AND run_id=p.run_id
+        AND event_type='process.completed' AND payload->>'processId'=p.id ORDER BY sequence DESC LIMIT 1
+      ) e ON true WHERE p.owner_key=$1 AND p.run_id=$2 ORDER BY p.started_at LIMIT 100`, [ownerKey(identity), runId])).rows;
+  }
+  public async runEnvironmentEvidence(identity: ExecutionIdentity, runId: string): Promise<EnvironmentOperation[]> {
+    return (await this.pool.query<EnvironmentOperation>(`SELECT id,workspace_id AS "workspaceId",source_run AS "sourceRun",status,result,error
+      FROM harness_workspace_operations WHERE owner_key=$1 AND source_run=$2 AND kind='environment_prepare' ORDER BY created_at LIMIT 96`,
+      [ownerKey(identity),runId])).rows;
+  }
+  public async evidenceWorkspace(identity: ExecutionIdentity, type: "process" | "artifact", referenceId: string): Promise<string> {
+    if(type === "artifact") return (await this.artifact(identity, referenceId)).workspaceId;
+    assertResourceId(referenceId,"prc");
+    const row=(await this.pool.query<{ workspaceId:string }>(`SELECT workspace_id AS "workspaceId" FROM harness_process_sessions WHERE id=$1 AND owner_key=$2`,
+      [referenceId,ownerKey(identity)])).rows[0];
+    if(!row) throw new ResourceError("PROCESS_NOT_FOUND","Process evidence is not available to this account.",404); return row.workspaceId;
+  }
+
+  public async persistTerminalReceipt(receipt: ProcessReceipt): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const row = (await client.query<{ owner_key: string; run_id: string }>(`SELECT owner_key,run_id FROM harness_process_sessions
+        WHERE id=$1 AND workspace_id=$2 AND NOT EXISTS (
+          SELECT 1 FROM harness_resource_events e WHERE e.owner_key=harness_process_sessions.owner_key AND e.run_id=harness_process_sessions.run_id
+          AND e.event_type='process.completed' AND e.payload->>'processId'=harness_process_sessions.id) FOR UPDATE`, [receipt.processId, receipt.workspaceId])).rows[0];
+      if (!row) { await client.query("COMMIT"); return; }
+      const blob = await this.content.put(Buffer.from(JSON.stringify(receipt))); const artifactId = id("art");
+      await client.query(`INSERT INTO harness_resources(id,owner_key,kind,title,capabilities) VALUES($1,$2,'artifact','Process terminal receipt','["read"]')`, [artifactId,row.owner_key]);
+      await client.query(`INSERT INTO harness_artifacts(resource_id,workspace_id,media_type,size_bytes,blob_hash,metadata)
+        VALUES($1,$2,'application/json',$3,$4,$5)`, [artifactId,receipt.workspaceId,blob.size,blob.digest,JSON.stringify({ processId:receipt.processId,runId:row.run_id,audit:true })]);
+      const status = receipt.state === "exited" ? (receipt.exitCode === 0 ? "exited" : "failed")
+        : ["cancelled", "timed_out"].includes(receipt.state) ? receipt.state : "interrupted";
+      await client.query(`UPDATE harness_process_sessions SET status=$2,exit_code=$3,output_cursor=$4,finished_at=COALESCE($5::timestamptz,now()) WHERE id=$1`,
+        [receipt.processId,status,receipt.exitCode,receipt.cursor,receipt.finishedAt]);
+      await client.query(`INSERT INTO harness_resource_events(owner_key,run_id,resource_id,event_type,payload) VALUES($1,$2,$3,'process.completed',$4)`,
+        [row.owner_key,row.run_id,receipt.workspaceId,JSON.stringify({ ...receipt,output:receipt.output.slice(0,8192),artifactId,outputDigest:blob.digest })]);
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+
+  public async claimEnvironment(identity: ExecutionIdentity, workspaceId: string, requestId: string, sourceRun: string | undefined, input: unknown): Promise<{ operation: EnvironmentOperation; claimed: boolean }> {
+    await this.workspace(identity,workspaceId); const operationId=id("op"); const hash=createHash("sha256").update(canonical(input)).digest("hex");
+    const inserted=await this.pool.query(`INSERT INTO harness_workspace_operations(id,owner_key,workspace_id,request_id,kind,input_hash,source_run,status)
+      VALUES($1,$2,$3,$4,'environment_prepare',$5,$6,'running') ON CONFLICT(workspace_id,request_id) DO NOTHING`, [operationId,ownerKey(identity),workspaceId,requestId,hash,sourceRun??null]);
+    const row=(await this.pool.query<EnvironmentOperation & { input_hash:string }>(`SELECT id,workspace_id AS "workspaceId",source_run AS "sourceRun",status,result,error,input_hash
+      FROM harness_workspace_operations WHERE workspace_id=$1 AND request_id=$2 AND owner_key=$3`,[workspaceId,requestId,ownerKey(identity)])).rows[0];
+    if(!row||row.input_hash!==hash) throw new ResourceError("ENVIRONMENT_OUTCOME_UNCERTAIN","Preparation request already exists with different input; it was not repeated.",409);
+    return {operation:row,claimed:Boolean(inserted.rowCount)};
+  }
+  public async environmentOperation(identity: ExecutionIdentity, workspaceId: string, operationId: string): Promise<EnvironmentOperation> {
+    await this.workspace(identity,workspaceId);
+    const row=(await this.pool.query<EnvironmentOperation>(`SELECT id,workspace_id AS "workspaceId",source_run AS "sourceRun",status,result,error
+      FROM harness_workspace_operations WHERE id=$1 AND workspace_id=$2 AND owner_key=$3 AND kind='environment_prepare'`,[operationId,workspaceId,ownerKey(identity)])).rows[0];
+    if(!row) throw new ResourceError("ENVIRONMENT_NOT_FOUND","Environment operation is not available in this workspace.",404); return row;
+  }
+  public async completeEnvironment(operationId: string, status: "completed" | "failed" | "cancelled", result: Record<string, unknown>, error?: string): Promise<void> {
+    await this.pool.query(`WITH changed AS (UPDATE harness_workspace_operations SET status=$2,result=$3,error=$4,updated_at=now()
+      WHERE id=$1 AND status='running' RETURNING *) INSERT INTO harness_resource_events(owner_key,run_id,resource_id,event_type,payload)
+      SELECT owner_key,source_run,workspace_id,'environment.completed',jsonb_build_object('operationId',id,'status',status,'result',result,'error',error) FROM changed`,
+      [operationId,status,JSON.stringify(result),error??null]);
+  }
+  public async interruptEnvironmentOperations(): Promise<void> {
+    await this.pool.query(`WITH changed AS (UPDATE harness_workspace_operations SET status='interrupted',error='Worker restarted; preparation was not replayed.',updated_at=now()
+      WHERE kind='environment_prepare' AND status='running' RETURNING *) INSERT INTO harness_resource_events(owner_key,run_id,resource_id,event_type,payload)
+      SELECT owner_key,source_run,workspace_id,'environment.interrupted',jsonb_build_object('operationId',id,'status',status,'error',error) FROM changed`);
+  }
+
+  public async reconcileMissingProcesses(missingProcessIds: readonly string[]): Promise<number> {
+    for (const processId of missingProcessIds) assertResourceId(processId, "prc");
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       const stopped = (await client.query<{ id: string; owner_key: string; workspace_id: string; run_id: string; status: string }>(`UPDATE harness_process_sessions
         SET status=CASE WHEN timeout_at IS NOT NULL AND timeout_at <= now() THEN 'timed_out' ELSE 'interrupted' END,
           finished_at=COALESCE(finished_at,now())
-        WHERE status IN ('starting','running') AND NOT (id=ANY($1::text[]))
-        RETURNING id,owner_key,workspace_id,run_id,status`, [liveProcessIds])).rows;
+        WHERE status IN ('starting','running') AND id=ANY($1::text[])
+        RETURNING id,owner_key,workspace_id,run_id,status`, [missingProcessIds])).rows;
       for (const process of stopped) {
         await client.query(`INSERT INTO harness_resource_events(owner_key,run_id,resource_id,event_type,payload)
           VALUES($1,$2,$3,'process.reconciled',$4)`, [process.owner_key, process.run_id, process.workspace_id,

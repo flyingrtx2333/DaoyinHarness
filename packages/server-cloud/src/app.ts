@@ -1,14 +1,15 @@
+import { admissionHashInput, executionBudget, requestedBudget, type ExecutionBudget, type RunAdmission } from "./execution-budget.js";
 import { randomUUID } from "node:crypto";
 import { registerProjectAuthorization } from "./projects/authorization.js";
 import { createProjectTools, PROJECT_INSTRUCTIONS, cancelProjectRun } from "./projects/tools.js";
 import { registerProjectRoutes } from "./projects/routes.js";
-import { cancelResourceRun, createResourceTools, RESOURCE_INSTRUCTIONS } from "./resources/tools.js";
+import { cancelResourceRun, createResourceTools, resourceRunEvidence, validateResourceEvidence, RESOURCE_INSTRUCTIONS } from "./resources/tools.js";
 import { registerResourceRoutes } from "./resources/routes.js";
 import { attachedWorkspaceContext } from "./resources/session-context.js";
 import { CLOUD_ORCHESTRATION_NAMES, CLOUD_ORCHESTRATION_INSTRUCTIONS, createCloudOrchestrationTools, validateCloudOrchestrationInput } from "./cloud-orchestration.js";
 export { isCloudOrchestrationToolName } from "./cloud-orchestration.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import { AgentEngine, SystemPromptRegistry, type ModelClient } from "@daoyin/harness-agent-core";
+import { AgentEngine, SystemPromptRegistry, createTaskPlanTool, type ModelClient } from "@daoyin/harness-agent-core";
 import { CLOUD_MODEL_TIMEOUT_MS } from "./model-limits.js";
 import { YINGHUO_MUTATIONS } from "./yinghuo-contract.js";
 import { capabilityPacksFor, explicitHighRiskPacks } from "./capability-packs.js";
@@ -58,6 +59,8 @@ export interface CloudServerOptions {
   resolveProfile(identity: ExecutionIdentity, signal: AbortSignal): Promise<CloudProfile>;
   /** Must use a delegated, metered gateway client for this identity and exact run. */
   createModel(identity: ExecutionIdentity, run: CloudRun, signal: AbortSignal): Promise<ModelClient>;
+  /** Trusted platform atomically binds the root allowance before any model routing. */
+  bindExecutionBudget?(identity: ExecutionIdentity, run: CloudRun, limits: ExecutionBudget, signal: AbortSignal): Promise<ExecutionBudget>;
   /** Read-only service-authenticated bridge probe; never calls a model or creates a grant. */
   checkPlatform?(signal: AbortSignal): Promise<void>;
   buildInfo?: RuntimeBuild;
@@ -116,7 +119,7 @@ const REVIEWED_STORY_MUTATIONS: Readonly<Record<string, string>> = Object.freeze
 function checkedProfile(profile: CloudProfile): CloudProfile {
   // Catalog memory entries are descriptors only. Ignore their executors and install trusted, run-bound tools later.
   const businessTools = profile.tools.filter((binding) => !isMemoryToolName(binding.definition.name) &&
-    !isEpisodicMemoryToolName(binding.definition.name) && !ORCHESTRATION_TOOLS.has(binding.definition.name));
+    !isEpisodicMemoryToolName(binding.definition.name) && binding.definition.name !== "task_plan" && !ORCHESTRATION_TOOLS.has(binding.definition.name));
   if (!/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.id) || !/^[A-Za-z0-9_.-]{1,100}$/u.test(profile.version) ||
       !profile.instructions.trim() || profile.instructions.length > 10_000 || businessTools.length > 2_000 || profile.tools.length > 2_000 ||
       (profile.instructionsForTools !== undefined && typeof profile.instructionsForTools !== "function")) {
@@ -150,7 +153,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     if (typeof callback !== "function") throw new Error("Cloud authentication, authorization, profile and metered model adapters are required.");
   }
   const maxConcurrentRuns = options.maxConcurrentRuns ?? 4;
-  const runTimeoutMs = options.runTimeoutMs ?? 300_000;
+  const runTimeoutMs = options.runTimeoutMs ?? 600_000;
   const capabilityRouterMode = options.capabilityRouterMode ?? "off";
   const generalResourcesMode = options.generalResourcesMode ?? "off";
   if (!Number.isSafeInteger(maxConcurrentRuns) || maxConcurrentRuns < 1 || maxConcurrentRuns > 32 ||
@@ -365,19 +368,21 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     run: await options.repository.getRun(identityFor(request), request.params.runId),
   }));
 
-  function startRun(identity: ExecutionIdentity, profile: CloudProfile, run: CloudRun, maxModelCalls = 12): void {
+  function startRun(identity: ExecutionIdentity, profile: CloudProfile, run: CloudRun): void {
+    const budget = executionBudget(run.executionBudget ?? requestedBudget(run.admission ?? {}, runTimeoutMs));
+    const maxModelCalls = budget.maxModelCalls;
     const controller = new AbortController();
     const runSpan = telemetry.startSpan("agent.run", { attributes: {
       "daoyin.run.id": run.id, "daoyin.session.id": run.sessionId, "daoyin.profile.id": profile.id,
       "daoyin.space.kind": identity.space.kind, "daoyin.router.mode": capabilityRouterMode,
     } });
-    let remainingRunMs = runTimeoutMs;
+    let remainingRunMs = budget.maxActiveMs;
     let activeSince = Date.now();
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const resumeRunDeadline = (): void => {
       if (controller.signal.aborted || deadline !== undefined) return;
       activeSince = Date.now();
-      deadline = setTimeout(() => controller.abort("runtime"), remainingRunMs);
+      deadline = setTimeout(() => controller.abort("budget"), remainingRunMs);
       deadline.unref();
     };
     const suspendRunDeadline = (): void => {
@@ -390,14 +395,38 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     resumeRunDeadline();
     const done = (async () => {
       let preparingWorkspaceContext = false;
+      let resourcePoll: ReturnType<typeof setInterval> | undefined;
+      let resourceTerminal = false;
       try {
         const bound = await options.repository.bindRun(identity, run.sessionId, run.id);
+        const publishedProcesses = new Set<string>();
+        let resourceSync: ReturnType<typeof resourceRunEvidence> | undefined;
+        const syncResourceEvidence = async (): ReturnType<typeof resourceRunEvidence> => {
+          if (resourceSync !== undefined) return resourceSync;
+          const pending = (async () => {
+            const facts = await resourceRunEvidence(identity, run);
+            for (const completion of facts.completions) {
+              const key = `${completion.processId}:${completion.receiptDigest}`;
+              if (publishedProcesses.has(key)) continue;
+              await bound.events.append({ type: "process.completed", accountId: bound.accountId, scopeId: bound.scopeId,
+                sessionId: run.sessionId, turnId: run.id, payload: completion });
+              publishedProcesses.add(key);
+            }
+            return facts;
+          })();
+          resourceSync = pending;
+          try { return await pending; } finally { if (resourceSync === pending) resourceSync = undefined; }
+        };
         const stores: BoundRunStores = { ...bound, events: {
           read: (sessionId, after) => bound.events.read(sessionId, after),
           append: (pending) => measurements.measure(run.id, "event_persist", async () => {
-            if (pending.type === "turn.cancelled") {
-              await cancelProjectRun(identity, run.id).catch(() => undefined);
-              if (generalResourcesMode === "enforce") await cancelResourceRun(identity, run.id).catch(() => undefined);
+            if (pending.type === "turn.cancelled") await cancelProjectRun(identity, run.id).catch(() => undefined);
+            if (["turn.completed", "turn.failed", "turn.cancelled"].includes(pending.type) && generalResourcesMode === "enforce") {
+              resourceTerminal = true;
+              if (resourcePoll !== undefined) { clearInterval(resourcePoll); resourcePoll = undefined; }
+              if (resourceSync !== undefined) await resourceSync;
+              await cancelResourceRun(identity, run.id);
+              await syncResourceEvidence();
             }
             if (["turn.completed", "turn.failed", "turn.cancelled"].includes(pending.type)) {
               const children = await options.repository.listChildRuns?.(identity, run.id) ?? [];
@@ -448,7 +477,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           : createCloudEpisodicMemoryRuntime({ episodicMemory: options.repository.episodicMemory, identity, run, ensureActive });
         let toolCalls = 0;
         const chargeTool = (): void => {
-          if (toolCalls >= 24) throw new CloudError(409, "TOOL_TREE_LIMIT", "本轮及其子 Agent 已达到共享工具调用上限。");
+          if (toolCalls >= budget.maxToolCalls) throw new CloudError(409, "TOOL_TREE_LIMIT", "本轮及其子 Agent 已达到共享工具调用上限。");
           toolCalls++;
         };
         const orchestrationAvailable = identity.space.kind !== "public" && options.repository.acceptChildRun !== undefined && options.repository.listChildRuns !== undefined;
@@ -550,6 +579,11 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         const authorize: ToolAuthorization = async ({ tool, context, request }): Promise<boolean> => {
           const current = context.executionIdentity;
           if (current === undefined || !sameExecutionScope(identity, current) || current.authorizationId !== identity.authorizationId) return false;
+          if (tool.name === "task_plan") {
+            if (identity.space.kind === "public" || context.sessionId !== run.sessionId || context.turnId !== run.id || !current.permissions.includes("agent.use")) return false;
+            await ensureActive(identity, controller.signal);
+            return true;
+          }
           if (tool.name === "capability_search") {
             if (capabilitySearchTool === undefined || capabilityRoute === undefined ||
                 !capabilityRoute.canSearchReadonly() || !current.permissions.includes("agent.use")) return false;
@@ -633,7 +667,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                 span.end({ error, attributes: { "gen_ai.request.index": modelCalls } });
                 const diagnostic = error instanceof Error ? error.message : "non-error rejection";
                 process.stderr.write(`Model request failed: ${diagnostic.slice(0, 300)}\n`);
-                if (error instanceof CloudError && error.code === "MODEL_CALL_LIMIT") throw error;
+                if (error instanceof CloudError && (error.code === "MODEL_CALL_LIMIT" || error.code.startsWith("MODEL_ADMISSION_"))) throw error;
                 if (error instanceof CloudError && (
                   ["AUTHORIZATION_REVOKED", "AUTHENTICATION_REQUIRED", "APP_ACCESS_DENIED", "RUN_IDENTITY_MISMATCH"].includes(error.code) ||
                   (error.code === "PLATFORM_BRIDGE_REJECTED" && [401, 403].includes(error.statusCode))
@@ -660,8 +694,17 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           !isMemoryToolName(definition.name) && !isEpisodicMemoryToolName(definition.name)), { authorize });
         const orchestrationDefinitions = createCloudOrchestrationTools({ identity, repository: options.repository, parentRun: run,
           tools: childTools, systemPrompt: `${SYSTEM_PROMPT}\n\n应用规则：\n${profile.instructionsForTools?.(childTools.definitions().map(tool => tool.name)) ?? profile.instructions}${projectBindings.length ? "\n"+PROJECT_INSTRUCTIONS : ""}${resourceBindings.length ? "\n"+RESOURCE_INSTRUCTIONS : ""}`, signal: controller.signal,
-          remainingModelCalls: () => maxModelCalls - modelCalls, remainingTimeMs, chargeTool, createModel: createMeteredModel, ensureActive });
+          remainingModelCalls: () => maxModelCalls - modelCalls, remainingToolCalls: () => Math.max(0, budget.maxToolCalls - toolCalls), remainingTimeMs, chargeTool, createModel: createMeteredModel, ensureActive });
+        const taskPlanDefinition = identity.space.kind === "public" ? undefined : createTaskPlanTool({ events: stores.events,
+          ...(resourceBindings.length ? { validateEvidence: (reference, _context, signal) => validateResourceEvidence(identity, run, reference, signal) } : {}) });
+        const taskPlan = taskPlanDefinition === undefined ? undefined : { ...taskPlanDefinition,
+          execute: async (input: Parameters<ToolDefinition["execute"]>[0], signal: AbortSignal, context: Parameters<ToolDefinition["execute"]>[2]) => {
+            await ensureActive(identity, signal);
+            chargeTool();
+            return taskPlanDefinition.execute(input, signal, context);
+          } };
         const tools = new ToolRegistry([...wrappedDefinitions,
+          ...(taskPlan === undefined ? [] : [taskPlan]),
           ...(capabilitySearchTool === undefined ? [] : [capabilitySearchTool]),
           ...(videoConfirmationTool === undefined ? [] : [videoConfirmationTool]),
           ...orchestrationDefinitions], { authorize });
@@ -711,10 +754,20 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
                   (names.includes(VIDEO_CONFIRMATION_TOOL) ? `\n\n${VIDEO_CONFIRMATION_INSTRUCTIONS}` : "");
               } },
           ]),
-          maxSteps: Math.max(1, maxModelCalls - modelCalls), maxToolCalls: 24,
+          maxSteps: Math.max(1, maxModelCalls - modelCalls), maxToolCalls: budget.maxToolCalls,
           remainingModelCalls: () => Math.max(0, maxModelCalls - modelCalls),
+          remainingToolCalls: () => Math.max(0, budget.maxToolCalls - toolCalls),
+          ...(resourceBindings.length ? { executionState: () => syncResourceEvidence() } : {}),
           remainingTimeMs,
         });
+        if (resourceBindings.length > 0) {
+          resourcePoll = setInterval(() => {
+            if (resourceTerminal || controller.signal.aborted) return;
+            // Invalidation publishes committed facts only; it never schedules a model call.
+            void syncResourceEvidence().catch(() => undefined);
+          }, 1000);
+          resourcePoll.unref();
+        }
         preparingWorkspaceContext = resourceBindings.length > 0;
         const workspaceContext = resourceBindings.length ? await attachedWorkspaceContext(identity, run.sessionId, controller.signal) : undefined;
         preparingWorkspaceContext = false;
@@ -737,7 +790,16 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         // Cancellation may happen before AgentEngine starts. Still record its exact terminal state.
         try {
           const current = await options.repository.getRun(identity, run.id);
-          if (current.status === "running" && controller.signal.aborted) {
+          if (current.status === "running" && controller.signal.aborted && controller.signal.reason === "budget") {
+            if (generalResourcesMode === "enforce") await cancelResourceRun(identity, run.id).catch(() => undefined);
+            const stores = await options.repository.bindRun(identity, run.sessionId, run.id);
+            const fields = { accountId: stores.accountId, scopeId: stores.scopeId, sessionId: run.sessionId, turnId: run.id };
+            const message = "本轮执行时间额度已用尽，已保存进展，等待你继续；尚未完成的验证未报告通过。";
+            const history = await stores.events.read(run.sessionId);
+            if (!history.some(event => event.turnId === run.id && event.type === "turn.started")) await stores.events.append({ ...fields, type: "turn.started", payload: { status: "running", userMessageId: `msg_${randomUUID()}`, userMessage: run.userMessage } });
+            await stores.events.append({ ...fields, type: "assistant.delta", payload: { contentBlockId: `block_${randomUUID()}`, delta: message } });
+            await stores.events.append({ ...fields, type: "turn.completed", payload: { status: "completed", assistantMessageId: `msg_${randomUUID()}`, outcomeSummary: message, taskOutcome: "partial" } });
+          } else if (current.status === "running" && controller.signal.aborted) {
             const stores = await options.repository.bindRun(identity, run.sessionId, run.id);
             await stores.events.append({
               type: "turn.cancelled", accountId: stores.accountId, scopeId: stores.scopeId,
@@ -757,6 +819,10 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
           }
         } catch { storageFault = true; }
       } finally {
+        resourceTerminal = true;
+        if (resourcePoll !== undefined) clearInterval(resourcePoll);
+        // Finite operations belong to this run; settle actual receipts before dropping ownership.
+        if (generalResourcesMode === "enforce") await cancelResourceRun(identity, run.id).catch(() => undefined);
         // No admitted child is silently abandoned, even when initialization/storage fails before Engine starts.
         controller.abort("runtime");
         try {
@@ -777,17 +843,37 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     active.set(run.id, { controller, done });
   }
 
-  app.post<{ Params: { sessionId: string }; Body: { requestId: string; message: string; maxModelCalls?: number } }>("/api/v1/cloud/sessions/:sessionId/runs", {
+  app.post<{ Params: { sessionId: string }; Body: { requestId: string; message: string } & RunAdmission }>("/api/v1/cloud/sessions/:sessionId/runs", {
     schema: { params: sessionParams, body: { type: "object", required: ["requestId", "message"], additionalProperties: false,
-      properties: { requestId: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" }, message: { type: "string", minLength: 1, maxLength: 10_000 }, maxModelCalls: { type: "integer", minimum: 2, maximum: 12 } } } },
+      properties: { requestId: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" }, message: { type: "string", minLength: 1, maxLength: 10_000 },
+        maxModelCalls: { type: "integer", minimum: 1, maximum: 24 }, continueFromRunId: idSchema,
+        limits: { type: "object", additionalProperties: false, properties: {
+          maxModelCalls: { type: "integer", minimum: 1, maximum: 24 }, maxToolCalls: { type: "integer", minimum: 1, maximum: 96 },
+          maxActiveMs: { type: "integer", minimum: 1, maximum: 600_000 } } } } } },
   }, async (request, reply) => {
     const identity = identityFor(request);
     const selectedSession = await options.repository.getSession(identity, request.params.sessionId);
-    // Delivery retries must still find their original run when capacity is full or a profile changed.
+    const admission: RunAdmission = {
+      ...(request.body.limits === undefined ? {} : { limits: request.body.limits }),
+      ...(request.body.maxModelCalls === undefined ? {} : { maxModelCalls: request.body.maxModelCalls }),
+      ...(request.body.continueFromRunId === undefined ? {} : { continueFromRunId: request.body.continueFromRunId }),
+    };
+    const limits = requestedBudget(admission, runTimeoutMs);
     const previous = await options.repository.findRequest(identity, selectedSession.id, request.body.requestId);
     if (previous !== undefined) {
-      if (previous.userMessage !== request.body.message) throw new CloudError(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同消息。");
+      if (admissionHashInput(previous.userMessage, previous.admission ?? {}) !== admissionHashInput(request.body.message, admission)) {
+        throw new CloudError(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同消息或额度。");
+      }
       return reply.code(200).send({ run: previous, reused: true });
+    }
+    if (admission.continueFromRunId !== undefined) {
+      const source = await options.repository.getRun(identity, admission.continueFromRunId);
+      if (source.sessionId !== selectedSession.id) throw new CloudError(403, "CONTINUATION_SCOPE_MISMATCH", "只能继续当前会话的任务。");
+      if (source.status === "running") throw new CloudError(409, "CONTINUATION_BUSY", "原任务尚未结束。");
+      const latest = (await options.repository.listRuns(identity, selectedSession.id))[0];
+      if (latest?.id !== source.id) throw new CloudError(409, "CONTINUATION_STALE", "请继续当前会话最新任务，以免恢复过期目标。");
+      await ensureActive(identity, request.raw.aborted ? AbortSignal.abort() : new AbortController().signal);
+      if (generalResourcesMode === "enforce") await attachedWorkspaceContext(identity, selectedSession.id, AbortSignal.timeout(10_000));
     }
     const profile = await profileFor(identity);
     if (selectedSession.profileId !== profile.id || selectedSession.profileVersion !== profile.version) {
@@ -796,9 +882,22 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
     if (active.size + admissions >= maxConcurrentRuns) throw new CloudError(429, "RUN_CAPACITY", "当前执行容量已满，请查询已有任务或稍后重试。");
     admissions += 1;
     try {
-      const accepted = await options.repository.acceptRun(identity, selectedSession.id, request.body.requestId, request.body.message);
-      if (accepted.created) startRun(identity, profile, accepted.run, request.body.maxModelCalls);
-      return reply.code(accepted.created ? 202 : 200).send({ run: accepted.run, reused: !accepted.created });
+      const accepted = await options.repository.acceptRun(identity, selectedSession.id, request.body.requestId, request.body.message, admission);
+      if (!accepted.created) return reply.code(200).send({ run: accepted.run, reused: true });
+      if (options.bindExecutionBudget === undefined || options.repository.bindExecutionBudget === undefined) {
+        await options.repository.interruptRun(identity, accepted.run.id, "runtime_recovery");
+        throw new CloudError(503, "BUDGET_BINDING_UNAVAILABLE", "可信执行额度接口不可用，本轮未开始模型请求。");
+      }
+      let run: CloudRun;
+      try {
+        const effective = await options.bindExecutionBudget(identity, accepted.run, limits, AbortSignal.timeout(10_000));
+        run = await options.repository.bindExecutionBudget(identity, accepted.run.id, effective);
+      } catch (error) {
+        await options.repository.interruptRun(identity, accepted.run.id, "runtime_recovery");
+        throw error;
+      }
+      startRun(identity, profile, run);
+      return reply.code(202).send({ run, reused: false });
     } finally { admissions -= 1; }
   });
 

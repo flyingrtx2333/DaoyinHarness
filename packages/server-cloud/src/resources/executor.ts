@@ -12,6 +12,8 @@ import { ensureWorkspaceEgress, isolateExistingContainer } from "./workspace-net
 import type { ExecutorProcessRequest, ResolvedSecret } from "./contracts.js";
 import { assertFileVersion, fileBaseline, fileChange, fileDigest, fileMutation } from "./file-mutation.js";
 import { applyTextPatch, parseTextPatch } from "./text-patch.js";
+import { PROJECT_DECLARATIONS, VERSION_PROBES, environmentCacheKey } from "./environment.js";
+import { ProcessReceiptStore, receiptPage } from "./process-receipts.js";
 
 const ROOT = process.env.HARNESS_WORKSPACE_ROOT ?? "/var/lib/daoyin-resources/workspaces";
 const CONTENT_ROOT = process.env.HARNESS_CONTENT_STORE_ROOT ?? "/var/lib/daoyin-resources/content";
@@ -26,6 +28,7 @@ const EGRESS_SECRET = process.env.HARNESS_EGRESS_HMAC_SECRET ?? "";
 const IMAGE_CATALOG = JSON.parse(process.env.HARNESS_RUNTIME_IMAGES ?? "{}") as Record<string, { image: string; digest: string }>;
 const SANDBOX_PROBE = JSON.parse(process.env.HARNESS_SANDBOX_PROBE ?? "null") as { imageId?: string; executable?: string; args?: string[] } | null;
 const content = await FileContentStore.open(CONTENT_ROOT);
+const receipts = new ProcessReceiptStore(path.join(CONTENT_ROOT, "process-receipts"));
 const processes = new Map<string, { workspaceId: string; name: string; mode: "background" | "pty"; startedAt: string; timeoutAt: number }>();
 
 async function processSession(workspaceId: string, processId: string): Promise<{ workspaceId: string; name: string; mode: "background" | "pty"; startedAt: string; timeoutAt: number }> {
@@ -65,13 +68,16 @@ async function reconcileProcessSecrets(): Promise<void> {
     if (item.isDirectory() && /^hr-(?:run-|prc_)/u.test(item.name) && !live.has(item.name)) await cleanupSecrets(item.name);
   }
 }
+let processSweep: Promise<void> | undefined;
 async function enforceProcessTimeouts(): Promise<void> {
-  const now = Date.now();
-  for (const [processId, session] of processes) if (session.timeoutAt > 0 && now >= session.timeoutAt) {
-    if (await removeSandboxContainer(session.name)) {
-      processes.delete(processId); await cleanupSecrets(session.name);
-    } else console.error(`Timed out sandbox could not be removed: ${processId}`);
-  }
+  if (processSweep) return processSweep;
+  processSweep = (async () => {
+    for (const [processId, session] of processes) {
+      await dispatchSerialized({ action: "process", operation: "read", workspaceId: session.workspaceId, processId })
+        .catch(() => { console.error(`Process evidence could not be retained: ${processId}`); });
+    }
+  })();
+  try { await processSweep; } finally { processSweep = undefined; }
 }
 
 function workspaceRoot(workspaceId: string): string {
@@ -110,19 +116,34 @@ async function safePath(workspaceId: string, relative: string, forCreation = fal
   return candidate;
 }
 
-async function saveRuntime(workspaceId: string, spec: RuntimeSpec): Promise<void> {
-  const directory = path.join(workspaceRoot(workspaceId), ".harness");
-  await mkdir(directory, { recursive: true, mode: 0o711 });
-  await chmod(directory, 0o711);
-  await writeFile(path.join(directory, "runtime.json"), JSON.stringify(spec), { mode: 0o600 });
-  await chown(directory, 0, 0); await chown(path.join(directory, "runtime.json"), 0, 0);
+async function runtimeDirectory(workspaceId: string, segments: readonly string[], userOwned = false): Promise<string> {
+  let target = workspaceRoot(workspaceId);
+  for (const segment of [".harness", ...segments]) {
+    target = path.join(target, segment);
+    await mkdir(target, { mode: 0o711 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
+    const info = await lstat(target);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new ResourceError("WORKSPACE_RUNTIME_PATH_INVALID", "Runtime directories cannot be replaced by links or files.", 403);
+  }
+  await chmod(target, userOwned ? 0o700 : 0o711); await chown(target, userOwned ? 1000 : 0, userOwned ? 1000 : 0);
+  return target;
 }
 
-async function ensureWorkspaceRuntimeDirectories(workspaceId: string): Promise<void> {
-  const directory = path.join(workspaceRoot(workspaceId), ".harness");
-  await mkdir(directory, { recursive: true, mode: 0o711 }); await chmod(directory, 0o711); await chown(directory, 0, 0);
+async function saveRuntime(workspaceId: string, spec: RuntimeSpec): Promise<void> {
+  const directory = await runtimeDirectory(workspaceId, []);
+  const target = path.join(directory, "runtime.json");
+  const existing = await lstat(target).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+  if (existing && (!existing.isFile() || existing.isSymbolicLink())) throw new ResourceError("WORKSPACE_RUNTIME_PATH_INVALID", "Runtime metadata cannot be a link.", 403);
+  const temporary = path.join(directory, `runtime-${randomBytes(8).toString("hex")}.pending`);
+  await writeFile(temporary, JSON.stringify(spec), { mode: 0o600, flag: "wx" }); await rename(temporary, target);
+  await chown(target, 0, 0);
+}
+
+async function ensureWorkspaceRuntimeDirectories(workspaceId: string, cacheKey: string): Promise<void> {
+  await runtimeDirectory(workspaceId, []);
+  await runtimeDirectory(workspaceId, ["environments"]);
+  await runtimeDirectory(workspaceId, ["environments", cacheKey]);
   for (const name of ["home", "cache", "python-user", "npm-global", "cargo", "go"]) {
-    const target = path.join(directory, name); await mkdir(target, { recursive: true, mode: 0o700 }); await chmod(target, 0o700); await chown(target, 1000, 1000);
+    await runtimeDirectory(workspaceId, ["environments", cacheKey, name], true);
   }
 }
 
@@ -145,12 +166,17 @@ async function ensureWorkspaceStorage(workspaceId: string, diskMiB: number): Pro
 }
 
 async function loadRuntime(workspaceId: string): Promise<RuntimeSpec> {
-  const value = JSON.parse(await readFile(path.join(workspaceRoot(workspaceId), ".harness", "runtime.json"), "utf8")) as RuntimeSpec;
-  image(value); return value;
+  const directory = path.join(workspaceRoot(workspaceId), ".harness"); const target = path.join(directory, "runtime.json");
+  const directoryInfo = await lstat(directory); const info = await lstat(target);
+  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink() || !info.isFile() || info.isSymbolicLink())
+    throw new ResourceError("WORKSPACE_RUNTIME_PATH_INVALID", "Runtime metadata paths cannot be links.", 403);
+  const value = JSON.parse(await readFile(target, "utf8")) as RuntimeSpec;
+  assertRuntimeSpec(value); image(value); return value;
 }
 
-async function run(executable: string, args: string[], timeoutMs: number, input?: string, maximumBytes = 1_000_000): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
+async function run(executable: string, args: string[], timeoutMs: number, input?: string, maximumBytes = 1_000_000, signal?: AbortSignal): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     const child = spawn(executable, args, { shell: false, stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", HOME: "/nonexistent", LANG: "C.UTF-8" } });
     let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0); let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0); let timedOut = false; let exceeded = false;
     const append = (current: Buffer<ArrayBufferLike>, chunk: Buffer<ArrayBufferLike>): Buffer<ArrayBufferLike> => {
@@ -159,15 +185,16 @@ async function run(executable: string, args: string[], timeoutMs: number, input?
     };
     child.stdout.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk); });
     child.stderr.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk); });
+    const abort = (): void => { child.kill("SIGKILL"); }; signal?.addEventListener("abort", abort, { once: true });
     child.once("error", reject);
     const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
-    child.once("close", code => { clearTimeout(timer); if (exceeded) reject(new ResourceError("PROCESS_OUTPUT_LIMIT", "Process output exceeded its limit.", 422)); else resolve({ exitCode: code ?? 1, stdout: stdout.toString(), stderr: stderr.toString(), timedOut }); });
+    child.once("close", code => { clearTimeout(timer); signal?.removeEventListener("abort", abort); if (exceeded) reject(new ResourceError("PROCESS_OUTPUT_LIMIT", "Process output exceeded its limit.", 422)); else resolve({ exitCode: code ?? 1, stdout: stdout.toString(), stderr: stderr.toString(), timedOut }); });
     if (input !== undefined) child.stdin.end(input); else child.stdin.end();
   });
 }
 
-async function docker(args: string[], timeoutMs = 30_000, input?: string, maximumBytes?: number): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
-  return run("/usr/bin/docker", args, timeoutMs, input, maximumBytes);
+async function docker(args: string[], timeoutMs = 30_000, input?: string, maximumBytes?: number, signal?: AbortSignal): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
+  return run("/usr/bin/docker", args, timeoutMs, input, maximumBytes, signal);
 }
 
 async function removeSandboxContainer(name: string): Promise<boolean> {
@@ -283,22 +310,30 @@ async function redactSecretOutput(name: string, value: string): Promise<string> 
       if (secret) result = result.replaceAll(secret, "[REDACTED_SECRET]");
     }
   } catch { /* No secret material was mounted. */ }
-  return result;
+  return result.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/giu, "$1[REDACTED_CREDENTIALS]@");
 }
 
 async function commonArgs(workspaceId: string, spec: RuntimeSpec, name: string, runId = "system"): Promise<string[]> {
   const root = workspaceRoot(workspaceId); const egress = spec.network === "public" ? await egressArguments(workspaceId, runId, spec.limits.timeoutSeconds) : null;
-  await ensureWorkspaceRuntimeDirectories(workspaceId);
+  const declarations = await projectDeclarations(workspaceId);
+  const digest = spec.image.kind === "builtin" ? spec.image.digest : spec.image.imageDigest!;
+  const cacheKey = environmentCacheKey(digest, declarations);
+  await ensureWorkspaceRuntimeDirectories(workspaceId, cacheKey);
+  const environmentRoot = `/workspace/.harness/environments/${cacheKey}`;
+  const environmentHostRoot = path.join(root, ".harness", "environments", cacheKey);
   return ["run", "--runtime", RUNTIME, "--name", name, "--label", "daoyin.harness.resource=1", "--label", `daoyin.harness.workspace=${workspaceId}`,
     "--network", egress?.networkName ?? "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
     "--memory", `${spec.limits.memoryMiB}m`, "--memory-swap", `${spec.limits.memoryMiB}m`, "--cpus", String(spec.limits.cpu), "--pids-limit", String(spec.limits.pids),
     "--ulimit", "nofile=2048:2048", "--log-driver", "local", "--log-opt", "max-size=4m", "--log-opt", "max-file=3",
-    "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777", "--mount", `type=bind,src=${root},dst=/workspace`, "--workdir", "/workspace",
-    "--env", "HOME=/workspace/.harness/home", "--env", "XDG_CACHE_HOME=/workspace/.harness/cache",
-    "--env", "PYTHONUSERBASE=/workspace/.harness/python-user", "--env", "PIP_CACHE_DIR=/workspace/.harness/cache/pip",
-    "--env", "NPM_CONFIG_CACHE=/workspace/.harness/cache/npm", "--env", "NPM_CONFIG_PREFIX=/workspace/.harness/npm-global",
-    "--env", "CARGO_HOME=/workspace/.harness/cargo", "--env", "GOPATH=/workspace/.harness/go", "--env", "GOMODCACHE=/workspace/.harness/go/pkg/mod",
-    "--env", "PATH=/workspace/.harness/python-user/bin:/workspace/.harness/npm-global/bin:/workspace/.harness/cargo/bin:/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777", "--mount", `type=bind,src=${root},dst=/workspace`,
+    "--mount", `type=bind,src=${path.join(root, ".harness")},dst=/workspace/.harness,readonly`,
+    ...["home", "cache", "python-user", "npm-global", "cargo", "go"].flatMap(name => ["--mount", `type=bind,src=${path.join(environmentHostRoot,name)},dst=${environmentRoot}/${name}`]),
+    "--workdir", "/workspace",
+    "--env", `HOME=${environmentRoot}/home`, "--env", `XDG_CACHE_HOME=${environmentRoot}/cache`,
+    "--env", `PYTHONUSERBASE=${environmentRoot}/python-user`, "--env", `PIP_CACHE_DIR=${environmentRoot}/cache/pip`,
+    "--env", `NPM_CONFIG_CACHE=${environmentRoot}/cache/npm`, "--env", `NPM_CONFIG_PREFIX=${environmentRoot}/npm-global`,
+    "--env", `CARGO_HOME=${environmentRoot}/cargo`, "--env", `GOPATH=${environmentRoot}/go`, "--env", `GOMODCACHE=${environmentRoot}/go/pkg/mod`,
+    "--env", `PATH=${environmentRoot}/python-user/bin:${environmentRoot}/npm-global/bin:${environmentRoot}/cargo/bin:/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
     "--env", "CI=1", "--env", "NO_COLOR=1",
     ...(egress?.args ?? []),
     ...safeEnvironment(spec.environment)];
@@ -354,7 +389,7 @@ function runtimeFrom(request: ExecutorProcessRequest): RuntimeSpec {
   image(request.runtime); return request.runtime;
 }
 
-async function prepare(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
+async function prepare(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const workspaceId = request.workspaceId!; assertResourceId(workspaceId, "wsp"); const root = workspaceRoot(workspaceId);
   if (request.operation === "snapshot") return { entries: await scan(workspaceId) };
   if (request.operation === "set_runtime") { await saveRuntime(workspaceId, runtimeFrom(request)); return { runtimeUpdated: true }; }
@@ -374,7 +409,7 @@ async function prepare(request: ExecutorProcessRequest): Promise<Record<string, 
           ? { executable: "tar", args: [request.mediaType === "application/x-tar" ? "-xf" : "-xzf", `/workspace/${path.basename(archive)}`, "-C", "/workspace"] }
           : undefined;
       if (!command) throw new ResourceError("WORKSPACE_UPLOAD_TYPE_DENIED", "Uploaded workspace package must be zip, tar or tar.gz.", 422);
-      const extracted = await foreground(workspaceId, spec, command.executable, command.args, ".", undefined, 120_000, undefined, request.runId);
+      const extracted = await foreground(workspaceId, spec, command.executable, command.args, ".", undefined, 120_000, undefined, request.runId, undefined, signal);
       if (extracted.exitCode !== 0) throw new ResourceError("WORKSPACE_UPLOAD_EXTRACT_FAILED", extracted.stderr.slice(-2000) || "Uploaded workspace package could not be extracted.", 422);
     } finally { await rm(archive, { force: true }); }
     await rm(path.join(root, ".harness"), { recursive: true, force: true });
@@ -426,7 +461,7 @@ async function atomicFileWrite(target: string, data: Buffer, existing: boolean):
   } finally { await rm(temporary, { force: true }); }
 }
 
-async function fileOperation(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
+async function fileOperation(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const workspaceId = request.workspaceId!; const operation = request.operation ?? "";
   if (operation === "list") {
     const root = request.path ? await safePath(workspaceId, request.path) : workspaceRoot(workspaceId);
@@ -509,7 +544,7 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
     const args = request.searchMode === "glob"
       ? ["--files", "-g", request.query, ...(request.glob ? ["-g", request.glob] : []), "--", request.path ?? "."]
       : ["--json", "--max-count", "200", "--max-columns", "500", ...(request.searchMode === "literal" ? ["-F"] : []), ...(request.glob ? ["-g", request.glob] : []), "--", request.query, request.path ?? "."];
-    const result = await foreground(workspaceId, spec, "rg", args, ".", undefined, 30_000, undefined, request.runId);
+    const result = await foreground(workspaceId, spec, "rg", args, ".", undefined, 30_000, undefined, request.runId, undefined, signal);
     if (result.exitCode !== 0 && result.exitCode !== 1) throw new ResourceError("FILE_SEARCH_FAILED", result.stderr.slice(-2000), 422);
     if (request.searchMode === "glob") return { paths: result.stdout.split("\n").filter(Boolean).slice(0, 500) };
     return { matches: result.stdout.split("\n").filter(Boolean).slice(0, 500).map(line => JSON.parse(line) as unknown) };
@@ -517,14 +552,15 @@ async function fileOperation(request: ExecutorProcessRequest): Promise<Record<st
   throw new ResourceError("FILE_OPERATION_DENIED", "File operation is not allowed.", 403);
 }
 
-async function foreground(workspaceId: string, spec: RuntimeSpec, executable: string, args: string[], cwd = ".", stdin?: string, timeoutMs?: number, environment?: Record<string, string>, runId = "system", secretValues?: ResolvedSecret[]): Promise<Record<string, unknown> & { exitCode: number; stdout: string; stderr: string }> {
+async function foreground(workspaceId: string, spec: RuntimeSpec, executable: string, args: string[], cwd = ".", stdin?: string, timeoutMs?: number, environment?: Record<string, string>, runId = "system", secretValues?: ResolvedSecret[], signal?: AbortSignal): Promise<Record<string, unknown> & { exitCode: number; stdout: string; stderr: string }> {
   assertProcessInput(executable, args);
   cwd = assertProcessCwd(cwd);
   const name = `hr-run-${workspaceId.slice(4, 16)}-${randomBytes(4).toString("hex")}`;
   const secrets = await secretArguments(name, spec.secretRefs, secretValues);
   try {
     const command = [...await commonArgs(workspaceId, spec, name, runId), "--rm", ...secrets, ...safeEnvironment(environment), "--workdir", `/workspace/${cwd === "." ? "" : cwd}`, "-i", image(spec), executable, ...args];
-    const result = await docker(command, Math.min(timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000), stdin, spec.limits.maxOutputBytes);
+    const result = await docker(command, Math.min(timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000), stdin, spec.limits.maxOutputBytes, signal);
+    signal?.throwIfAborted();
     if (result.timedOut) throw new ResourceError("PROCESS_TIMEOUT", "Process exceeded its execution timeout and was terminated.", 408);
     assertSandboxStarted(result);
     return { ...result, stdout: await redactSecretOutput(name, result.stdout), stderr: await redactSecretOutput(name, result.stderr),
@@ -535,7 +571,7 @@ async function foreground(workspaceId: string, spec: RuntimeSpec, executable: st
   }
 }
 
-async function gitOperation(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
+async function gitOperation(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const workspaceId = request.workspaceId!; const spec = await loadRuntime(workspaceId); const operation = request.operation ?? "";
   const commands: Record<string, string[]> = {
     status: ["status", "--short", "--branch"], diff: ["diff", "--no-ext-diff", "--no-textconv", ...(request.revision ? [request.revision] : [])],
@@ -545,67 +581,152 @@ async function gitOperation(request: ExecutorProcessRequest): Promise<Record<str
   };
   const args = commands[operation]; if (!args) throw new ResourceError("GIT_OPERATION_DENIED", "Git operation is not allowed.", 403);
   if (operation === "commit") {
-    const staged = await foreground(workspaceId, spec, "git", ["add", "-A"], ".", undefined, 120_000, undefined, request.runId);
+    const staged = await foreground(workspaceId, spec, "git", ["add", "-A"], ".", undefined, 120_000, undefined, request.runId, undefined, signal);
     if (staged.exitCode !== 0) throw new ResourceError("GIT_OPERATION_FAILED", staged.stderr.slice(-2000) || "Git changes could not be staged.", 422);
   }
-  const result = await foreground(workspaceId, spec, "git", args, ".", undefined, 120_000, undefined, request.runId);
+  const result = await foreground(workspaceId, spec, "git", args, ".", undefined, 120_000, undefined, request.runId, undefined, signal);
   if (result.exitCode !== 0) throw new ResourceError("GIT_OPERATION_FAILED", result.stderr.slice(-2000) || "Git operation failed.", 422);
   return operation === "export_patch" ? { content: result.stdout } : result;
 }
 
-async function processOperation(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
+async function projectDeclarations(workspaceId: string): Promise<Array<{ path: string; digest: string; size: number; content: string; truncated: boolean }>> {
+  const result: Array<{ path: string; digest: string; size: number; content: string; truncated: boolean }> = [];
+  let remaining = 64 * 1024;
+  for (const name of PROJECT_DECLARATIONS) {
+    let target: string;
+    try { target = await safePath(workspaceId, name); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+    const info = await lstat(target);
+    if (!info.isFile() || info.size > 16 * 1024 * 1024) continue;
+    const bytes = await readFile(target); const maximum = Math.min(remaining, 8192);
+    const preview = bytes.subarray(0, maximum); remaining -= preview.byteLength;
+    result.push({ path: name, digest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+      size: bytes.byteLength, content: preview.toString("utf8"), truncated: preview.byteLength < bytes.byteLength });
+  }
+  return result;
+}
+async function environmentInspect(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const workspaceId = request.workspaceId!; const spec = await loadRuntime(workspaceId);
+  const declarations = await projectDeclarations(workspaceId);
+  const interpreters: Array<Record<string, unknown>> = [];
+  for (const executable of VERSION_PROBES) {
+    signal?.throwIfAborted();
+    try {
+      const probe = await foreground(workspaceId, { ...spec, network: "none", secretRefs: [] }, executable,
+        [executable === "go" ? "version" : "--version"], ".", undefined, 3000, undefined, request.runId, undefined, signal);
+      interpreters.push({ executable, available: probe.exitCode === 0, exitCode: probe.exitCode,
+        output: String(probe.stdout + probe.stderr).slice(0, 2048) });
+    } catch (error) { interpreters.push({ executable, available: false, code: error instanceof ResourceError ? error.code : "PROBE_FAILED" }); }
+  }
+  const imageDigest = spec.image.kind === "builtin" ? spec.image.digest : spec.image.imageDigest!;
+  return { runtime: spec, interpreters, declarations, cacheKey: environmentCacheKey(imageDigest, declarations),
+    uncertainty: "Declarations are bounded data, not executed configuration or proof of dependency compatibility." };
+}
+
+async function processOperation(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const workspaceId = request.workspaceId!; const operation = request.operation ?? ""; const spec = await loadRuntime(workspaceId);
-  if (operation === "run") return foreground(workspaceId, spec, request.executable ?? "", request.args ?? [], request.cwd, request.stdin, request.timeoutMs, request.environment, request.runId, request.secretValues);
+  if (operation === "run") return foreground(workspaceId, spec, request.executable ?? "", request.args ?? [], request.cwd, request.stdin, request.timeoutMs, request.environment, request.runId, request.secretValues, signal);
   if (operation === "start") {
     if (request.mode !== "background" && request.mode !== "pty") throw new ResourceError("PROCESS_MODE_INVALID", "Background or PTY mode is required.");
     assertProcessInput(request.executable ?? "", request.args ?? []);
+    if (request.timeoutMs !== undefined && (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 100 || request.timeoutMs > 3_600_000))
+      throw new ResourceError("PROCESS_TIMEOUT_INVALID", "Process lifetime must be between 100 and 3600000 milliseconds.");
     const cwd = assertProcessCwd(request.cwd);
-    const processId = `prc_${randomBytes(12).toString("hex")}`; const name = `hr-${processId}`;
+    const processId = request.processId ?? `prc_${randomBytes(12).toString("hex")}`; assertResourceId(processId, "prc");
+    const name = `hr-${processId}`;
+    if (await receipts.read(workspaceId, processId)) throw new ResourceError("PROCESS_ALREADY_STARTED", "This process already has a durable receipt; startup was not replayed.", 409);
+    const existing = await docker(["inspect", "--format", "{{.Id}}", name], 10_000, undefined, 2000);
+    if (existing.exitCode === 0) throw new ResourceError("PROCESS_ALREADY_STARTED", "This process identity already exists; startup was not replayed.", 409);
     const startedAt = new Date().toISOString();
     const timeoutAt = Date.now() + Math.min(request.timeoutMs ?? spec.limits.timeoutSeconds * 1000, spec.limits.timeoutSeconds * 1000);
     const secrets = await secretArguments(name, spec.secretRefs, request.secretValues);
-    const args = [...await commonArgs(workspaceId, spec, name, request.runId), "-d", "--label", `daoyin.harness.process=${processId}`,
+    const containerArgs = await commonArgs(workspaceId, spec, name, request.runId);
+    signal?.throwIfAborted();
+    const hasStdin = typeof request.stdin === "string";
+    if (hasStdin) containerArgs[0] = "create";
+    const args = [...containerArgs, ...(hasStdin ? ["-i"] : ["-d"]), "--label", `daoyin.harness.process=${processId}`,
       "--label", `daoyin.harness.mode=${request.mode}`, "--label", `daoyin.harness.started_at=${startedAt}`,
       "--label", `daoyin.harness.timeout_at=${String(timeoutAt)}`,
       ...(request.mode === "pty" ? ["-i", "-t"] : []), ...secrets, ...safeEnvironment(request.environment),
       "--workdir", `/workspace/${cwd !== "." ? cwd : ""}`, image(spec), request.executable ?? "", ...(request.args ?? [])];
     const result = await docker(args, 30_000); if (result.exitCode !== 0) { await cleanupSecrets(name); throw new ResourceError("PROCESS_START_FAILED", result.stderr.slice(-2000), 422); }
     processes.set(processId, { workspaceId, name, mode: request.mode, startedAt, timeoutAt });
+    if (hasStdin) {
+      // Docker create + one attached start feeds finite input without a shell
+      // wrapper or a second command launch. Daemon logs remain authoritative.
+      const attached = spawn("/usr/bin/docker", ["start", "--attach", "--interactive", name], {
+        shell: false, stdio: ["pipe", "ignore", "ignore"], env: { PATH: "/usr/bin:/bin", HOME: "/nonexistent", LANG: "C.UTF-8" },
+      });
+      attached.stdin.on("error", () => undefined);
+      attached.stdin.end(request.stdin);
+      attached.on("error", () => { console.error(`Tracked process attach failed: ${processId}`); });
+      const timer = setTimeout(() => attached.kill("SIGKILL"), Math.max(1, timeoutAt - Date.now()) + 5000);
+      timer.unref(); attached.once("close", () => clearTimeout(timer));
+      // Observe the same container; never retry its start if acknowledgement is
+      // delayed. A created state is retained for subsequent read/stop evidence.
+      const launchDeadline = Date.now() + 3000;
+      do {
+        const state = await docker(["inspect", "--format", "{{.State.Status}}", name], 2000, undefined, 2000);
+        if (state.exitCode === 0 && state.stdout.trim() !== "created") break;
+        await delay(100);
+      } while (Date.now() < launchDeadline);
+    }
+    if (signal?.aborted) return processOperation({ ...request, operation: "stop", processId }, undefined);
     return { processId, status: "running", mode: request.mode, timeoutAt: new Date(timeoutAt).toISOString() };
   }
-  if (operation === "read") {
-    const processId = request.processId ?? ""; const session = await processSession(workspaceId, processId);
-    if (session.timeoutAt > 0 && Date.now() >= session.timeoutAt) {
-      if (!(await removeSandboxContainer(session.name))) throw new ResourceError("PROCESS_CLEANUP_FAILED", "Timed out process container could not be terminated.", 503);
-      processes.delete(processId);
-      await cleanupSecrets(session.name);
-      return { processId, output: "", cursor: request.cursor ?? 0, truncated: false, state: "timed_out", exitCode: null };
+  if (operation === "read" || operation === "stop") {
+    if (request.cursor !== undefined && (!Number.isSafeInteger(request.cursor) || request.cursor < 0))
+      throw new ResourceError("PROCESS_CURSOR_INVALID", "Process cursor must be a nonnegative integer.");
+    const processId = request.processId ?? "";
+    const saved = await receipts.read(workspaceId, processId);
+    if (saved) {
+      const pending = processes.get(processId);
+      if (pending?.workspaceId === workspaceId && await removeSandboxContainer(pending.name)) {
+        processes.delete(processId); await cleanupSecrets(pending.name);
+      }
+      return { ...receiptPage(saved, request.cursor), cleanupPending: processes.has(processId) };
     }
-    const result = await docker(["logs", session.name], 20_000, undefined, 16_000_000);
-    if (result.exitCode !== 0 || result.timedOut)
-      throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Process output could not be observed; the process was not restarted.", 503);
-    const inspect = await docker(["inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", session.name], 10_000);
-    if (inspect.exitCode !== 0 || inspect.timedOut)
-      throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Process state could not be observed; the process was not restarted.", 503);
-    const all = Buffer.from(result.stdout + result.stderr); const requested = Math.max(0, request.cursor ?? 0);
-    const start = Math.min(requested, all.byteLength); const maximum = 1_000_000; const end = Math.min(all.byteLength, start + maximum);
-    const [state = "", exit = ""] = inspect.stdout.trim().split(/\s+/u);
-    if (!["created", "running", "paused", "restarting", "removing", "exited", "dead"].includes(state) || !/^\d+$/u.test(exit))
-      throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Process state response is incomplete; no terminal result was established.", 503);
-    const output = await redactSecretOutput(session.name, all.subarray(start, end).toString("utf8"));
-    if (["exited", "dead"].includes(state)) await cleanupSecrets(session.name);
-    return { processId, output, cursor: end,
-      truncated: end < all.byteLength, state, exitCode: state === "exited" ? Number(exit) : null };
+    const session = await processSession(workspaceId, processId);
+    let inspected = await docker(["inspect", "--format", "{{json .State}}", session.name], 10_000);
+    if (inspected.exitCode !== 0 || inspected.timedOut) throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Original process state could not be observed; it was not restarted.", 503);
+    const initial = JSON.parse(inspected.stdout) as { Status?: string };
+    const active = !["exited", "dead"].includes(initial.Status ?? "");
+    const timedOut = active && session.timeoutAt > 0 && Date.now() >= session.timeoutAt;
+    const cancelled = active && operation === "stop";
+    if (timedOut || cancelled) {
+      const stopped = await docker(["stop", "--time", "2", session.name], 15_000, undefined, 20_000);
+      if (stopped.exitCode !== 0 || stopped.timedOut) throw new ResourceError("PROCESS_STOP_FAILED", "Process could not be stopped; evidence and container were retained.", 503);
+    }
+    if (timedOut || cancelled) inspected = await docker(["inspect", "--format", "{{json .State}}", session.name], 10_000);
+    if (inspected.exitCode !== 0 || inspected.timedOut) throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Stopped process state could not be retained.", 503);
+    const state = JSON.parse(inspected.stdout) as { Status?: string; ExitCode?: number; FinishedAt?: string };
+    if (!state.Status || !Number.isSafeInteger(state.ExitCode)) throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Process state is incomplete.", 503);
+    const logs = await docker(["logs", session.name], 20_000, undefined, 16_000_000);
+    if (logs.exitCode !== 0 || logs.timedOut) throw new ResourceError("PROCESS_OBSERVATION_FAILED", "Original process output could not be retained; cleanup was deferred.", 503);
+    const redacted = Buffer.from(await redactSecretOutput(session.name, logs.stdout + logs.stderr));
+    const limited = redacted.subarray(0, spec.limits.maxOutputBytes);
+    const terminal = ["exited", "dead"].includes(state.Status);
+    if (terminal) {
+      const receipt = await receipts.save({ processId, workspaceId,
+        state: timedOut ? "timed_out" : cancelled ? "cancelled" : state.Status,
+        exitCode: typeof state.ExitCode === "number" ? state.ExitCode : null,
+        output: limited.toString("utf8"), cursor: limited.byteLength, truncated: limited.byteLength < redacted.byteLength,
+        startedAt: session.startedAt, finishedAt: state.FinishedAt ?? null, timeoutAt: new Date(session.timeoutAt).toISOString() });
+      // Canonical receipt exists before either the Docker logs or mounted secret
+      // values disappear. A lost control response is observed, never replayed.
+      const cleaned = await removeSandboxContainer(session.name);
+      if (cleaned) { processes.delete(processId); await cleanupSecrets(session.name); }
+      return { ...receiptPage(receipt, request.cursor), cleanupPending: !cleaned };
+    }
+    const start = Math.min(Math.max(0, request.cursor ?? 0), limited.byteLength);
+    return { processId, output: limited.subarray(start).toString("utf8"), cursor: limited.byteLength,
+      truncated: limited.byteLength < redacted.byteLength, state: state.Status, exitCode: null,
+      startedAt: session.startedAt, timeoutAt: new Date(session.timeoutAt).toISOString(), finishedAt: null };
   }
   if (operation === "write") {
     const processId = request.processId ?? ""; const session = await processSession(workspaceId, processId); if (session.mode !== "pty") throw new ResourceError("PROCESS_PTY_REQUIRED", "A running PTY process is required.", 409);
     const result = await docker(["attach", "--sig-proxy=false", "--detach-keys", "ctrl-]", session.name], 10_000, `${request.stdin ?? ""}\x1d`, 100_000);
     return { processId, accepted: !result.timedOut && result.exitCode === 0 };
-  }
-  if (operation === "stop") {
-    const processId = request.processId ?? ""; const session = await processSession(workspaceId, processId);
-    if (!(await removeSandboxContainer(session.name))) throw new ResourceError("PROCESS_STOP_FAILED", "Process container could not be terminated.", 503);
-    processes.delete(processId); await cleanupSecrets(session.name); return { processId, status: "cancelled" };
   }
   if (operation === "list") return { processes: [...processes.entries()].filter(([, value]) => value.workspaceId === workspaceId).map(([processId, value]) => ({ processId, mode: value.mode, startedAt: value.startedAt, timeoutAt: new Date(value.timeoutAt).toISOString() })) };
   throw new ResourceError("PROCESS_OPERATION_DENIED", "Process operation is not allowed.", 403);
@@ -634,49 +755,51 @@ async function readiness(): Promise<Record<string, unknown>> {
   return { ready: true, runtime: RUNTIME, publicNetwork: "controlled", images: Object.keys(IMAGE_CATALOG) };
 }
 
-async function dispatch(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
+async function dispatch(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  signal?.throwIfAborted();
   if (request.action === "readiness") return readiness();
-  if (request.action === "reconcile") { await reconcileProcesses(); return { processes: [...processes.keys()] }; }
+  if (request.action === "reconcile") { await reconcileProcesses(); await enforceProcessTimeouts(); return { processes: [...processes.keys()] }; }
   if (!request.workspaceId) throw new ResourceError("WORKSPACE_REQUIRED", "Workspace is required.");
-  if (request.action === "workspace_prepare") return withPausedWorkspaceProcesses(request.workspaceId, () => prepare(request));
+  if (request.action === "workspace_prepare") return withPausedWorkspaceProcesses(request.workspaceId, () => prepare(request, signal));
   if (request.action === "workspace_remove") {
     const root = workspaceRoot(request.workspaceId); const imageFile = path.join(DISK_ROOT, `${request.workspaceId}.ext4`);
     await run("/usr/bin/umount", [root], 30_000, undefined, 20_000).catch(() => undefined);
     await rm(root, { recursive: true, force: true }); await rm(imageFile, { force: true }); return { removed: true };
   }
+  if (request.action === "environment") return withPausedWorkspaceProcesses(request.workspaceId, () => environmentInspect(request, signal));
   if (request.action === "image_import") return importImage(request);
-  if (request.action === "file") return withPausedWorkspaceProcesses(request.workspaceId, () => fileOperation(request));
-  if (request.action === "git") return withPausedWorkspaceProcesses(request.workspaceId, () => gitOperation(request));
-  if (request.action === "process") return processOperation(request);
+  if (request.action === "file") return withPausedWorkspaceProcesses(request.workspaceId, () => fileOperation(request, signal));
+  if (request.action === "git") return withPausedWorkspaceProcesses(request.workspaceId, () => gitOperation(request, signal));
+  if (request.action === "process") return processOperation(request, signal);
   throw new ResourceError("EXECUTOR_ACTION_DENIED", "Executor operation is not allowed.", 403);
 }
 
-async function readProcessWithWait(request: ExecutorProcessRequest, waitMs: number): Promise<Record<string, unknown>> {
+async function readProcessWithWait(request: ExecutorProcessRequest, waitMs: number, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const started = performance.now();
   const deadline = started + waitMs;
   while (true) {
     // Each observation joins the normal workspace queue; sleeping between
     // observations must not hold it and block edits or process_stop.
-    const result = await dispatchSerialized({ ...request, waitMs: 0 });
+    const result = await dispatchSerialized({ ...request, waitMs: 0 }, signal);
     const remaining = deadline - performance.now();
     if ((typeof result.output === "string" && result.output.length > 0) ||
         !["running", "created", "restarting", "paused"].includes(String(result.state)) || remaining <= 0) {
       return { ...result, observation: { waitMs, elapsedMs: Math.round(performance.now() - started) } };
     }
-    await delay(Math.min(500, remaining));
+    await delay(Math.min(500, remaining), undefined, { signal });
   }
 }
 
-function dispatchSerialized(request: ExecutorProcessRequest): Promise<Record<string, unknown>> {
+function dispatchSerialized(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
   if (request.action === "process" && request.operation === "read") {
     const waitMs = request.waitMs ?? 0;
     if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 30_000)
       throw new ResourceError("PROCESS_WAIT_INVALID", "Process observation wait must be an integer between 0 and 30000 milliseconds.");
-    if (waitMs > 0) return readProcessWithWait(request, waitMs);
+    if (waitMs > 0) return readProcessWithWait(request, waitMs, signal);
   }
-  if (request.action === "readiness" || !request.workspaceId) return dispatch(request);
+  if (request.action === "readiness" || !request.workspaceId) return dispatch(request, signal);
   const previous = workspaceQueues.get(request.workspaceId) ?? Promise.resolve();
-  const pending = previous.then(() => dispatch(request));
+  const pending = previous.then(() => dispatch(request, signal));
   const settled = pending.then(() => undefined, () => undefined);
   workspaceQueues.set(request.workspaceId, settled);
   void settled.finally(() => { if (workspaceQueues.get(request.workspaceId!) === settled) workspaceQueues.delete(request.workspaceId!); });
@@ -690,9 +813,11 @@ await reconcileProcessSecrets();
 const timeoutSweep = setInterval(() => { void enforceProcessTimeouts(); }, 5_000); timeoutSweep.unref();
 const server = http.createServer((request, response) => {
   if (request.method !== "POST" || request.url !== "/execute") { response.writeHead(404).end(); return; }
+  const controller = new AbortController(); request.once("aborted", () => controller.abort());
+  response.once("close", () => { if (!response.writableEnded) controller.abort(); });
   let body = ""; request.on("data", chunk => { body += chunk.toString(); if (Buffer.byteLength(body) > 2_000_000) request.destroy(); });
   request.on("end", () => { void (async () => {
-      try { const value = await dispatchSerialized(JSON.parse(body) as ExecutorProcessRequest); response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value)); }
+      try { const value = await dispatchSerialized(JSON.parse(body) as ExecutorProcessRequest, controller.signal); response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(value)); }
     catch (error) { const failure = error instanceof ResourceError ? error : new ResourceError("EXECUTOR_FAILED", "Sandbox executor failed.", 503); response.writeHead(failure.status, { "Content-Type": "application/json" }).end(JSON.stringify({ error: { code: failure.code, message: failure.message } })); }
   })(); });
 });

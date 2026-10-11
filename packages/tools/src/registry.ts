@@ -107,6 +107,13 @@ export class ToolRegistry {
     for (const tool of pack.tools) this.register(tool);
   }
 
+  /** Add host-owned scoped tools while retaining every existing tool's exact authorization policy. */
+  public withAdditionalTools(definitions: ToolDefinition[], authorizeAdditional: ToolAuthorization): ToolRegistry {
+    const added = new Set(definitions.map(definition => definition.name));
+    return new ToolRegistry([...this.definitions(), ...definitions], { authorize: (input) => added.has(input.tool.name)
+      ? authorizeAdditional(input) : this.#allowed(input.tool, input.context, input.request) });
+  }
+
   /** Runtime configuration inventory, NOT a user-authorized capability endpoint. */
   public definitions(): ToolDefinition[] {
     return [...this.#tools.values()];

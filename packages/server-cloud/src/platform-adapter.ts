@@ -1,3 +1,4 @@
+import { executionBudget, type ExecutionBudget } from "./execution-budget.js";
 import { isProjectAccountIdentity } from "./projects/profile.js";
 import { isProjectTool, validateProjectInput } from "./projects/tools.js";
 import { assertExecutionIdentity, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
@@ -40,6 +41,8 @@ export interface PlatformAdapterOptions {
   appServiceToken?: string;
   /** 可选的自定义 fetch 函数（用于单测或特定网络拦截） */
   fetch?: typeof fetch;
+  /** Trusted host gate for bounded evaluation; never a browser-controlled billing override. */
+  modelAdmission?: (context: { sessionId: string; runId: string; operationId: string; input: unknown; kind: "model" | "capability" }, signal: AbortSignal) => Promise<void>;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -75,7 +78,7 @@ export function privateModelCallAllowed(name: string, input: Record<string, unkn
     typeof input.query === "string" && input.query.trim().length > 0 && input.query.length <= 500;
   if (isProjectTool(name)) return validateProjectInput(name, input);
   if (isMemoryToolName(name)) return validateMemoryToolInput(name, input);
-  if (RESOURCE_TOOLS.has(name) || isCloudOrchestrationToolName(name)) return true;
+  if (name === "task_plan" || RESOURCE_TOOLS.has(name) || isCloudOrchestrationToolName(name)) return true;
   const direct = bindings.find((binding) => binding.definition.name === name);
   if (direct !== undefined) return direct.validateInput(input);
   if (name !== VIDEO_CONFIRMATION_TOOL || typeof input.operation !== "string" || !VIDEO_GENERATION_OPERATIONS.has(input.operation) ||
@@ -131,7 +134,7 @@ function reply(value: unknown, appPolicy?: CallPolicy): ModelReply {
   return { kind: "tool_calls", content: output.content, calls };
 }
 
-type BridgePath = "introspect" | "authorize" | "model" | "search" | "profile" | "call" |
+type BridgePath = "run-budget" | "introspect" | "authorize" | "model" | "search" | "profile" | "call" |
   "authorize-tool" | "capability-semantic" | "health";
 
 
@@ -155,7 +158,7 @@ type BridgePath = "introspect" | "authorize" | "model" | "search" | "profile" | 
  * });
  * ```
  */
-export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<CloudServerOptions, "authenticate" | "isAuthorizationActive" | "resolveProfile" | "createModel" | "createCapabilitySemantic" | "checkPlatform"> {
+export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<CloudServerOptions, "authenticate" | "isAuthorizationActive" | "resolveProfile" | "createModel" | "createCapabilitySemantic" | "checkPlatform" | "bindExecutionBudget"> {
   const base = new URL(options.platformUrl);
   if (base.username || base.password || base.search || base.hash || base.pathname !== "/" ||
       (base.protocol !== "https:" && !(base.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(base.hostname))) ||
@@ -164,8 +167,14 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   const transport = options.fetch ?? fetch;
 
   /** 封装对平台内部网关的安全 POST 请求 */
-  async function post(path: BridgePath, input: unknown, parent: AbortSignal, privateApp = false, onTextDelta?: (delta: string) => Promise<void>): Promise<unknown> {
+  async function post(path: BridgePath, input: unknown, parent: AbortSignal, privateApp = false, onTextDelta?: (delta: string) => Promise<void>, sessionId = ""): Promise<unknown> {
     parent.throwIfAborted();
+    if (options.modelAdmission !== undefined && (path === "model" || path === "capability-semantic")) {
+      if (!record(input) || typeof input.runId !== "string" || typeof input.operationId !== "string") throw new Error("Model admission context missing.");
+      await options.modelAdmission({ sessionId, runId: input.runId, operationId: input.operationId, input: input.input,
+        kind: path === "model" ? "model" : "capability" }, parent);
+      parent.throwIfAborted();
+    }
     const secret = privateApp ? options.appServiceToken : options.serviceToken;
     if (!secret) throw new CloudError(503, "APP_BRIDGE_DISABLED", "私有业务插件尚未配置。");
     if ((!privateApp && ["profile", "call", "authorize-tool"].includes(path)) || (privateApp && path === "search")) throw new Error("Invalid bridge path.");
@@ -237,6 +246,16 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
   }
 
   return {
+    bindExecutionBudget: async (identity, run, limits, signal): Promise<ExecutionBudget> => {
+      const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
+      if (!privateApp) return executionBudget({ ...limits, maxModelCalls: Math.min(limits.maxModelCalls, 12) });
+      const value = await post("run-budget", { authorizationId: identity.authorizationId, runId: run.id,
+        sessionId: run.sessionId, limits, ...(run.admission?.continueFromRunId === undefined ? {} : { continueFromRunId: run.admission.continueFromRunId }) }, signal, true);
+      if (!record(value) || value.schemaVersion !== 1 || value.runId !== run.id) throw new CloudError(503, "BUDGET_BINDING_INVALID", "平台额度绑定响应无效。");
+      const bound = executionBudget(value.limits);
+      if (bound.maxModelCalls > limits.maxModelCalls || bound.maxToolCalls > limits.maxToolCalls || bound.maxActiveMs > limits.maxActiveMs) throw new CloudError(503, "BUDGET_BINDING_INVALID", "平台返回额度超过宿主许可。");
+      return bound;
+    },
     checkPlatform: async (signal) => {
       for (const privateApp of options.appServiceToken ? [false, true] : [false]) {
         const value = await post("health", {}, signal, privateApp);
@@ -263,8 +282,9 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
       if (!isCompanyPublicIdentity(identity)) throw new CloudError(403, "APP_ACCESS_DENIED", "未开通当前应用。");
       return publicProfile;
     },
-    createCapabilitySemantic: (identity, run) => ({
-      analyze: async (input) => {
+    createCapabilitySemantic: (identity, run) => {
+      let operationIndex = 0;
+      return { analyze: async (input) => {
         const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) ||
           isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
         if (!privateApp || run.authorizationId !== identity.authorizationId ||
@@ -272,20 +292,20 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
           throw new CloudError(403, "RUN_IDENTITY_MISMATCH", "任务授权不匹配。");
         }
         const value = await post("capability-semantic", {
-          authorizationId: identity.authorizationId, runId: run.id, operationId: "capability_route",
+          authorizationId: identity.authorizationId, runId: run.id, operationId: `capability_route_${String(++operationIndex)}`,
           input: { schemaVersion: 1, operation: "analyze", query: input.query, clauses: input.clauses,
             candidates: input.candidates.map((pack) => ({
               id: pack.id, title: pack.title, summary: pack.summary, intents: pack.intents,
               examples: pack.examples, negativeExamples: pack.negativeExamples,
               resourceKinds: pack.resourceKinds, risk: pack.risk,
             })) },
-        }, input.signal, true);
+        }, input.signal, true, undefined, run.sessionId);
         if (!record(value) || value.schemaVersion !== 1 || !record(value.rerankScores) ||
             !Array.isArray(value.intents)) throw new Error("Invalid capability semantic response.");
         return { rerankScores: value.rerankScores as Record<string, number>,
           intents: value.intents as Array<{ label: string; objective: string; confidence: number; packIds: string[] }> };
-      },
-    }),
+      } };
+    },
     createModel: async (identity, run, signal) => {
       const privateApp = isSaishiIdentity(identity) || isStoryIdentity(identity) || isWorkbenchIdentity(identity) || isProjectAccountIdentity(identity);
       if ((!privateApp && !isCompanyPublicIdentity(identity)) || run.authorizationId !== identity.authorizationId || run.billingAccountId !== identity.billingAccountId) {
@@ -300,7 +320,7 @@ export function createPlatformAdapters(options: PlatformAdapterOptions): Pick<Cl
           input: { schemaVersion: 1, messages: wireMessages(request),
             tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
             systemPrompt: request.systemPrompt },
-        }, request.signal, privateApp, request.onTextDelta);
+        }, request.signal, privateApp, request.onTextDelta, run.sessionId);
         return reply(value, privateApp ? (name, input) => privateModelCallAllowed(name, input, request.tools, bindings) : undefined);
       } };
     },

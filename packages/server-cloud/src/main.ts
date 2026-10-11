@@ -3,11 +3,17 @@ import { createConfiguredMemoryRetriever } from "./memory-retrieval-config.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
 import { loadRuntimeBuild } from "./runtime-health.js";
 import { configuredTelemetry, disabledTelemetry, type Telemetry } from "./observability.js";
+import { fileModelAdmission } from "./model-admission.js";
 
 const databaseUrl = process.env.DAOYIN_CLOUD_POSTGRES_URL ?? "";
 const port = Number(process.env.DAOYIN_CLOUD_PORT ?? "4700");
 const platformUrl = process.env.DAOYIN_CLOUD_PLATFORM_URL ?? "";
 const appServiceToken = process.env.DAOYIN_CLOUD_APP_SERVICE_TOKEN;
+const admissionPolicyPath = process.env.DAOYIN_CLOUD_MODEL_ADMISSION_POLICY;
+const admissionLedgerPath = process.env.DAOYIN_CLOUD_MODEL_ADMISSION_LEDGER;
+if ((admissionPolicyPath === undefined) !== (admissionLedgerPath === undefined)) throw new Error("Both trusted model admission paths are required.");
+const modelAdmission = admissionPolicyPath !== undefined && admissionLedgerPath !== undefined
+  ? fileModelAdmission(admissionPolicyPath, admissionLedgerPath) : undefined;
 const vectorMinScoreRaw = process.env.DAOYIN_MEMORY_VECTOR_MIN_SCORE;
 const runTimeoutRaw = process.env.DAOYIN_CLOUD_RUN_TIMEOUT_MS;
 const runTimeoutMs = runTimeoutRaw === undefined ? undefined : Number(runTimeoutRaw);
@@ -108,6 +114,7 @@ try {
     generalResourcesMode: generalResourcesMode as "off" | "shadow" | "enforce",
     ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
     ...(appServiceToken ? { appServiceToken } : {}),
+    ...(modelAdmission === undefined ? {} : { modelAdmission }),
   });
   // Startup never creates or changes production schema. Run postgres-migrate first.
   await repository.verifySchema();
