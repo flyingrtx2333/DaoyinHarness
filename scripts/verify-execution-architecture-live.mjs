@@ -145,7 +145,11 @@ try {
   const actualTotals = totals.length === 3 && totals[0].join(',') === 'name,total' && totals.slice(1).every(row => row.length === 2) &&
     totals.slice(1).filter(row => row[0] === 'alpha' && Number(row[1]) === 6).length === 1 &&
     totals.slice(1).filter(row => row[0] === 'beta' && Number(row[1]) === 4).length === 1;
-  multi.status = partial(first) && currentPlan(multi)?.steps.every(step => step.status === 'completed') && actualTotals &&
+  const savedPlan = first.events.filter(event => event.type === 'task_plan.updated').at(-1)?.payload.plan;
+  const resumedPlan = currentPlan(multi);
+  multi.status = partial(first) && savedPlan?.steps.some(step => step.status !== 'completed') &&
+    resumedPlan?.version > savedPlan.version && resumedPlan.goal === savedPlan.goal &&
+    resumedPlan.steps.length > 0 && resumedPlan.steps.every(step => step.status === 'completed') && actualTotals &&
     summaryNumbers.length === 1 && Number(summaryNumbers[0]) === 10 && resumed.events.some(event => event.type === 'tool.completed') ? 'passed' : 'failed';
 
   });
