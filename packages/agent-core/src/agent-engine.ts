@@ -423,7 +423,7 @@ export class AgentEngine {
         // Never inherit a parent's plan as the child's writable coordination state.
         const plan = await readCurrentTaskPlan(this.#events, executionContext);
         pendingPlanSteps = plan?.steps.filter(item => item.status !== "completed").length ?? 0;
-        const planText = taskPlanContext(plan);
+        const planText = tools.some(tool => tool.name === "task_plan") || plan !== undefined ? taskPlanContext(plan) : "";
         const executionState = await this.#executionState?.(input);
         if (executionState !== undefined && (executionState.evidenceText.length > 12_000 || executionState.pendingOperationIds.length > 96 ||
             executionState.pendingOperationIds.some(id => typeof id !== "string" || !id || id.length > 200))) {

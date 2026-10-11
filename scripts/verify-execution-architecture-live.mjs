@@ -74,6 +74,9 @@ async function run(item, message, maxModelCalls, { continueFromRunId, cancelWhen
   }
   while (true) {
     await collect(deadline);
+    evidence.modelCalls = Math.max(evidence.modelCalls, evidence.events.filter(event => ['model.requested', 'capability.model.requested'].includes(event.type)).length);
+    report.modelCalls = report.cases.flatMap(item => item.runs).reduce((sum, run) => sum + run.modelCalls, 0);
+    await save();
     evidence.costAdmission = await budget.settleRun(admitted.id);
     evidence.modelCalls = Math.max(evidence.events.filter(event => ['model.requested', 'capability.model.requested'].includes(event.type)).length, evidence.costAdmission.requestsReservedForRun);
     report.modelCalls = report.cases.flatMap(item => item.runs).reduce((sum, run) => sum + run.modelCalls, 0);
@@ -91,6 +94,9 @@ async function run(item, message, maxModelCalls, { continueFromRunId, cancelWhen
   active = undefined;
   await collect(performance.now() + 30000);
   evidence.run = observed; evidence.durationMs = Math.round(performance.now() - started);
+  evidence.modelCalls = Math.max(evidence.modelCalls, evidence.events.filter(event => ['model.requested', 'capability.model.requested'].includes(event.type)).length);
+  report.modelCalls = report.cases.flatMap(item => item.runs).reduce((sum, run) => sum + run.modelCalls, 0);
+  await save();
   evidence.costAdmission = await budget.settleRun(admitted.id);
   evidence.modelCalls = Math.max(evidence.events.filter(event => ['model.requested', 'capability.model.requested'].includes(event.type)).length, evidence.costAdmission.requestsReservedForRun);
   report.modelCalls = report.cases.flatMap(item => item.runs).reduce((sum, run) => sum + run.modelCalls, 0);
