@@ -62,6 +62,8 @@ export type ToolExecution = ToolSuccess | ToolFailure;
 
 export interface ToolDefinition extends ToolDescriptor {
   auditInput?(input: Record<string, unknown>): unknown;
+  /** Capability-owned resource whose previous verification becomes unknown on failure. */
+  failureVerificationResource?(input: Record<string, unknown>): string | undefined;
   /** Return a bounded user-safe failure for expected outcomes; raw exceptions stay redacted. */
   execute(input: Record<string, unknown>, signal: AbortSignal, context: ToolExecutionContext): Promise<ToolExecution>;
 }
@@ -148,6 +150,15 @@ export class ToolRegistry {
     } catch {
       return { redacted: true };
     }
+  }
+
+  public failureVerificationResource(toolName: string, input: Record<string, unknown>): string | undefined {
+    const definition = this.#tools.get(toolName);
+    if (!definition?.mutating) return undefined;
+    try {
+      const id = definition.failureVerificationResource?.(input);
+      return typeof id === "string" && id.length > 0 && id.length <= 160 ? id : undefined;
+    } catch { return undefined; }
   }
 
   public async execute(

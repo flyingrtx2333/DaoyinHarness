@@ -266,6 +266,7 @@ export interface AgentEventPayloads {
     displayName?: string;
     displayText: string;
     input?: JsonValue;
+    failureVerificationResource?: string;
   };
   "tool.progress": {
     toolCallId: string;

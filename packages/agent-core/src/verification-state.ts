@@ -16,6 +16,7 @@ export class VerificationState {
   readonly #turnIds: Set<string>;
   readonly #changedResources = new Set<string>();
   readonly #terminal = new Map<string, { state: string; exitCode: number | null; eventId: string; before?: WorkspaceVersion; after?: WorkspaceVersion }>();
+  readonly #failureResources = new Map<string, string>();
 
   constructor(events: readonly AgentEvent[], turnId: string) {
     this.#turnIds = taskTurnIds(events, turnId);
@@ -23,7 +24,19 @@ export class VerificationState {
   }
 
   observe(event: AgentEvent): void {
+    if (event.type === "tool.started" && event.payload.failureVerificationResource) {
+      this.#failureResources.set(event.payload.toolCallId, event.payload.failureVerificationResource);
+    } else if (event.type === "tool.failed") {
+      const resource = this.#failureResources.get(event.payload.toolCallId);
+      if (resource) {
+        this.#versions.delete(resource);
+        this.#generations.set(resource, (this.#generations.get(resource) ?? 0) + 1);
+        if (this.#turnIds.has(event.turnId)) this.#changedResources.add(resource);
+      }
+      this.#failureResources.delete(event.payload.toolCallId);
+    }
     if (event.type === "tool.completed") {
+      this.#failureResources.delete(event.payload.toolCallId);
       const evidence: ToolEvidence = event.payload.evidence;
       if (evidence.verificationHint) {
         const id = evidence.verificationHint.resourceId;

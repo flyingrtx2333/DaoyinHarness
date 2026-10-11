@@ -238,6 +238,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
       definition: {
         name, description: descriptor.description + (name === "resource_campfire_list" ? ` ${CAMPFIRE_INSTRUCTIONS}` : ""), category: "extension", mutating: descriptor.mutating,
         inputSchema: schema as JsonValue,
+        failureVerificationResource: input => descriptor.mutating && typeof input.workspaceId === "string" && /^wsp_[a-f0-9]{24}$/u.test(input.workspaceId) ? input.workspaceId : undefined,
         ...(CAMPFIRE_DISPLAY_NAMES[name] ? { displayName: CAMPFIRE_DISPLAY_NAMES[name], auditInput: () => ({}) } : {}),
         async execute(input, signal, context) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");

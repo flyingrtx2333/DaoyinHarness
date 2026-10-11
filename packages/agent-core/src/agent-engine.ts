@@ -709,11 +709,13 @@ export class AgentEngine {
           : progress.before(call, descriptor);
 
         if (result === undefined) {
+          const failureVerificationResource = this.#tools.failureVerificationResource(call.name, call.input);
           // 持久化记录工具开始执行事件（入参严格经过 auditInput 脱敏处理，防密钥入库）
           const toolStarted = await append("tool.started", { toolCallId: call.id, toolName: call.name,
             ...(descriptor?.displayName === undefined ? {} : { displayName: descriptor.displayName }),
             displayText: descriptor?.displayName ? `正在${descriptor.displayName}…` : "正在执行操作…",
-            input: toJsonValue(this.#tools.auditInput(call.name, call.input)) });
+            input: toJsonValue(this.#tools.auditInput(call.name, call.input)),
+            ...(failureVerificationResource === undefined ? {} : { failureVerificationResource }) });
 
           if (signal.aborted) {
             await append("tool.failed", { toolCallId: call.id, toolName: call.name, code: "TOOL_CANCELLED",
