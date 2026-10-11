@@ -789,8 +789,8 @@ export class AgentEngine {
         }
 
         // 将工具执行结果格式化（做安全截断）后作为工具消息加入本轮上下文，供后续模型阅读
-        current.push({ role: "tool", toolCallId: call.id, toolName: call.name, content: modelToolResult(result) +
-          "\nActual persisted evidence reference: " + JSON.stringify({ type: "event", id: receiptEvent.id }) });
+        current.push({ role: "tool", toolCallId: call.id, toolName: call.name,
+          content: modelToolResult(result, undefined, { type: "event", id: receiptEvent.id }) });
         toolReceipts.push({ toolCallId: call.id, name: call.name, ok: result.ok, mutating: descriptor?.mutating ?? false });
 
         if (signal.aborted) return cancel();

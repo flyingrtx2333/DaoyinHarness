@@ -1,4 +1,4 @@
-import type { JsonValue } from "@daoyin/harness-protocol";
+import type { JsonValue, TaskEvidenceReference } from "@daoyin/harness-protocol";
 import type { ToolExecution } from "@daoyin/harness-tools";
 
 export const MAX_MODEL_TOOL_RESULT_CHARACTERS = 24_000;
@@ -63,14 +63,19 @@ export function contextPreview(value: JsonValue, maxCharacters: number): string 
   return JSON.stringify({ ...envelope, preview });
 }
 
-export function modelToolResult(result: ToolExecution, maxCharacters = MAX_MODEL_TOOL_RESULT_CHARACTERS): string {
+export function modelToolResult(result: ToolExecution, maxCharacters = MAX_MODEL_TOOL_RESULT_CHARACTERS, evidenceReference?: TaskEvidenceReference): string {
   if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1024 || maxCharacters > MAX_MODEL_TOOL_RESULT_CHARACTERS) {
     throw new Error("Invalid tool result context budget.");
   }
+  if (evidenceReference !== undefined && (evidenceReference.type !== "event" || !evidenceReference.id || evidenceReference.id.length > 200)) {
+    throw new Error("Invalid persisted tool evidence reference.");
+  }
+  // Keep the trusted reference inside the JSON envelope, ahead of potentially large observations.
+  const reference = evidenceReference === undefined ? {} : { evidenceReference };
   const complete = result.ok
-    ? { ok: true, summary: result.summary,
+    ? { ...reference, ok: true, summary: result.summary,
       ...(result.evidence.verificationHint === undefined ? {} : { verificationHint: result.evidence.verificationHint }), result: result.evidence.result }
-    : { ok: false, code: result.code, message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) };
+    : { ...reference, ok: false, code: result.code, message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) };
   const serialized = JSON.stringify(complete);
   if (serialized.length <= maxCharacters) return serialized;
 
@@ -81,14 +86,14 @@ export function modelToolResult(result: ToolExecution, maxCharacters = MAX_MODEL
   };
   const textBudget = Math.min(1024, Math.floor(maxCharacters / 8));
   if (result.ok) {
-    const envelope = { ok: true, summary: boundedString(result.summary, textBudget), modelContext,
+    const envelope = { ...reference, ok: true, summary: boundedString(result.summary, textBudget), modelContext,
       ...(result.evidence.verificationHint === undefined ? {} : {
         verificationHint: boundedJson(result.evidence.verificationHint, textBudget),
       }) };
     const budget = maxCharacters - JSON.stringify(envelope).length - 16;
     return JSON.stringify({ ...envelope, result: boundedJson(result.evidence.result, budget) });
   }
-  const envelope = { ok: false, code: boundedString(result.code, 128), message: boundedString(result.message, textBudget), retryable: result.retryable, modelContext };
+  const envelope = { ...reference, ok: false, code: boundedString(result.code, 128), message: boundedString(result.message, textBudget), retryable: result.retryable, modelContext };
   const budget = maxCharacters - JSON.stringify(envelope).length - 16;
   return JSON.stringify({ ...envelope, ...(result.details === undefined ? {} : { details: boundedJson(result.details, budget) }) });
 }

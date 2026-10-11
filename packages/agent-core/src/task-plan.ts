@@ -42,7 +42,8 @@ function references(value: unknown): TaskEvidenceReference[] {
 
 function parseUpdate(input: Record<string, unknown>, version: number): TaskPlan {
   if (Object.keys(input).some(key => !["operation", "expectedVersion", "goal", "steps", "blockers", "evidence"].includes(key))) throw new Error("Unknown task plan field.");
-  if (!Array.isArray(input.steps) || input.steps.length > 32 || !Array.isArray(input.blockers) || input.blockers.length > 16) throw new Error("Invalid plan steps or blockers.");
+  const blockers = input.blockers === undefined ? [] : input.blockers;
+  if (!Array.isArray(input.steps) || input.steps.length > 32 || !Array.isArray(blockers) || blockers.length > 16) throw new Error("Invalid plan steps or blockers.");
   const steps: TaskPlanStep[] = input.steps.map(item => {
     if (typeof item !== "object" || item === null || Array.isArray(item)) throw new Error("Invalid plan step.");
     const candidate = item as Record<string, unknown>;
@@ -53,7 +54,7 @@ function parseUpdate(input: Record<string, unknown>, version: number): TaskPlan 
     return { id, description: text(candidate.description, 800), status: candidate.status as TaskPlanStep["status"], evidence: references(candidate.evidence ?? []) };
   });
   if (new Set(steps.map(step => step.id)).size !== steps.length) throw new Error("Duplicate step identifier.");
-  const plan = { version, goal: text(input.goal, 2000), steps, blockers: input.blockers.map(value => text(value, 800)), evidence: references(input.evidence ?? []) };
+  const plan = { version, goal: text(input.goal, 2000), steps, blockers: blockers.map(value => text(value, 800)), evidence: references(input.evidence ?? []) };
   if (JSON.stringify(plan).length > 12_000) throw new Error("Task plan exceeds the bounded context size.");
   return plan;
 }
@@ -67,13 +68,16 @@ export function createTaskPlanTool(options: TaskPlanToolOptions): ToolDefinition
   const writes = new Map<string, Promise<unknown>>();
   return {
     name: "task_plan", displayName: "记录任务计划", category: "extension", mutating: true, repeatable: true,
-    description: "Read or update an optional versioned plan for a complex task. Status records intended progress, not verified correctness. Cite only actual accessible evidence; subagents maintain their own session plan.",
+    description: "Read or update an optional versioned plan for a complex task. Read returns currentVersion (0 before creation). Updates require expectedVersion equal to currentVersion, goal and steps; blockers and evidence default to empty arrays. Status records intended progress, not verified correctness. Cite only actual accessible evidence; subagents maintain their own session plan.",
     inputSchema: { type: "object", additionalProperties: false, required: ["operation"], properties: {
       operation: { type: "string", enum: ["read", "update"] }, expectedVersion: { type: "integer", minimum: 0 }, goal: { type: "string", maxLength: 2000 },
       steps: { type: "array", maxItems: 32, items: { type: "object", additionalProperties: false, required: ["id", "description", "status"], properties: {
         id: { type: "string", maxLength: 80 }, description: { type: "string", maxLength: 800 }, status: { type: "string", enum: ["pending", "in_progress", "completed", "blocked"] }, evidence: referenceSchema } } },
       blockers: { type: "array", maxItems: 16, items: { type: "string", maxLength: 800 } }, evidence: referenceSchema,
-    } },
+    }, oneOf: [
+      { properties: { operation: { const: "read" } }, maxProperties: 1 },
+      { properties: { operation: { const: "update" } }, required: ["expectedVersion", "goal", "steps"] },
+    ] },
     auditInput(input) { return { operation: input.operation, expectedVersion: input.expectedVersion, stepCount: Array.isArray(input.steps) ? input.steps.length : 0 }; },
     async execute(input, signal, context) {
       const operation = async () => {
@@ -83,25 +87,29 @@ export function createTaskPlanTool(options: TaskPlanToolOptions): ToolDefinition
         const current = latest?.type === "task_plan.updated" ? latest.payload.plan : undefined;
         const success = (result: JsonValue) => ({ ok: true as const, summary: input.operation === "read" ? "已读取当前任务计划。" : "已保存任务计划；计划状态不代表验收通过。",
           evidence: { schemaVersion: 1 as const, toolName: "task_plan", result, artifacts: [], diagnostics: [] } });
-        if (input.operation === "read" && Object.keys(input).every(key => key === "operation")) return success({ plan: current === undefined ? null : JSON.parse(JSON.stringify(current)) as JsonValue });
-        if (input.operation !== "update" || !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion !== (current?.version ?? 0)) {
-          return { ok: false as const, code: "TASK_PLAN_VERSION_CONFLICT", message: "任务计划版本已变化或更新参数无效，请先读取当前计划。", retryable: false };
+        const currentVersion = current?.version ?? 0;
+        if (input.operation === "read" && Object.keys(input).every(key => key === "operation")) return success({ currentVersion, plan: current === undefined ? null : JSON.parse(JSON.stringify(current)) as JsonValue });
+        if (input.operation !== "update" || !Number.isSafeInteger(input.expectedVersion) || Number(input.expectedVersion) < 0) {
+          return { ok: false as const, code: "TASK_PLAN_INVALID", message: "更新任务计划需要 expectedVersion（初次为 0）、goal 和 steps；请按当前版本提交。", retryable: false, details: { currentVersion } };
+        }
+        if (input.expectedVersion !== currentVersion) {
+          return { ok: false as const, code: "TASK_PLAN_VERSION_CONFLICT", message: "任务计划版本已变化，请读取当前计划后更新。", retryable: false, details: { currentVersion } };
         }
         let plan: TaskPlan;
         try { plan = parseUpdate(input, (current?.version ?? 0) + 1); }
-        catch { return { ok: false as const, code: "TASK_PLAN_INVALID", message: "任务计划需要有界目标、唯一的步骤编号、合法状态和证据引用。", retryable: false }; }
+        catch { return { ok: false as const, code: "TASK_PLAN_INVALID", message: "任务计划需要有界目标、唯一的步骤编号、合法状态和证据引用。", retryable: false, details: { currentVersion } }; }
         const all = [...plan.evidence, ...plan.steps.flatMap(step => step.evidence)];
         for (const reference of all) {
           const event = reference.type === "event" ? events.find(event => event.id === reference.id) : undefined;
           const accessible = reference.type === "event" ? event !== undefined && ["tool.completed", "tool.failed", "model.responded", "process.completed"].includes(event.type)
             : options.validateEvidence !== undefined && await options.validateEvidence(reference, context, signal);
-          if (!accessible) return { ok: false as const, code: "TASK_PLAN_EVIDENCE_DENIED", message: "证据引用不是当前会话可访问的真实执行记录。计划未更新。", retryable: false };
+          if (!accessible) return { ok: false as const, code: "TASK_PLAN_EVIDENCE_DENIED", message: "证据引用不是当前会话可访问的真实执行记录。计划未更新。", retryable: false, details: { currentVersion } };
         }
         signal.throwIfAborted();
         const event = await options.events.append({ type: "task_plan.updated", accountId: context.accountId, scopeId: context.scopeId,
           sessionId: context.sessionId, turnId: context.turnId, payload: { plan, previousVersion: current?.version ?? 0, toolCallId: context.toolCallId ?? "" } });
         try { await options.onEvent?.(event); } catch { /* Persisted evidence can be replayed. */ }
-        return success({ plan: JSON.parse(JSON.stringify(plan)) as JsonValue, eventId: event.id, eventSeq: event.eventSeq, acceptance: "unverified" });
+        return success({ currentVersion: plan.version, plan: JSON.parse(JSON.stringify(plan)) as JsonValue, eventId: event.id, eventSeq: event.eventSeq, acceptance: "unverified" });
       };
       const key = JSON.stringify([context.accountId, context.scopeId, context.sessionId]);
       const previous = writes.get(key) ?? Promise.resolve();
