@@ -186,6 +186,7 @@ try {
   let observedOriginalFailure;
   let first;
   let observedPreparedOperation;
+  let continuationRunId;
   if (reusePrepared) {
     item = { name: '复用已成功环境并继续验证', sessionId: sourceReceipt.priorSessionId,
       workspaceId: sourceReceipt.preparedWorkspaceId, originalWorkspaceId: sourceReceipt.priorWorkspaceId,
@@ -203,6 +204,22 @@ try {
     // Retained actual evidence has an explicit source report; it is never submitted to the Agent as a replay.
     first = sourceRun;
     report.referencedRuns = [{ sourceReportSha256: sourceReceipt.sha256, revision: sourceReport.revision, ...sourceRun }];
+    // A failed validation may have created a later, genuine continuation. Resume
+    // the current tip only if its trusted admission chain reaches this preparation.
+    const history = (await call(`/sessions/${item.sessionId}/runs`)).runs;
+    invariant(Array.isArray(history) && history.length > 0, 'Current session run history is unavailable.');
+    let tip = history[0];
+    continuationRunId = tip.id;
+    const seen = new Set();
+    const chain = [];
+    while (tip.id !== prior.id) {
+      invariant(tip.sessionId === item.sessionId && !['running', 'queued'].includes(tip.status) &&
+        !seen.has(tip.id) && typeof tip.admission?.continueFromRunId === 'string' && seen.size < 32,
+      'Current task tip is unrelated, active or has no trusted continuation ancestry.');
+      seen.add(tip.id); chain.push({ runId: tip.id, continueFromRunId: tip.admission.continueFromRunId, status: tip.status });
+      tip = (await call(`/runs/${tip.admission.continueFromRunId}`)).run;
+    }
+    report.resumedTaskTip = { runId: continuationRunId, preparedRunId: prior.id, chain }; await save();
   } else if (resuming) {
     item = { name: '原会话环境准备修复与继续验证', sessionId: sourceReceipt.priorSessionId,
       workspaceId: sourceReceipt.priorWorkspaceId, originalWorkspaceId: sourceReceipt.priorWorkspaceId,
@@ -244,7 +261,7 @@ try {
     firstCase.savedPlan.steps.every(step => ['pending', 'in_progress', 'completed', 'blocked'].includes(step.status)), 'Preparation did not retain a valid partial plan for the actual unfinished code task.');
   firstCase.status = 'passed'; await save();
 
-  const resumed = await run(item, `继续原任务，使用已成功准备的工作区 ${item.workspaceId}，复用实际环境，不重新准备候选或安装依赖。先读保存的计划与产物。按 CONTRIBUTING.md 先实际运行 focused check，用稳定 verification 名称 price-export；根据真实失败输出修复 export.py，使总额含 10% 服务费，保留解释器约束和测试断言。更新 CONTRIBUTING.md 说明已验证的用法，并创建 pytest.ini 仅保存测试选择声明。环境依赖与版本声明不改变。修改后用相同 verification 名称重跑同一 focused check，实际检查导入的依赖位置和 environment_inspect cacheKey，再完成计划。如实区分最初失败、修复和最终验证。`, report.limits.runCalls[1], { continueFromRunId: first.runId });
+  const resumed = await run(item, `继续原任务，使用已成功准备的工作区 ${item.workspaceId}，复用实际环境，不重新准备候选或安装依赖。先读保存的计划与产物。按 CONTRIBUTING.md 先实际运行 focused check，用稳定 verification 名称 price-export；根据真实失败输出修复 export.py，使总额含 10% 服务费，保留解释器约束和测试断言。更新 CONTRIBUTING.md 说明已验证的用法，并创建 pytest.ini 仅保存测试选择声明。环境依赖与版本声明不改变。修改后用相同 verification 名称重跑同一 focused check，实际检查导入的依赖位置和 environment_inspect cacheKey，再完成计划。如实区分最初失败、修复和最终验证。`, report.limits.runCalls[1], { continueFromRunId: continuationRunId ?? first.runId });
   const secondCase = { name: '继续任务、失败验证修复与诊断编辑保留缓存', sessionId: item.sessionId, workspaceId: item.workspaceId, runId: resumed.runId, status: 'failed' };
   report.cases.push(secondCase);
   secondCase.cacheAfter = await control(item, 'environment_inspect');
