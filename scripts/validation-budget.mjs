@@ -1,8 +1,24 @@
 // Real cloud validation uses a trusted server-side admission ledger. No credentials enter this module.
 import { spawn } from 'node:child_process';
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/u.test(value);
+const auditError = code => Object.assign(new Error(`Validation budget audit failed (${code}); no further runs admitted.`), { code });
+function auditFailureCode(exitCode, diagnostic) {
+  if (exitCode === 255) return 'VALIDATION_AUDIT_SSH_TRANSPORT';
+  // Match only our fixed diagnostic messages; remote stderr is never exposed.
+  for (const [message, code] of [
+    ['Read-only platform audit failed', 'VALIDATION_AUDIT_PLATFORM_READ'],
+    ['Frozen model configuration changed', 'VALIDATION_AUDIT_MODEL_DRIFT'],
+    ['Frozen scene configuration or pricing changed', 'VALIDATION_AUDIT_CONFIGURATION_DRIFT'],
+    ['Validation policy expired', 'VALIDATION_AUDIT_POLICY_EXPIRED'],
+    ['Admission ledger lock unavailable', 'VALIDATION_AUDIT_LEDGER_LOCK'],
+    ['Actual usage differs from frozen model', 'VALIDATION_AUDIT_USAGE_MODEL_DRIFT'],
+    ['Actual usage exceeds reservation', 'VALIDATION_AUDIT_RESERVATION_EXCEEDED'],
+  ]) if (diagnostic.includes(message)) return code;
+  return 'VALIDATION_AUDIT_REMOTE_FAILURE';
+}
 export function validationBudget(directory) {
   if (!/^\/var\/lib\/daoyin-harness\/validation\/[a-zA-Z0-9_-]+$/u.test(directory ?? '')) throw new Error('An explicit trusted validation budget directory is required.');
+  const controlPath = `/tmp/daoyin-validation-ssh-${directory.split('/').at(-1)}`;
   async function remote(operation, input = {}) {
     const configurationProgram = [
       'import json,hashlib',
@@ -77,16 +93,17 @@ try:
 finally: lock.rmdir()
 `;
     return await new Promise((resolve, reject) => {
-      const child = spawn('ssh', ['-o', 'BatchMode=yes', 'root@42.194.159.81', 'python3', '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
-      const chunks = []; let size = 0;
-      const timer = setTimeout(() => { child.kill('SIGTERM'); reject(new Error('Bounded validation audit timed out.')); }, 55000);
+      const child = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=600', '-o', `ControlPath=${controlPath}`, 'root@42.194.159.81', 'python3', '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const chunks = []; let size = 0; let diagnostic = '';
+      const timer = setTimeout(() => { child.kill('SIGTERM'); reject(auditError('VALIDATION_AUDIT_TIMEOUT')); }, 55000);
       child.stdout.on('data', chunk => { size += chunk.length; if (size > 2_000_000) child.kill('SIGTERM'); else chunks.push(chunk); });
-      child.stderr.resume();
-      child.on('error', error => { clearTimeout(timer); reject(error); });
+      child.stderr.on('data', chunk => { diagnostic = (diagnostic + chunk.toString('utf8')).slice(-4096); });
+      child.on('error', () => { clearTimeout(timer); reject(auditError('VALIDATION_AUDIT_SSH_START')); });
       child.on('close', code => {
         clearTimeout(timer);
-        if (code !== 0 || size > 2_000_000) { reject(new Error('Validation budget audit failed; no further runs admitted.')); return; }
-        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { reject(new Error('Invalid validation budget receipt.')); }
+        if (size > 2_000_000) { reject(auditError('VALIDATION_AUDIT_OUTPUT_LIMIT')); return; }
+        if (code !== 0) { reject(auditError(auditFailureCode(code, diagnostic))); return; }
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { reject(auditError('VALIDATION_AUDIT_RECEIPT_INVALID')); }
       });
       child.stdin.end(program);
     });
