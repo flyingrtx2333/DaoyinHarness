@@ -23,20 +23,22 @@ if (resuming) {
   sourceCase = sourceReport.cases?.find(item => item.failedOperation?.status === 'failed' && !item.completedOperation);
   sourceRun = sourceReport.runs?.find(run => run.runId === sourceCase?.runId);
   const requirement = sourceCase?.cacheBefore?.declarations?.find(item => item.path === 'requirements.txt');
-  if (sourceReport.status !== 'incomplete' || sourceReport.modelCalls !== 8 || sourceReport.runs?.length !== 1 ||
+  if (sourceReport.status !== 'incomplete' || !Number.isSafeInteger(sourceReport.modelCalls) || sourceReport.modelCalls < 1 || sourceReport.modelCalls > 8 || sourceReport.runs?.length !== 1 ||
       !/^ses_[a-f0-9-]{36}$/u.test(sourceReport.fixture?.sessionId ?? '') ||
       !/^wsp_[a-f0-9]{24}$/u.test(sourceReport.fixture?.originalWorkspaceId ?? '') ||
       !/^run_[a-f0-9-]{36}$/u.test(sourceRun?.runId ?? '') ||
       !/^op_[a-f0-9]{24}$/u.test(sourceCase?.failedOperation?.id ?? '') ||
       sourceCase.sessionId !== sourceReport.fixture.sessionId || sourceCase.failedOperation.workspaceId !== sourceReport.fixture.originalWorkspaceId ||
-      sourceCase.failedOperation.error !== 'ENVIRONMENT_DECLARATION_MISSING' || sourceRun.status !== 'completed' ||
+      sourceCase.failedOperation.error !== 'ENVIRONMENT_DECLARATION_MISSING' || !['completed', 'failed'].includes(sourceRun.status) ||
       !/^sha256:[a-f0-9]{64}$/u.test(requirement?.digest ?? '') || typeof requirement.content !== 'string' || requirement.truncated) {
-    throw new Error('Resume requires the original bounded, completed partial run and known declaration failure; no fixture or operation will be replayed.');
+    throw new Error('Resume requires a bounded, terminal previous run and known declaration failure; no fixture or operation will be replayed.');
   }
   sourceReceipt = { path, sha256: createHash('sha256').update(raw).digest('hex'), revision: sourceReport.revision,
     modelCalls: sourceReport.modelCalls, status: sourceReport.status, priorRunId: sourceRun.runId,
     priorSessionId: sourceReport.fixture.sessionId, priorWorkspaceId: sourceReport.fixture.originalWorkspaceId,
-    failedOperationId: sourceCase.failedOperation.id, requirementsDigest: requirement.digest };
+    failedOperationId: sourceCase.failedOperation.id, requirementsDigest: requirement.digest,
+    cumulativePreviousModelCalls: sourceReport.modelCalls + (sourceReport.resume?.cumulativePreviousModelCalls ?? sourceReport.resume?.modelCalls ?? 0),
+    ...(sourceReport.resume ? { previousSource: { path: sourceReport.resume.path, sha256: sourceReport.resume.sha256, priorRunId: sourceReport.resume.priorRunId } } : {}) };
 }
 const revision = value('--expected-revision');
 const driverRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(import.meta.dirname, '..'), encoding: 'utf8' }).trim();
@@ -47,8 +49,8 @@ await mkdir(output, { recursive: true, mode: 0o700 });
 const report = { revision, driverRevision, driverSha256, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
   cases: [], runs: [], ...(sourceReceipt ? { resume: sourceReceipt } : {}), budgetDirectory: budget.directory,
   startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: {
-    maxScenarioRequests: resuming ? 18 : 20, reservedSweRequests: 72, requiredRemainingRequests: resuming ? 90 : 92,
-    runCalls: [resuming ? 6 : 8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
+    maxScenarioRequests: resuming ? 15 : 20, reservedSweRequests: 72, requiredRemainingRequests: resuming ? 87 : 92,
+    runCalls: resuming ? [5, 6, 4] : [8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
 const save = () => writeFile(join(output, 'report.json'), JSON.stringify(sanitizeEvidence(report), null, 2) + '\n', { mode: 0o600 });
 const client = createCloudAccountClient();
 const call = async (path, body, options = {}) => (body === undefined ? await requestCloudObservation(client, path, options) : await client.request(path, body, options)).result;
@@ -182,7 +184,7 @@ try {
     const requirements = report.resume.requirements.content ?? report.resume.requirements.text;
     invariant(typeof requirements === 'string' && 'sha256:' + createHash('sha256').update(requirements).digest('hex') === sourceReceipt.requirementsDigest,
       'Existing declaration differs from its actual previous digest; do not overwrite it or repeat the previous task.');
-    first = await run(item, `继续原任务。原工作区是 ${item.originalWorkspaceId}；之前实际失败的环境操作 ${sourceReceipt.failedOperationId} 仅因缺少依赖声明失败。requirements.txt 已正确写入，保留它和其他产物，不重建工作区、不重复之前失败请求、不再次写 requirements.txt。先读取保存的计划、现有声明和原 operation 实际结果，再从 runtime_list 选择项目声明的 Python 3.11。environment_prepare 必须显式传 retryFromOperationId="${sourceReceipt.failedOperationId}"、installDependencies=true，源 workspaceId="${item.originalWorkspaceId}"，以新请求创建候选。观察同一新 operation，成功后在新工作区真实核对 Python 3.11、architecture_dependency 导入位置和 cacheKey。保留 export.py 修改和 focused check 为下一轮未完成项，如实报告 partial。`, 6, { continueFromRunId: sourceReceipt.priorRunId });
+    first = await run(item, `继续原任务。原工作区是 ${item.originalWorkspaceId}；之前实际失败的环境操作 ${sourceReceipt.failedOperationId} 仅因缺少依赖声明失败。requirements.txt 已正确写入，保留它和其他产物，不重建工作区、不重复之前失败请求、不再次写 requirements.txt。先读取保存的计划、现有声明和原 operation 实际结果，再从 runtime_list 选择项目声明的 Python 3.11。environment_prepare 必须显式传 retryFromOperationId="${sourceReceipt.failedOperationId}"、installDependencies=true，源 workspaceId="${item.originalWorkspaceId}"，以新请求创建候选。观察同一新 operation，成功后在新工作区真实核对 Python 3.11、architecture_dependency 导入位置和 cacheKey。保留 export.py 修改和 focused check 为下一轮未完成项，如实报告 partial。`, report.limits.runCalls[0], { continueFromRunId: sourceReceipt.priorRunId });
   } else {
     item = await fixture('准备重试、环境缓存与任务边界', { '.python-version': '3.11\n', 'export.py': originalExport,
     'check_export.py': check, 'CONTRIBUTING.md': 'Declared runtime: .python-version. Focused check: python check_export.py. Keep interpreter constraints and assertions unchanged.\n',
@@ -208,7 +210,7 @@ try {
     firstCase.savedPlan.steps.every(step => ['pending', 'in_progress', 'completed', 'blocked'].includes(step.status)), 'Preparation did not retain a valid partial plan for the actual unfinished code task.');
   firstCase.status = 'passed'; await save();
 
-  const resumed = await run(item, '继续原任务。先读保存的计划与产物，复用已准备环境。按 CONTRIBUTING.md 先实际运行 focused check，用稳定 verification 名称 price-export；根据真实失败输出修复 export.py，使总额含 10% 服务费，保留解释器约束和测试断言。更新 CONTRIBUTING.md 说明已验证的用法，并创建 pytest.ini 仅保存测试选择声明。环境依赖与版本声明不改变，不重复安装。修改后用相同 verification 名称重跑同一 focused check，实际检查导入的依赖位置和 environment_inspect cacheKey，再完成计划。如实区分最初失败、修复和最终验证。', 8, { continueFromRunId: first.runId });
+  const resumed = await run(item, '继续原任务。先读保存的计划与产物，复用已准备环境。按 CONTRIBUTING.md 先实际运行 focused check，用稳定 verification 名称 price-export；根据真实失败输出修复 export.py，使总额含 10% 服务费，保留解释器约束和测试断言。更新 CONTRIBUTING.md 说明已验证的用法，并创建 pytest.ini 仅保存测试选择声明。环境依赖与版本声明不改变，不重复安装。修改后用相同 verification 名称重跑同一 focused check，实际检查导入的依赖位置和 environment_inspect cacheKey，再完成计划。如实区分最初失败、修复和最终验证。', report.limits.runCalls[1], { continueFromRunId: first.runId });
   const secondCase = { name: '继续任务、失败验证修复与诊断编辑保留缓存', sessionId: item.sessionId, workspaceId: item.workspaceId, runId: resumed.runId, status: 'failed' };
   report.cases.push(secondCase);
   secondCase.cacheAfter = await control(item, 'environment_inspect');
