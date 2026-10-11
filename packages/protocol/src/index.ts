@@ -153,6 +153,10 @@ export interface ToolEvidence {
   diagnostics: string[];
   /** Capability-owned changed resource to inspect; not a claim of task validation. */
   verificationHint?: { resourceId: string; paths?: string[] };
+  /** Actual process observation; verification records selected intent, not coverage or correctness. */
+  processObservation?: { resourceId: string; processId: string; state: string; exitCode: number | null; verification: string | null };
+  /** Successful snapshot-derived environment transition; not verification success. */
+  verificationWorkspace?: { sourceResourceId: string; targetResourceId: string };
 }
 
 export interface AgentEventPayloads {
@@ -175,6 +179,8 @@ export interface AgentEventPayloads {
     status: "running";
     userMessageId: string;
     userMessage: string;
+    /** Trusted runtime linkage after validating continuation ownership. */
+    continueFromTurnId?: string;
   };
   "capability.routed": {
     phase: "initial" | "expansion";

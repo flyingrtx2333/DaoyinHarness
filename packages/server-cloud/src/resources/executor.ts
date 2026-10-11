@@ -619,8 +619,19 @@ async function environmentInspect(request: ExecutorProcessRequest, signal?: Abor
     } catch (error) { interpreters.push({ executable, available: false, code: error instanceof ResourceError ? error.code : "PROBE_FAILED" }); }
   }
   const imageDigest = spec.image.kind === "builtin" ? spec.image.digest : spec.image.imageDigest!;
-  return { runtime: spec, interpreters, declarations, cacheKey: environmentCacheKey(imageDigest, declarations),
-    uncertainty: "Declarations are bounded data, not executed configuration or proof of dependency compatibility." };
+  const sourceMetadata: Array<Record<string, unknown>> = [];
+  for (const args of [["rev-parse", "--is-shallow-repository"], ["describe", "--tags", "--always"], ["status", "--short"]]) {
+    signal?.throwIfAborted();
+    try {
+      const probe = await foreground(workspaceId, { ...spec, network: "none", secretRefs: [] }, "git",
+        ["--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args],
+        ".", undefined, 3000, undefined, request.runId, undefined, signal);
+      const output = String(probe.stdout + probe.stderr);
+      sourceMetadata.push({ args, exitCode: probe.exitCode, output: output.slice(0, 2048), truncated: output.length > 2048 });
+    } catch (error) { signal?.throwIfAborted(); sourceMetadata.push({ args, code: error instanceof ResourceError ? error.code : "PROBE_FAILED" }); }
+  }
+  return { runtime: spec, interpreters, declarations, sourceMetadata, cacheKey: environmentCacheKey(imageDigest, declarations),
+    uncertainty: "Declarations are bounded untrusted data, not executed configuration or proof of compatibility. Git metadata may be absent or shallow; derived package versions must be checked, never invented. Verification commands and optional test dependencies remain model-selected from project declarations." };
 }
 
 async function processOperation(request: ExecutorProcessRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {

@@ -790,6 +790,7 @@ export function createCloudServer(options: CloudServerOptions): FastifyInstance 
         await engine.runTurn({
           accountId: stores.accountId, scopeId: stores.scopeId, sessionId: run.sessionId, turnId: run.id,
           userMessage: run.userMessage, executionIdentity: identity, signal: controller.signal,
+          ...(run.admission?.continueFromRunId === undefined ? {} : { continueFromTurnId: run.admission.continueFromRunId }),
           ...(workspaceContext === undefined ? {} : { systemInstruction: workspaceContext }),
         });
         runSpan.end({ attributes: { "daoyin.model.calls": modelCalls, "daoyin.tool.calls": toolCalls } });

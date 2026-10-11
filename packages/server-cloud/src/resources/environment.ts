@@ -2,9 +2,12 @@ import { createHash } from "node:crypto";
 
 // Declaration files are read as data. No imports, evaluation or project hooks
 // run during inspection. Installation is a separate explicit preparation action.
-export const PROJECT_DECLARATIONS = ["package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", ".nvmrc", ".node-version",
-  "pyproject.toml", "setup.cfg", "setup.py", "requirements.txt", "Pipfile", "Pipfile.lock", "poetry.lock", "uv.lock", ".python-version",
-  "go.mod", "go.sum", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "Dockerfile", ".tool-versions"] as const;
+export const PROJECT_DECLARATIONS = ["package.json", ".nvmrc", ".node-version", ".python-version", ".tool-versions",
+  "pyproject.toml", "setup.cfg", "pytest.ini", "tox.ini", "noxfile.py", "Makefile", "CONTRIBUTING.md", "CONTRIBUTING.rst",
+  "requirements-dev.txt", "requirements-test.txt", "requirements/testing.txt", "requirements/dev.txt",
+  "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock",
+  "setup.py", "requirements.txt", "Pipfile", "Pipfile.lock", "poetry.lock", "uv.lock",
+  "go.mod", "go.sum", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "Dockerfile"] as const;
 export const VERSION_PROBES = ["node", "npm", "python", "python3", "pip", "pip3", "uv", "poetry", "go", "rustc", "cargo"] as const;
 export interface RuntimeCatalogEntry { digest?: unknown; image?: unknown; version?: unknown; capabilities?: unknown }
 export function trustedRuntimeCatalog(catalog: Record<string, RuntimeCatalogEntry>): Array<{ id: string; digest: string; image: string | null; version: string | null; capabilities: string[] }> {

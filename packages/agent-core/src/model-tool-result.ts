@@ -81,7 +81,9 @@ export function modelToolResult(result: ToolExecution, maxCharacters = MAX_MODEL
   const reference = evidenceReference === undefined ? {} : { evidenceReference };
   const complete = result.ok
     ? { ...reference, ok: true, summary: result.summary,
-      ...(result.evidence.verificationHint === undefined ? {} : { verificationHint: result.evidence.verificationHint }), result: result.evidence.result }
+      ...(result.evidence.verificationHint === undefined ? {} : { verificationHint: result.evidence.verificationHint }),
+      ...(result.evidence.processObservation === undefined ? {} : { processObservation: result.evidence.processObservation }),
+      ...(result.evidence.verificationWorkspace === undefined ? {} : { verificationWorkspace: result.evidence.verificationWorkspace }), result: result.evidence.result }
     : { ...reference, ok: false, code: result.code, message: result.message, retryable: result.retryable, ...(result.details === undefined ? {} : { details: result.details }) };
   const serialized = JSON.stringify(complete);
   if (serialized.length <= maxCharacters) return serialized;
@@ -94,6 +96,8 @@ export function modelToolResult(result: ToolExecution, maxCharacters = MAX_MODEL
   const textBudget = Math.min(1024, Math.floor(maxCharacters / 8));
   if (result.ok) {
     const envelope = { ...reference, ok: true, summary: boundedString(result.summary, textBudget), modelContext,
+      ...(result.evidence.verificationWorkspace === undefined ? {} : { verificationWorkspace: result.evidence.verificationWorkspace }),
+      ...(result.evidence.processObservation === undefined ? {} : { processObservation: result.evidence.processObservation }),
       ...(result.evidence.verificationHint === undefined ? {} : {
         verificationHint: boundedJson(result.evidence.verificationHint, textBudget),
       }) };
