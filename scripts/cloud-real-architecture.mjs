@@ -1,8 +1,8 @@
 // Three bounded actual model runs. Each assertion is backed by the actual account, tools and persistent receipts.
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, join, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createCloudAccountClient, readHiddenCredentials, requestCloudObservation, sanitizeEvidence } from './cloud-live-client.mjs';
 import { validationBudget } from './validation-budget.mjs';
@@ -12,10 +12,11 @@ const value = flag => args[args.indexOf(flag) + 1];
 const reusePrepared = args.includes('--resume-prepared-report');
 const resuming = args.includes('--resume-report') || reusePrepared;
 const repairOnly = args.includes('--repair-only');
-if (args.length !== (resuming ? 7 : 5) + (repairOnly ? 1 : 0) || !args.includes('--run') || !args.includes('--budget-dir') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') ||
-    repairOnly && !reusePrepared ||
+const completedSwe = args.includes('--completed-swe-report');
+if (args.length !== (resuming ? 7 : 5) + (repairOnly ? 1 : 0) + (completedSwe ? 2 : 0) || !args.includes('--run') || !args.includes('--budget-dir') || !/^[a-f0-9]{40}$/u.test(value('--expected-revision') ?? '') ||
+    (repairOnly || completedSwe) && !reusePrepared || completedSwe && typeof value('--completed-swe-report') !== 'string' ||
     args.includes('--resume-report') && reusePrepared || resuming && typeof value(reusePrepared ? '--resume-prepared-report' : '--resume-report') !== 'string')
-  throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY [--resume-report PATH | --resume-prepared-report PATH [--repair-only]].');
+  throw new Error('Use --run --expected-revision FULL_COMMIT --budget-dir TRUSTED_DIRECTORY [--resume-report PATH | --resume-prepared-report PATH [--repair-only] [--completed-swe-report PATH]].');
 let sourceReport;
 let sourceCase;
 let sourceRun;
@@ -51,6 +52,72 @@ if (resuming) {
     ...(sourceReport.resume ? { previousSource: { path: sourceReport.resume.path, sha256: sourceReport.resume.sha256, priorRunId: sourceReport.resume.priorRunId } } : {}) };
 }
 const revision = value('--expected-revision');
+const terminalStatuses = ['completed', 'failed', 'cancelled', 'interrupted'];
+async function completedSweReceipt(path) {
+  const ids = ['pytest-dev__pytest-5787', 'pytest-dev__pytest-5631', 'sympy__sympy-12481'];
+  const exactIds = list => Array.isArray(list) && list.length === ids.length && new Set(list).size === ids.length && list.every(id => ids.includes(id));
+  const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  const cache = await realpath(resolve(import.meta.dirname, '../.cache'));
+  async function document(file, digest, initial = false) {
+    if (typeof file !== 'string') throw new Error('Completed SWE evidence file is missing.');
+    if (!initial && (typeof digest !== 'string' || !/^[a-f0-9]{64}$/u.test(digest))) throw new Error('Completed SWE evidence checksum is missing.');
+    const actual = await realpath(resolve(file));
+    const rel = relative(cache, actual);
+    if (isAbsolute(rel) || rel === '..' || rel.startsWith('..' + sep)) throw new Error('Completed SWE evidence must be retained in repository .cache.');
+    const raw = await readFile(actual);
+    if (raw.length > 32000000 || digest !== undefined && hash(raw) !== digest) throw new Error('Completed SWE evidence checksum or size is invalid.');
+    return { path: actual, sha256: hash(raw), value: JSON.parse(raw) };
+  }
+  const grade = await document(path, undefined, true);
+  const grading = grade.value;
+  if (grading.kind !== 'swebench-cloud-inference-official-grading' || grading.status !== 'graded-small-sample' ||
+      grading.gradingComplete !== true || grading.lifecycleComplete !== true || grading.inferenceLifecycleIncomplete === true ||
+      grading.graderVersion !== '3.0.15' || !exactIds(grading.selectedIds) || !exactIds(grading.submittedIds) ||
+      !Array.isArray(grading.containerCleanup?.errors) || grading.containerCleanup.errors.length ||
+      typeof grading.finishedAt !== 'string' || !Number.isFinite(Date.parse(grading.finishedAt))) {
+    throw new Error('All three official SWE evaluations and their cleanup must be complete before releasing the reservation.');
+  }
+  const inferred = await document(grading.inferenceReport, grading.inferenceReportSha256);
+  const inference = inferred.value;
+  if (inference.kind !== 'swebench-verified-cloud-harness-inference' || inference.mode !== 'real' || inference.fakeModels !== false ||
+      inference.fabricatedBusinessResponses !== false || !exactIds(inference.selectedIds) || !exactIds(inference.cases?.map(item => item.instance_id)) ||
+      inference.expectedRuntimeRevision !== revision || inference.runtime?.build?.revision !== revision || inference.lifecycleIncomplete === true ||
+      inference.datasetRevision !== 'c104f840cc67f8b6eec6f759ebc8b2693d585d4a' || grading.datasetRevision !== inference.datasetRevision ||
+      inference.status !== 'cloud-inference-exported-awaiting-official-grading' || typeof inference.finishedAt !== 'string' ||
+      !Number.isFinite(Date.parse(inference.finishedAt)) || Date.parse(inference.finishedAt) > Date.parse(grading.finishedAt)) {
+    throw new Error('Completed SWE inference does not match all fixed samples and the current exact runtime.');
+  }
+  const runtime = await document(inference.runtimeEvidence?.file, inference.runtimeEvidence?.sha256);
+  if (inference.runtimeEvidence?.source !== 'ordinary-cloud-runtime-API' || runtime.value.build?.revision !== revision) throw new Error('SWE runtime receipt is missing or changed.');
+  const official = await document(grading.official?.file, grading.official?.sha256);
+  const aggregate = official.value;
+  if (aggregate.total_instances !== 3 || !exactIds(aggregate.submitted_ids) ||
+      !Array.isArray(aggregate.error_ids) || aggregate.error_ids.length || !Array.isArray(aggregate.incomplete_ids) || aggregate.incomplete_ids.length ||
+      !exactIds([...(aggregate.resolved_ids ?? []), ...(aggregate.unresolved_ids ?? []), ...(aggregate.empty_patch_ids ?? [])])) {
+    throw new Error('Official aggregate does not account for all three fixed samples.');
+  }
+  const runs = [];
+  for (const item of inference.cases) {
+    if (!terminalStatuses.includes(item.runStatus) || !/^run_[a-f0-9-]{36}$/u.test(item.runId ?? '') ||
+        !/^ses_[a-f0-9-]{36}$/u.test(item.sessionId ?? '') || !Number.isSafeInteger(item.sharedModelCalls) || item.sharedModelCalls < 1 ||
+        item.runEvidence?.source !== 'ordinary-cloud-runs-API' || item.persisted?.source !== 'ordinary-cloud-session-events-API') {
+      throw new Error('Every SWE sample needs a known terminal run and actual shared-call evidence.');
+    }
+    const run = await document(item.runEvidence.file, item.runEvidence.sha256);
+    const transcript = await document(item.persisted.file, item.persisted.sha256);
+    if (run.value.id !== item.runId || run.value.sessionId !== item.sessionId || run.value.status !== item.runStatus ||
+        !Array.isArray(transcript.value) || transcript.value.some(event => event.sessionId !== item.sessionId || event.turnId !== item.runId) ||
+        !transcript.value.some(event => ['turn.completed', 'turn.failed', 'turn.cancelled', 'turn.interrupted'].includes(event.type))) {
+      throw new Error('SWE terminal receipt or persisted transcript identity changed.');
+    }
+    runs.push({ instanceId: item.instance_id, runId: item.runId, sessionId: item.sessionId, status: item.runStatus,
+      sharedModelCalls: item.sharedModelCalls, runEvidenceSha256: run.sha256, persistedSha256: transcript.sha256 });
+  }
+  return { evidence: { gradingReport: grade.path, gradingReportSha256: grade.sha256, inferenceReport: inferred.path,
+    inferenceReportSha256: inferred.sha256, officialFile: official.path, officialSha256: official.sha256, revision, selectedIds: ids, runs },
+    configuration: inference.finalBudget?.configuration ?? inference.budget?.configuration };
+}
+const completedSweSource = completedSwe ? await completedSweReceipt(value('--completed-swe-report')) : undefined;
 const driverRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(import.meta.dirname, '..'), encoding: 'utf8' }).trim();
 const driverSha256 = createHash('sha256').update(await readFile(import.meta.filename)).digest('hex');
 const budget = validationBudget(value('--budget-dir'));
@@ -58,9 +125,11 @@ const output = resolve('.cache/execution-architecture-live', new Date().toISOStr
 await mkdir(output, { recursive: true, mode: 0o700 });
 const report = { revision, driverRevision, driverSha256, environment: 'server-hosted cloud / authenticated daoyintech account', mode: 'real', fakeModels: false,
   cases: [], runs: [], ...(sourceReceipt ? { resume: sourceReceipt } : {}), budgetDirectory: budget.directory,
+  ...(completedSweSource ? { completedSwe: completedSweSource.evidence } : {}),
   ...(repairOnly ? { independentTaskValidation: 'not_run_budget_reserved' } : {}),
   startedAt: new Date().toISOString(), status: 'preflight', modelCalls: 0, cost: 'unknown', limits: {
-    maxScenarioRequests: repairOnly ? 4 : reusePrepared ? 10 : resuming ? 15 : 20, reservedSweRequests: 72, requiredRemainingRequests: repairOnly ? 76 : reusePrepared ? 82 : resuming ? 87 : 92,
+    maxScenarioRequests: repairOnly ? 4 : reusePrepared ? 10 : resuming ? 15 : 20, reservedSweRequests: completedSwe ? 0 : 72,
+    requiredRemainingRequests: completedSwe ? (repairOnly ? 4 : 10) : repairOnly ? 76 : reusePrepared ? 82 : resuming ? 87 : 92,
     runCalls: repairOnly ? [0, 4, 0] : reusePrepared ? [0, 6, 4] : resuming ? [5, 6, 4] : [8, 8, 4], maxToolCalls: 96, maxActiveMs: 600000, externalObservationMs: 420000 } };
 const save = () => writeFile(join(output, 'report.json'), JSON.stringify(sanitizeEvidence(report), null, 2) + '\n', { mode: 0o600 });
 const client = createCloudAccountClient();
@@ -178,8 +247,21 @@ try {
   report.limits.maxCny = report.budget.maxMicroCny / 1000000;
   invariant(report.budget.maxRequests === 100 && report.budget.maxMicroCny === 5000000, 'The separately authorized 100-request / 5-CNY ledger is required.');
   invariant(report.model.provider === 'deepseek' && report.model.model === 'deepseek-flash', 'Frozen actual model differs from the authorized model.');
-  invariant(report.budget.maxRequests - report.budget.requestsReserved >= report.limits.requiredRemainingRequests, 'Insufficient request allowance for the bounded mechanisms and reserved 72-call SWE sample.');
+  invariant(report.budget.maxRequests - report.budget.requestsReserved >= report.limits.requiredRemainingRequests, 'Insufficient request allowance for the bounded mechanisms and remaining SWE reservation.');
   invariant((await call('/runtime')).build?.revision === revision, 'Expected cloud revision not deployed.');
+  if (completedSweSource) {
+    invariant(completedSweSource.configuration && ['provider', 'model', 'modelConfigurationSha256', 'pricingSha256'].every(key =>
+      completedSweSource.configuration[key] === report.model[key]), 'Completed SWE uses another frozen model or pricing configuration.');
+    report.completedSwe.budgetDirectory = budget.directory;
+    for (const recorded of report.completedSwe.runs) {
+      const actual = (await call(`/runs/${recorded.runId}`)).run;
+      invariant(actual.id === recorded.runId && actual.sessionId === recorded.sessionId && terminalStatuses.includes(actual.status) && actual.status === recorded.status,
+        'SWE run is not actually in its recorded terminal state; no further model run admitted.');
+      const admission = await budget.settleRun(recorded.runId);
+      invariant(admission.requestsReservedForRun === recorded.sharedModelCalls, 'Completed SWE was not reserved in this active validation ledger.');
+      recorded.ledgerProof = { requestsReservedForRun: admission.requestsReservedForRun, ledgerSha256: admission.ledgerSha256 };
+    }
+  }
   report.status = 'running'; await save();
   const originalExport = 'import sys\nfrom decimal import Decimal\nif sys.version_info[:2] != (3, 11):\n    raise RuntimeError("project requires Python 3.11")\nfrom architecture_dependency import FACTOR\ndef total():\n    return sum([Decimal("3"), Decimal("4")])\nif __name__ == "__main__":\n    print(total())\n';
   const check = 'from decimal import Decimal\nfrom export import total\nassert total() == Decimal("7.7"), ("service-fee total", total())\nprint("focused-check-passed")\n';
@@ -282,7 +364,8 @@ try {
 
   if (repairOnly) {
     report.cases.push({ name: '同会话独立任务的计划和验证隔离', sessionId: item.sessionId, workspaceId: item.workspaceId,
-      status: 'not_run_budget_reserved', reason: 'Remaining 72 shared requests reserved for the fixed SWE sample.' });
+      status: 'not_run_budget_reserved', reason: completedSwe ? 'Only the four-call repair scope was admitted from the remaining allowance.'
+        : 'Remaining 72 shared requests reserved for the fixed SWE sample.' });
     item.status = 'passed-repair-only'; report.status = 'passed-repair-only';
   } else {
   const independent = await run(item, `这是同会话中的独立新任务，不是上一任务续跑。第一步用 task_plan read 读取本任务状态，确认初始版本为 0；随后在工作区 ${item.workspaceId} 读取 .python-version，生成 runtime-audit.txt，内容只包含当前声明的版本和工作区编号，不修改现有源代码。创建并完成本任务自己的计划，引用真实文件证据。`, 4);
