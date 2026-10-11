@@ -3,10 +3,8 @@ import type { ExecutionIdentity } from "@daoyin/harness-contracts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { CloudRepository } from "../repository.js";
 import { CloudError } from "../repository.js";
-import type { ResourceControlRequest } from "./contracts.js";
+import { RESOURCE_TOOL_NAMES, type ResourceControlRequest } from "./contracts.js";
 import { resourceCall } from "./tools.js";
-
-const actionPattern = "^(?:resource_(?:list|attach|detach|media_(?:begin|chunk|commit|read|profile|analyze|supplement_approve)|campfire_(?:list|inspect|music|narrate|plan|render|status|supplement(?:_quote|_status)?))|workspace_(?:create|inspect|snapshot|restore)|file_(?:list|stat|read|search|write|patch|mkdir|move|remove)|git_(?:status|diff|log|branch|checkout|commit|export_patch)|process_(?:run|start|read|write|stop|list)|artifact_(?:create|read|list)|deployment_(?:create|status|rollback))$";
 
 export function registerResourceRoutes(app: FastifyInstance, options: {
   repository: CloudRepository;
@@ -70,15 +68,16 @@ export function registerResourceRoutes(app: FastifyInstance, options: {
   app.post<{ Body: ResourceControlRequest }>("/api/v1/cloud/resources/control", {
     bodyLimit: 2_000_000,
     schema: { body: { type: "object", additionalProperties: true, required: ["action"], properties: {
-      action: { type: "string", pattern: actionPattern }, sessionId: { type: "string", minLength: 1, maxLength: 160 },
+      action: { type: "string", enum: [...RESOURCE_TOOL_NAMES] }, sessionId: { type: "string", minLength: 1, maxLength: 160 },
       sourceRun: { type: "string", minLength: 1, maxLength: 160 }, requestId: { type: "string", minLength: 8, maxLength: 200 },
       resourceId: { type: "string", pattern: "^(?:res|wsp|snp|art|dep|prc)_[a-f0-9]{24}$" },
       workspaceId: { type: "string", pattern: "^wsp_[a-f0-9]{24}$" },
       snapshotId: { type: "string", pattern: "^snp_[a-f0-9]{24}$" }, artifactId: { type: "string", pattern: "^art_[a-f0-9]{24}$" },
       deploymentId: { type: "string", pattern: "^dep_[a-f0-9]{24}$" }, processId: { type: "string", pattern: "^prc_[a-f0-9]{24}$" },
-      waitMs: { type: "integer", minimum: 0, maximum: 30000 },
+      waitMs: { type: "integer", minimum: 0, maximum: 60000 },
     } } },
  }, async (request) => {
+ if (Object.hasOwn(request.body, "agentProcess")) throw new CloudError(400, "REQUEST_INVALID", "Agent process mode is runtime-owned and cannot be supplied by clients.");
  const identity = options.identityFor(request);
  await options.ensureActive(identity);
  if (!identity.allowedTools.includes(request.body.action)) {
