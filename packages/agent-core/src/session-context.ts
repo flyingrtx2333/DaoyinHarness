@@ -18,6 +18,7 @@ export function sessionEvidence(events: readonly AgentEvent[], minimumSeq = 0): 
       const start = starts.get(key);
       starts.delete(key);
       const base = {
+        evidenceReference: { type: "event", id: event.id },
         sessionId: event.sessionId, turnId: event.turnId, eventSeq: event.eventSeq,
         toolCallId: event.payload.toolCallId, tool: event.payload.toolName,
         input: preview(start?.payload.input ?? null, 300),

@@ -58,7 +58,14 @@ export function contextPreview(value: JsonValue, maxCharacters: number): string 
   if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 256) throw new Error("Invalid context preview budget.");
   const serialized = JSON.stringify(value);
   if (serialized.length <= maxCharacters) return serialized;
-  const envelope = { truncated: true, originalCharacters: serialized.length };
+  // Carry an existing event reference at the outer level even after repeated preview reductions.
+  // This preserves a reference as data; task_plan still checks access to the actual event.
+  const candidate = typeof value === "object" && value !== null && !Array.isArray(value) ? value.evidenceReference : undefined;
+  const reference = typeof candidate === "object" && candidate !== null && !Array.isArray(candidate) &&
+    candidate.type === "event" && typeof candidate.id === "string" && candidate.id.length > 0 && candidate.id.length <= 200 &&
+    Object.keys(candidate).every(key => key === "type" || key === "id") ? { evidenceReference: candidate } : {};
+  const envelope = { ...reference, truncated: true, originalCharacters: serialized.length };
+  if (JSON.stringify(envelope).length + 16 > maxCharacters) throw new Error("Persisted evidence reference exceeds the context preview budget.");
   const preview = boundedJson(value, maxCharacters - JSON.stringify(envelope).length - 16);
   return JSON.stringify({ ...envelope, preview });
 }
