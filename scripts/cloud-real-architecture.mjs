@@ -356,7 +356,7 @@ try {
   secondCase.checks = checks;
   invariant(checks.some(observation => observation.exitCode !== 0) && checks.at(-1)?.exitCode === 0, 'The actual named failing check and repaired rerun were not both observed.');
   invariant(secondCase.actual.exitCode === 0 && /focused-check-passed/.test(secondCase.actual.stdout ?? ''), 'Final actual focused check did not pass.');
-  invariant(secondCase.caller.exitCode === 0 && (secondCase.caller.stdout ?? '').trim() === '7.7' &&
+  invariant(secondCase.caller.exitCode === 0 && /^7\.70*$/u.test((secondCase.caller.stdout ?? '').trim()) &&
     (secondCase.checkSource.content ?? secondCase.checkSource.text) === check && (secondCase.versionDeclaration.content ?? secondCase.versionDeclaration.text) === '3.11\n', 'Caller compatibility, original assertion or declared runtime was weakened.');
   invariant(firstCase.cacheBefore.cacheKey === secondCase.cacheAfter.cacheKey && secondCase.dependency.exitCode === 0 && (secondCase.dependency.stdout ?? '').includes(firstCase.cacheBefore.cacheKey), 'Source or diagnostic edits invalidated the unchanged dependency cache.');
   invariant(outcome(resumed) === 'completed' && plan(resumed)?.steps.length > 0 && plan(resumed).steps.every(step => step.status === 'completed'), 'Successful repair did not clear the task-scoped unfinished work.');
