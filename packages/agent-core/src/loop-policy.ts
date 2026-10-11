@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { MODEL_TOOL_BATCH_LIMIT, MODEL_TOOL_ARGUMENT_LIMIT, MODEL_TOOL_BATCH_ARGUMENT_LIMIT } from "@daoyin/harness-protocol";
 import type { ToolDescriptor, ToolExecution, ToolFailure } from "@daoyin/harness-tools/registry";
 import type { ModelReply, ModelToolCall } from "./model.js";
 
@@ -44,7 +45,7 @@ export function validateModelReply(value: unknown, seenIds: ReadonlySet<string>)
     throw new AgentPolicyError("MODEL_REPLY_INVALID", "模型返回了无效的工具请求结构。");
   }
   if (!value.calls.length) throw new AgentPolicyError("MODEL_TOOL_CALLS_EMPTY", "模型返回了空工具请求。");
-  if (value.calls.length > 16 || (value.content !== undefined && (typeof value.content !== "string" || value.content.length > 8_000))) {
+  if (value.calls.length > MODEL_TOOL_BATCH_LIMIT || (value.content !== undefined && (typeof value.content !== "string" || value.content.length > 8_000))) {
     throw new AgentPolicyError("MODEL_TOOL_BATCH_INVALID", "模型工具批次超过允许的范围。");
   }
   const batchIds = new Set<string>();
@@ -58,7 +59,7 @@ export function validateModelReply(value: unknown, seenIds: ReadonlySet<string>)
     }
     const serialized = canonicalJson(item.input);
     characters += serialized.length;
-    if (serialized.length > 32_000 || characters > 48_000) {
+    if (serialized.length > MODEL_TOOL_ARGUMENT_LIMIT || characters > MODEL_TOOL_BATCH_ARGUMENT_LIMIT) {
       throw new AgentPolicyError("MODEL_TOOL_INPUT_TOO_LARGE", "工具参数超过上下文预算，请缩小操作范围。");
     }
     batchIds.add(item.id);

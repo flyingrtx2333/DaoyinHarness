@@ -1,5 +1,10 @@
 export const API_VERSION = "v1" as const;
 
+/** Trusted response bounds; per-run tool budgets and authorization still apply. */
+export const MODEL_TOOL_BATCH_LIMIT = 16;
+export const MODEL_TOOL_ARGUMENT_LIMIT = 32_000;
+export const MODEL_TOOL_BATCH_ARGUMENT_LIMIT = 48_000;
+
 export type Readiness = "ready" | "planned" | "unavailable";
 
 /** Model-reported task outcome, not independent verification of task success. */

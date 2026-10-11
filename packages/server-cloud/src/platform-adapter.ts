@@ -1,4 +1,5 @@
 import { executionBudget, type ExecutionBudget } from "./execution-budget.js";
+import { MODEL_TOOL_BATCH_LIMIT } from "@daoyin/harness-protocol";
 import { isProjectAccountIdentity } from "./projects/profile.js";
 import { isProjectTool, validateProjectInput } from "./projects/tools.js";
 import { assertExecutionIdentity, snapshotExecutionIdentity, type ExecutionIdentity } from "@daoyin/harness-contracts";
@@ -118,7 +119,7 @@ function reply(value: unknown, appPolicy?: CallPolicy): ModelReply {
     return { kind: "assistant", content: output.content,
       ...(output.taskOutcome === "completed" || output.taskOutcome === "partial" || output.taskOutcome === "blocked" ? { taskOutcome: output.taskOutcome } : {}) };
   }
-  if (output.kind !== "tool_calls" || !Array.isArray(output.calls) || output.calls.length < 1 || output.calls.length > 4) throw new Error("Invalid model calls.");
+  if (output.kind !== "tool_calls" || !Array.isArray(output.calls) || output.calls.length < 1 || output.calls.length > MODEL_TOOL_BATCH_LIMIT) throw new Error("Invalid model calls.");
   const seen = new Set<string>();
   const calls = output.calls.map((call) => {
     if (!record(call) || typeof call.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(call.id) || seen.has(call.id) ||
