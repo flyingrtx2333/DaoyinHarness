@@ -4,12 +4,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 const SENSITIVE_KEY = /token|password|passwd|cookie|secret|authorization|credential|csrf|accountscope/i;
 const SENSITIVE_TEXT = /(?:bearer\s+[a-z0-9._~+/-]{8,}|\bsk-[a-z0-9_-]{8,}\b|saishi_agent_[A-Za-z0-9_-]{64})/giu;
 const CREDENTIAL_URL = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/<>"'@]+@/giu;
+const TOKEN_METADATA = new Set(['max_tokens', 'maxOutputTokens', 'tokens_request', 'tokens_response', 'inputTokens', 'outputTokens', 'totalTokens']);
 
 export function sanitizeEvidence(value) {
   if (typeof value === 'string') return value.replace(SENSITIVE_TEXT, '[REDACTED]').replace(CREDENTIAL_URL, '$1[REDACTED]@');
   if (Array.isArray(value)) return value.map(sanitizeEvidence);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) =>
-    [key, SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeEvidence(item)]));
+    [key, SENSITIVE_KEY.test(key) && !(TOKEN_METADATA.has(key) && Number.isSafeInteger(item) && item >= 0) ? '[REDACTED]' : sanitizeEvidence(item)]));
   return value;
 }
 
