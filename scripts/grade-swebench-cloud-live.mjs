@@ -17,9 +17,11 @@ async function cachePath(path) {
   return actual;
 }
 
-export async function gradeSwebench({ inferenceReport, signal } = {}) {
+export async function gradeSwebench({ inferenceReport, instanceId, signal } = {}) {
   signal?.throwIfAborted();
   if (!inferenceReport) throw new Error("Provide an actual inference report.");
+  if (instanceId !== undefined && !ids.includes(instanceId)) throw new Error("Unsupported grading instance.");
+  const gradingIds = instanceId === undefined ? ids : [instanceId];
   const source = await cachePath(inferenceReport);
   const sourceText = await readFile(source, "utf8");
   const inference = JSON.parse(sourceText);
@@ -53,9 +55,10 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
   const datasetPath = await cachePath(manifest.datasetPath);
   if (hash(await readFile(datasetPath)) !== manifest.datasetSha256) throw new Error("Pinned dataset checksum changed.");
   const inferenceOutput = await cachePath(inference.output);
-  const predictionsPath = await cachePath(join(inferenceOutput, "predictions.jsonl"));
-  const predictionsText = await readFile(predictionsPath, "utf8");
-  const predictions = predictionsText.split(/\r?\n/u).filter(line => line.trim()).map(line => JSON.parse(line));
+  let predictionsPath = await cachePath(join(inferenceOutput, "predictions.jsonl"));
+  let predictionsText = await readFile(predictionsPath, "utf8");
+  let predictions = predictionsText.split(/\r?\n/u).filter(line => line.trim()).map(line => JSON.parse(line));
+  const sourcePredictions = { file: predictionsPath, sha256: hash(predictionsText) };
   const seen = new Set();
   for (const item of predictions) {
     if (!ids.includes(item.instance_id) || seen.has(item.instance_id) || typeof item.model_patch !== "string" ||
@@ -130,14 +133,25 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
   const output = join(root, ".cache", "swebench-grade", new Date().toISOString().replaceAll(":", "-") + "_" + randomUUID().slice(0, 8));
   await mkdir(output, { recursive: true, mode: 0o700 });
   await cachePath(output);
+  if (instanceId !== undefined) {
+    // Retain the original inference and grading records. A failed grader may
+    // retry only the affected instance, with its exact existing prediction.
+    predictions = predictions.filter(item => gradingIds.includes(item.instance_id));
+    if (!predictions.length) throw new Error("Selected instance has no retained prediction.");
+    seen.clear();
+    for (const item of predictions) seen.add(item.instance_id);
+    predictionsText = predictions.map(item => JSON.stringify(item)).join("\n") + "\n";
+    predictionsPath = join(output, "selected-predictions.jsonl");
+    await writeFile(predictionsPath, predictionsText, { flag: "wx", mode: 0o600 });
+  }
   const runId = "daoyin-verified-3-" + randomUUID().slice(0, 8);
   // v3 writes the aggregate in cwd even when report_dir is supplied.
   const resultsDirectory = output;
   const report = { kind: "swebench-cloud-inference-official-grading", status: "preflight", output, runId,
     runnerSha256: hash(await readFile(import.meta.filename)),
-    inferenceReport: source, inferenceReportSha256: hash(sourceText), predictionsPath, predictionsSha256: hash(predictionsText),
+    inferenceReport: source, inferenceReportSha256: hash(sourceText), sourcePredictions, predictionsPath, predictionsSha256: hash(predictionsText),
     datasetRevision: inference.datasetRevision, datasetSha256: manifest.datasetSha256, graderVersion: "3.0.15",
-    selectedIds: ids, perCaseModelCalls: callsPerCase, inferenceFailures: inference.inferenceFailures ?? [], inferenceLifecycleIncomplete: inference.lifecycleIncomplete === true, submittedIds: [...seen], missingInferenceIds: ids.filter(id => !seen.has(id)),
+    selectedIds: gradingIds, perCaseModelCalls: callsPerCase, inferenceFailures: (inference.inferenceFailures ?? []).filter(id => gradingIds.includes(id)), inferenceLifecycleIncomplete: inference.lifecycleIncomplete === true, submittedIds: [...seen], missingInferenceIds: gradingIds.filter(id => !seen.has(id)),
     limits: { workers: 1, perInstanceTestTimeoutSeconds: 900, totalProcessTimeoutMs: 5_400_000, capturedOutputBytes: 8_000_000 },
     environment: { platform: process.platform, arch: process.arch, execution: "independent trusted Docker daemon; not cloud gVisor inference" }, official: null, startedAt: new Date().toISOString() };
   const save = () => writeFile(join(output, "report.json"), JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });
@@ -226,7 +240,7 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
       { cwd: output, env: environment, timeout: 30_000, maxBuffer: 100_000, signal });
     report.graderDataset = { file: graderDataset, sha256: hash(await readFile(graderDataset)), referencePatchExposedToAgent: false };
     const args = ["-m", "swebench.harness.run_evaluation", "--dataset_name", graderDataset,
-      "--predictions_path", predictionsPath, "--instance_ids", ...ids, "--max_workers", "1", "--timeout", "900",
+      "--predictions_path", predictionsPath, "--instance_ids", ...gradingIds, "--max_workers", "1", "--timeout", "900",
       "--run_id", runId, "--report_dir", resultsDirectory, "--namespace", ""];
     report.command = { executable: python, args }; report.status = "official-grader-running"; await save();
     console.log(JSON.stringify({ status: report.status, output, submitted: predictions.length }));
@@ -241,9 +255,9 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
     const official = JSON.parse(officialText);
     const groups = ["completed_ids", "incomplete_ids", "empty_patch_ids", "resolved_ids", "unresolved_ids", "error_ids", "submitted_ids"];
     if (groups.some(key => !Array.isArray(official[key]) || new Set(official[key]).size !== official[key].length ||
-        official[key].some(id => !ids.includes(id))) ||
+        official[key].some(id => !gradingIds.includes(id))) ||
         official.submitted_ids.length !== seen.size || official.submitted_ids.some(id => !seen.has(id)) ||
-        official.resolved_ids.some(id => !seen.has(id)) || official.total_instances !== ids.length ||
+        official.resolved_ids.some(id => !seen.has(id)) || official.total_instances !== gradingIds.length ||
         official.resolved_instances !== official.resolved_ids.length ||
         official.unresolved_instances !== official.unresolved_ids.length ||
         official.error_instances !== official.error_ids.length ||
@@ -275,7 +289,7 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
       report.evaluationDetails.push(evidence);
     }
     const accounted = new Set([...official.resolved_ids, ...official.unresolved_ids, ...official.empty_patch_ids]);
-    report.gradingComplete = seen.size === ids.length && ids.every(id => accounted.has(id)) &&
+    report.gradingComplete = seen.size === gradingIds.length && gradingIds.every(id => accounted.has(id)) &&
       !official.error_ids.length && !official.incomplete_ids.length &&
       report.evaluationDetails.every(item => item.patchSuccessfullyApplied && item.testStatusAvailable);
     report.status = report.gradingComplete ? "graded-small-sample" : "official-results-with-incomplete-evaluation";
@@ -298,12 +312,14 @@ export async function gradeSwebench({ inferenceReport, signal } = {}) {
 
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   const args = process.argv.slice(2);
-  if (args.length !== 2 || args[0] !== "--report") throw new Error("Use --report PATH to an actual Harness inference report.");
+  if (![2, 4].includes(args.length) || args[0] !== "--report" || (args.length === 4 && args[2] !== "--instance")) {
+    throw new Error("Use --report PATH [--instance ID] to grade retained actual inference.");
+  }
   const controller = new AbortController();
   const stop = () => controller.abort(new Error("Operator cancelled official grading."));
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   try {
-    const result = await gradeSwebench({ inferenceReport: args[1], signal: controller.signal });
+    const result = await gradeSwebench({ inferenceReport: args[1], ...(args.length === 4 ? { instanceId: args[3] } : {}), signal: controller.signal });
     console.log(JSON.stringify({ status: result.report.status, output: result.output, official: result.report.official?.file ?? null }));
     process.exitCode = result.report.gradingComplete && result.report.lifecycleComplete ? 0 : 1;
   } finally {
