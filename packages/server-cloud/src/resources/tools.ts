@@ -239,6 +239,12 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
         name, description: descriptor.description + (name === "resource_campfire_list" ? ` ${CAMPFIRE_INSTRUCTIONS}` : ""), category: "extension", mutating: descriptor.mutating,
         inputSchema: schema as JsonValue,
         failureVerificationResource: input => descriptor.mutating && typeof input.workspaceId === "string" && /^wsp_[a-f0-9]{24}$/u.test(input.workspaceId) ? input.workspaceId : undefined,
+        ...(name === "environment_prepare" ? { auditInput: (input: Record<string, unknown>) => ({
+          ...(typeof input.workspaceId === "string" && /^wsp_[a-f0-9]{24}$/u.test(input.workspaceId) ? { workspaceId: input.workspaceId } : {}),
+          ...(typeof input.retryFromOperationId === "string" && /^op_[a-f0-9]{24}$/u.test(input.retryFromOperationId) ? { retryFromOperationId: input.retryFromOperationId } : {}),
+          ...(typeof input.installDependencies === "boolean" ? { installDependencies: input.installDependencies } : {}),
+          ...(typeof input.waitMs === "number" && Number.isSafeInteger(input.waitMs) && input.waitMs >= 0 && input.waitMs <= 60000 ? { waitMs: input.waitMs } : {}),
+        }) } : {}),
         ...(CAMPFIRE_DISPLAY_NAMES[name] ? { displayName: CAMPFIRE_DISPLAY_NAMES[name], auditInput: () => ({}) } : {}),
         async execute(input, signal, context) {
           if (!explicitHighRisk(run.userMessage, name)) throw new CloudError(409, "EXPLICIT_INTENT_REQUIRED", "This operation requires an explicit current-turn request.");

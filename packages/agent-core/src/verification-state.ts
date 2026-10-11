@@ -41,6 +41,7 @@ export class VerificationState {
       if (evidence.verificationHint) {
         const id = evidence.verificationHint.resourceId;
         this.#versions.delete(id);
+        this.#generations.set(id, (this.#generations.get(id) ?? 0) + 1);
         if (this.#turnIds.has(event.turnId)) this.#changedResources.add(id);
       }
       if (evidence.workspaceVersion) this.#versions.set(evidence.workspaceVersion.resourceId, evidence.workspaceVersion.version);
