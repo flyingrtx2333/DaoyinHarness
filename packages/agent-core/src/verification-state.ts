@@ -1,4 +1,4 @@
-import type { AgentEvent, ToolEvidence, WorkspaceVersion } from "@daoyin/harness-protocol";
+import type { AgentEvent, TaskPlan, ToolEvidence, WorkspaceVersion } from "@daoyin/harness-protocol";
 import { taskTurnIds } from "./task-scope.js";
 
 interface Check {
@@ -21,6 +21,7 @@ export class VerificationState {
   readonly #changedResources = new Set<string>();
   readonly #terminal = new Map<string, { state: string; exitCode: number | null; eventId: string; before?: WorkspaceVersion; after?: WorkspaceVersion }>();
   readonly #failureResources = new Map<string, string>();
+  readonly #transitions = new Map<string, string>();
 
   constructor(events: readonly AgentEvent[], turnId: string) {
     this.#turnIds = taskTurnIds(events, turnId);
@@ -53,6 +54,7 @@ export class VerificationState {
       if (evidence.workspaceVersion && !evidence.processObservation) this.#versions.set(evidence.workspaceVersion.resourceId, evidence.workspaceVersion.version);
       const transition = evidence.verificationWorkspace;
       if (transition && transition.sourceResourceId !== transition.targetResourceId && this.#turnIds.has(event.turnId)) {
+        this.#transitions.set(transition.sourceResourceId, transition.targetResourceId);
         for (const [key, check] of [...this.#checks]) {
           if (check.resourceId !== transition.sourceResourceId) continue;
           this.#checks.delete(key);
@@ -138,9 +140,30 @@ export class VerificationState {
   }
 
   get unresolvedCount(): number { return [...this.#checks.values()].filter(check => this.#status(check) !== "command_succeeded").length; }
+  get unsuccessfulCount(): number { return [...this.#checks.values()].filter(check => ["unsuccessful", "outdated", "version_unknown"].includes(this.#status(check))).length; }
   get unresolved(): boolean { return this.unresolvedCount > 0; }
   get unverifiedResourceCount(): number {
     return [...this.#changedResources].filter(id => ![...this.#checks.values()].some(check => check.resourceId === id && this.#status(check) === "command_succeeded")).length;
+  }
+
+  /** Plan status is never consulted: obligations require real current-version receipts. */
+  plannedChecks(plan: TaskPlan | undefined): Array<{ resourceId: string; scope: string; status: string }> {
+    const selected = new Map<string, { resourceId: string; scope: string; status: string }>();
+    for (const step of plan?.steps ?? []) {
+      if (!step.verification) continue;
+      let resourceId = step.verification.resourceId;
+      const visited = new Set<string>();
+      while (this.#transitions.has(resourceId) && !visited.has(resourceId)) {
+        visited.add(resourceId); resourceId = this.#transitions.get(resourceId)!;
+      }
+      const scope = step.verification.scope;
+      const checks = [...this.#checks.values()].filter(check => check.resourceId === resourceId && check.scope === scope);
+      const statuses = checks.map(check => this.#status(check));
+      // A different successful command with the same label cannot hide a failure.
+      const status = !statuses.length ? "not_started" : statuses.find(value => value !== "command_succeeded") ?? "command_succeeded";
+      selected.set(JSON.stringify([resourceId, scope]), { resourceId, scope, status });
+    }
+    return [...selected.values()];
   }
 
   context(): string {

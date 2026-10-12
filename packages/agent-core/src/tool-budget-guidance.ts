@@ -4,17 +4,21 @@ import type { ToolExecutionRole } from "@daoyin/harness-protocol";
 export function toolBudgetGuidance(input: {
   remaining: number; used: ReadonlyMap<ToolExecutionRole, number>; unresolvedChecks: number;
   unverifiedResources: number; pendingPlanSteps: number; pendingOperations: number;
+  plannedChecks: number; unsuccessfulChecks: number;
 }): string {
-  const checks = input.unresolvedChecks + input.unverifiedResources * 2;
+  const checks = Math.max(input.unresolvedChecks + input.plannedChecks, input.unverifiedResources * 2);
+  // Diagnosis plus a repair is additional to rerunning the existing check.
+  const repair = input.unsuccessfulChecks > 0 ? 2 : 0;
   const observe = input.pendingOperations;
   const closePlan = input.pendingPlanSteps > 0 ? 1 : 0;
-  const needed = checks + observe + closePlan;
+  const needed = checks + repair + observe + closePlan;
   if (!input.used.size && !needed) return "";
   const reserved = Math.min(input.remaining, needed);
   return "\n工具分配依据（建议，不是额外额度或权限）：" + JSON.stringify({
     attemptedByRole: Object.fromEntries(input.used), remaining: input.remaining,
     unresolvedChecks: input.unresolvedChecks, unverifiedResources: input.unverifiedResources,
     pendingOperations: input.pendingOperations, pendingPlanSteps: input.pendingPlanSteps,
+    notStartedPlannedChecks: input.plannedChecks, suggestedRepairCalls: repair,
     suggestedCheckCalls: checks, suggestedOperationReadCalls: observe, suggestedPlanCloseoutCalls: closePlan,
     suggestedReserve: reserved, optionalExplorationAllowance: Math.max(0, input.remaining - reserved),
   }) + "\n先保留结果核对与计划收尾所需的调用，再安排可选探索。修改通常还需检查差异并运行受影响的现有行为；失败检查需要定位、修正并重跑，以上只是下限估计。" +

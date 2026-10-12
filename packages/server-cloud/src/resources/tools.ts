@@ -9,6 +9,7 @@ import { unixJson } from "../projects/wire.js";
 import { RESOURCE_TOOL_NAMES, type ResourceControlRequest, type ResourceToolName } from "./contracts.js";
 import { CAMPFIRE_DEFINITIONS, CAMPFIRE_UI_ACTIONS, CAMPFIRE_INSTRUCTIONS } from "./campfire-contract.js";
 import { validateStoryInput } from "../story-profile.js";
+import { isDependencyDeclaration } from "./environment.js";
 
 const object = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({ type: "object", additionalProperties: false, properties, required });
 const id = { type: "string", pattern: "^(?:res|wsp|snp|art|dep|prc)_[a-f0-9]{24}$" };
@@ -22,6 +23,35 @@ function processCheckIdentity(input: Record<string, unknown>): string {
   return "sha256:" + createHash("sha256").update(JSON.stringify([
     input.executable, input.args, typeof input.cwd === "string" ? posix.normalize(input.cwd) : ".", input.stdin ?? null, environment,
   ])).digest("hex");
+}
+
+function environmentFacts(result: Record<string, unknown>): JsonValue {
+  const runtime = result.runtime as { image?: { runtimeId?: unknown; digest?: unknown; imageDigest?: unknown } } | undefined;
+  const interpreters = Array.isArray(result.interpreters) ? result.interpreters.slice(0, 16).flatMap(item => {
+    if (!item || typeof item !== "object") return [];
+    const value = item as Record<string, unknown>;
+    return [{ executable: String(value.executable ?? "").slice(0, 80), available: value.available === true,
+      output: typeof value.output === "string" ? value.output.slice(0, 160) : null, truncated: value.truncated === true }];
+  }) : [];
+  const assessment = result.runtimeAssessment as { observations?: unknown; incompleteSources?: unknown; hints?: unknown } | undefined;
+  return { runtimeId: typeof runtime?.image?.runtimeId === "string" ? runtime.image.runtimeId : null,
+    imageDigest: String(runtime?.image?.digest ?? runtime?.image?.imageDigest ?? "").slice(0, 80),
+    cacheKey: typeof result.cacheKey === "string" ? result.cacheKey.slice(0, 80) : null, interpreters,
+    observations: Array.isArray(assessment?.observations) ? assessment.observations.slice(0, 8).map(item => {
+      const value = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      return { family: String(value.family ?? "").slice(0, 40), actualVersion: typeof value.actualVersion === "string" ? value.actualVersion.slice(0, 80) : null,
+        status: String(value.status ?? "unknown").slice(0, 40) };
+    }) : [],
+    hints: Array.isArray(assessment?.hints) ? assessment.hints.slice(0, 16).map(item => {
+      const value = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      return { family: String(value.family ?? "").slice(0, 40), source: String(value.source ?? "").slice(0, 160),
+        kind: String(value.kind ?? "").slice(0, 40), value: String(value.value ?? "").slice(0, 160) };
+    }) : [],
+    runtimes: Array.isArray(result.runtimes) ? result.runtimes.slice(0, 8).map(item => {
+      const value = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      return { id: String(value.id ?? "").slice(0, 80), version: typeof value.version === "string" ? value.version.slice(0, 160) : null };
+    }) : [],
+    incompleteSources: Array.isArray(assessment?.incompleteSources) ? assessment.incompleteSources.slice(0, 8).map(item => String(item).slice(0, 160)) : [] };
 }
 const WORKSPACE_PATH_PATTERN = "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.{1,2}(?:/|$)).{1,512}$";
 const workspacePath = new RegExp(WORKSPACE_PATH_PATTERN, "u");
@@ -93,7 +123,7 @@ export const RESOURCE_INSTRUCTIONS = `Use resource and workspace tools for all c
 
 Work toward the requested outcome within the shared call and time budgets. Search named symbols or error text in relevant paths, then read bounded implementation, caller and verification ranges. Batch independent read-only observations whose inputs are already known. Reuse available same-digest observations rather than walking overlapping ranges one call at a time; omitted or truncated context is not available evidence, so retrieve only what is missing. Once evidence supports a concrete diagnosis, choose the smallest authorized change or check instead of continuing general exploration. Read-only tasks do not require a mutation. For related edits already understood, prefer one coherent unified patch over a separate model round for each hunk, and reserve capacity to inspect the diff and validate the result.
 
-For code changes, inspect the environment and declared verification configuration before the first install or test. Use runtimeAssessment, actual interpreter output and the returned trusted runtime catalog together: an explicit pin mismatch justifies candidate preparation; a minimum version is not a tested upper bound, and published classifiers are evidence rather than a guarantee. On interpreter/API incompatibility, compare declared or published supported versions with actual runtime choices before another install or temporary compatibility shim. Do not invent a runtime or change source constraints to fit the current image. Select a focused reproduction and the relevant existing-behavior checks with their required dependencies from declarations; record them as separate unfinished steps in task_plan for complex tasks. Mark only the actual acceptance-check process with a stable verification scope name; omit it on installation, environment preparation and diagnostic/version probes. Reuse the name and exact command when repairing and rerunning the same check; a different command with that label cannot clear the failed check. Different scopes remain independently unresolved. Install success, file reads and completed plan steps are not validation. If a check fails, distinguish an actual code/test failure from dependency, interpreter, source-version metadata or network failure using its output. Inspect the missing evidence, change the responsible condition, and rerun the focused check; never repeat an identical failed install without new evidence, fabricate a version, weaken a declared minimum or skip the failing test to claim success. Runtime preparation returns a different workspace: confirm the actual candidate interpreter and continue editing and checking there. A later edit makes older checks stale; verify the final change, including affected callers and public data contracts. When adding a branch or data field, inspect existing consumers and their tests before changing or removing old fields, defaults or return types. Run the reproduction and affected existing checks, not only syntax or the new happy path. A failure requires one concrete diagnosis, a coherent repair and rerunning the same check against the final source; do not mark the plan complete first. Update plan steps with real evidence after checking, reserving a tool call for that closeout. Preserve a concrete next check when allowance is insufficient.
+For executable code-change tasks, inspect the environment and declared verification configuration early, before broad source exploration; independent targeted reads may be batched with inspection. Reuse persisted current observations. Select the baseline/reproduction and affected existing-behavior checks before optional exploration, declaring verification:{resourceId,scope} on plan steps for complex tasks. Environment readiness, dependencies and actual code-check failures are separate facts; preserve a concrete diagnosis and next check on failure. Use runtimeAssessment, actual interpreter output and the returned trusted runtime catalog together: an explicit pin mismatch justifies candidate preparation; a minimum version is not a tested upper bound, and published classifiers are evidence rather than a guarantee. On interpreter/API incompatibility, compare declared or published supported versions with actual runtime choices before another install or temporary compatibility shim. Do not invent a runtime or change source constraints to fit the current image. Select a focused reproduction and the relevant existing-behavior checks with their required dependencies from declarations; record them as separate unfinished steps in task_plan for complex tasks. Mark only the actual acceptance-check process with a stable verification scope name; omit it on installation, environment preparation and diagnostic/version probes. Reuse the name and exact command when repairing and rerunning the same check; a different command with that label cannot clear the failed check. Different scopes remain independently unresolved. Install success, file reads and completed plan steps are not validation. If a check fails, distinguish an actual code/test failure from dependency, interpreter, source-version metadata or network failure using its output. Inspect the missing evidence, change the responsible condition, and rerun the focused check; never repeat an identical failed install without new evidence, fabricate a version, weaken a declared minimum or skip the failing test to claim success. Runtime preparation returns a different workspace: confirm the actual candidate interpreter and continue editing and checking there. A later edit makes older checks stale; verify the final change, including affected callers and public data contracts. When adding a branch or data field, inspect existing consumers and their tests before changing or removing old fields, defaults or return types. Run the reproduction and affected existing checks, not only syntax or the new happy path. A failure requires one concrete diagnosis, a coherent repair and rerunning the same check against the final source; do not mark the plan complete first. Update plan steps with real evidence after checking, reserving a tool call for that closeout. Preserve a concrete next check when allowance is insufficient.
 
 For code changes, identify the existing callers and public data formats affected by the change. Preserve their compatibility unless the user requested a migration. Choose focused validation that covers the reported behavior and relevant existing behavior, rather than checking only the new path. File change receipts establish execution, not correctness. Follow the repository's declared runtime, dependency and verification configuration before installing packages; do not repeatedly improvise dependency versions or install the whole environment for one check. For lengthy commands track the returned operation/process ID and cursor; use the largest appropriate bounded wait within the remaining time rather than repeated short polls. While an operation runs, do only independent necessary work and do not launch a competing install or edit its source. Use completion receipts already present in execution evidence; process_read retrieves missing output rather than rerunning the command. Keep tool capacity and time for diff review, reproduction, affected regression checks and plan closeout. If a necessary environment condition cannot be established within the allowance, preserve the patch and report that concrete validation blocker.`;
 
@@ -326,6 +356,7 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
             result = { ...result, framingPolicy: "本轮用户未明确要求横屏或方形时，执行层应用默认9:16竖屏。这是正常默认行为，不是参数错误；无需再次确认画幅，直接继续制作。" };
           }
           await ensureActive(identity, signal);
+          const mutation = result.mutation as { changes?: Array<{ path?: unknown; afterDigest?: unknown }> } | undefined;
           if (workspaceId) {
             if (["workspace_restore", "file_move", "file_remove", "git_checkout", "git_branch"].includes(name)) {
               observedFiles.delete(workspaceId);
@@ -358,7 +389,6 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
                 readCoverage.set(workspaceId, files);
               }
             }
-            const mutation = result.mutation as { changes?: Array<{ path?: unknown; afterDigest?: unknown }> } | undefined;
             for (const change of mutation?.changes ?? []) {
               if (typeof change.path === "string" && (change.afterDigest === null ||
                 (typeof change.afterDigest === "string" && /^sha256:[a-f0-9]{64}$/u.test(change.afterDigest)))) observed.set(change.path, change.afterDigest);
@@ -388,10 +418,15 @@ export function createResourceTools(identity: ExecutionIdentity, run: CloudRun, 
           const artifactId = reference && typeof reference === "object" && !Array.isArray(reference)
             ? (reference as Record<string, unknown>).artifactId : undefined;
           const artifacts = typeof artifactId === "string" && /^art_[a-f0-9]{24}$/u.test(artifactId) ? [artifactId] : [];
+          const environmentObservation = name === "environment_inspect" && workspaceId ? { resourceId: workspaceId, facts: environmentFacts(result) } : undefined;
+          const declarationChanged = mutation?.changes?.some(change => typeof change.path === "string" && isDependencyDeclaration(change.path));
+          const environmentInvalidated = workspaceId && (declarationChanged || name === "workspace_restore" || name === "git_checkout" || name === "git_branch") ? { resourceId: workspaceId } : undefined;
           return { ok: true, summary: typeof result.summary === "string" ? result.summary : `${name} completed.`, evidence: { schemaVersion: 1, toolName: name, result: result as JsonValue, artifacts, diagnostics: [],
             ...(verificationHint === undefined ? {} : { verificationHint }),
             ...(verificationWorkspace === undefined ? {} : { verificationWorkspace }),
             ...(workspaceVersion === undefined ? {} : { workspaceVersion }),
+            ...(environmentObservation === undefined ? {} : { environmentObservation }),
+            ...(environmentInvalidated === undefined ? {} : { environmentInvalidated }),
             ...(processObservation === undefined ? {} : { processObservation }) } };
         },
       },

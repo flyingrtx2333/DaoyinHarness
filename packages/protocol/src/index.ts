@@ -21,6 +21,8 @@ export interface TaskPlanStep {
   description: string;
   status: "pending" | "in_progress" | "completed" | "blocked";
   evidence: TaskEvidenceReference[];
+  /** Selected acceptance obligation, not authorization, execution or proof of coverage. */
+  verification?: { resourceId: string; scope: string };
 }
 
 export interface TaskPlan {
@@ -171,6 +173,10 @@ export interface ToolEvidence {
   /** Successful snapshot-derived environment transition; not verification success. */
   verificationWorkspace?: { sourceResourceId: string; targetResourceId: string };
   workspaceVersion?: { resourceId: string; version: WorkspaceVersion };
+  /** Bounded capability-owned observations; project declarations remain untrusted data. */
+  environmentObservation?: { resourceId: string; facts: JsonValue };
+  /** A dependency declaration changed; earlier inspection is no longer current. */
+  environmentInvalidated?: { resourceId: string };
 }
 
 export interface AgentEventPayloads {
